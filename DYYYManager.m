@@ -384,8 +384,14 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
     artistItem.value = [DYYYManager shared].currentAuthorNickname ?: @"";
     [metadataItems addObject:artistItem];
     
-    // 生成临时文件
-    NSString *tempFileName = [NSString stringWithFormat:@"dyyy_%@.mp4", [[NSUUID UUID].UUIDString substringToIndex:8]];
+    // 生成临时文件名：用 caption 当文件名，这样 iOS 相册会把它填入"添加说明"
+    NSString *sanitizedCaption = [self sanitizeCaptionForFilename];
+    NSString *tempFileName = nil;
+    if (sanitizedCaption.length > 0) {
+        tempFileName = [NSString stringWithFormat:@"%@.mp4", sanitizedCaption];
+    } else {
+        tempFileName = [NSString stringWithFormat:@"dyyy_%@.mp4", [[NSUUID UUID].UUIDString substringToIndex:8]];
+    }
     NSString *tempPath = [NSTemporaryDirectory() stringByAppendingPathComponent:tempFileName];
     NSURL *tempURL = [NSURL fileURLWithPath:tempPath];
     [[NSFileManager defaultManager] removeItemAtPath:tempPath error:nil];
