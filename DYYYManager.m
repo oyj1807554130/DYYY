@@ -3741,7 +3741,7 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                           DYYYLogVideo(@"开始保存视频到相册");
                           [DYYYManager saveAssetToLibrary:[NSURL fileURLWithPath:outputPath]
                                                 mediaType:MediaTypeVideo
-                                               useCaption:NO
+                                               useCaption:YES
                                                completion:^(BOOL success) {
                               completedSteps++;
                               dispatch_async(dispatch_get_main_queue(), ^{
