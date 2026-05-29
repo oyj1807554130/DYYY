@@ -256,53 +256,156 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
 }
 
 + (NSURL *)embedCaptionInImageFile:(NSURL *)sourceURL {
-    // Simply copy the file with caption as filename
-    // iOS Photos reads the filename (without extension) and populates the "添加说明" caption field
-    // No IPTC metadata needed - Apple DTS confirmed there's no API for caption, filename is the way
-    NSString *captionFilename = [DYYYManager sanitizeCaptionForFilename];
-    if (!captionFilename) return sourceURL;
-    
-    NSString *ext = [sourceURL pathExtension];
-    if (ext.length == 0) ext = @"jpg";
-    NSString *tempPath = [NSTemporaryDirectory() stringByAppendingPathComponent:
-        [NSString stringWithFormat:@"%@.%@", captionFilename, ext]];
-    NSURL *tempURL = [NSURL fileURLWithPath:tempPath];
-    
-    // Remove existing temp file if any
-    [[NSFileManager defaultManager] removeItemAtPath:tempPath error:nil];
-    
-    NSError *copyError = nil;
-    [[NSFileManager defaultManager] copyItemAtURL:sourceURL toURL:tempURL error:&copyError];
-    if (copyError) {
-        NSLog(@"[DYYY-Caption] embedCaptionInImageFile: copy failed: %@", copyError);
+    // 生成 caption 内容
+    NSString *caption = [self generateCaption];
+    if (!caption || caption.length == 0) {
+        NSLog(@"[DYYY-Caption] embedCaptionInImageFile: caption为空，跳过");
         return sourceURL;
     }
     
-    NSLog(@"[DYYY-Caption] Image copied with caption filename: %@", tempPath);
+    // 确定文件类型
+    NSString *ext = [sourceURL pathExtension].lowercaseString;
+    NSString *uti = nil;
+    if ([ext isEqualToString:@"heic"] || [ext isEqualToString:@"heif"]) {
+        uti = @"public.heic";
+    } else if ([ext isEqualToString:@"png"]) {
+        uti = @"public.png";
+    } else {
+        uti = @"public.jpeg";
+    }
+    
+    // 读取源图片和元数据
+    CGImageSourceRef source = CGImageSourceCreateWithURL((__bridge CFURLRef)sourceURL, nil);
+    if (!source) {
+        NSLog(@"[DYYY-Caption] embedCaptionInImageFile: CGImageSourceCreateWithURL failed");
+        return sourceURL;
+    }
+    
+    // 获取原始元数据并清除可能存在的 Jeff Jarvis 等旧 caption
+    NSMutableDictionary *metadata = (__bridge_transfer NSDictionary *)CGImageSourceCopyPropertiesAtIndex(source, 0, nil);
+    if (!metadata) {
+        metadata = [NSMutableDictionary dictionary];
+    }
+    
+    // 清除 TIFF Artist 和 EXIF UserComment（旧抖音 CDN 自带的音乐作者信息）
+    NSMutableDictionary *tiffDict = [metadata[(__bridge NSString *)kCGImagePropertyTIFFDictionary] mutableCopy];
+    if (tiffDict) {
+        [tiffDict removeObjectForKey:(__bridge NSString *)kCGImagePropertyTIFFArtist];
+        [tiffDict removeObjectForKey:(__bridge NSString *)kCGImagePropertyTIFFSoftware];
+        metadata[(__bridge NSString *)kCGImagePropertyTIFFDictionary] = tiffDict;
+    }
+    
+    NSMutableDictionary *exifDict = [metadata[(__bridge NSString *)kCGImagePropertyExifDictionary] mutableCopy];
+    if (exifDict) {
+        [exifDict removeObjectForKey:(__bridge NSString *)kCGImagePropertyExifUserComment];
+        metadata[(__bridge NSString *)kCGImagePropertyExifDictionary] = exifDict;
+    }
+    
+    // 写入 IPTC Caption-Abstract（iOS 相册"添加说明"显示的字段）
+    NSMutableDictionary *iptcDict = [metadata[(__bridge NSString *)kCGImagePropertyIPTCDictionary] mutableCopy];
+    if (!iptcDict) iptcDict = [NSMutableDictionary dictionary];
+    iptcDict[(__bridge NSString *)kCGImagePropertyIPTCCaptionAbstract] = caption;
+    metadata[(__bridge NSString *)kCGImagePropertyIPTCDictionary] = iptcDict;
+    
+    // 读取图片数据
+    CGImageRef image = CGImageSourceCreateImageAtIndex(source, 0, nil);
+    CFRelease(source);
+    if (!image) {
+        NSLog(@"[DYYY-Caption] embedCaptionInImageFile: CGImageSourceCreateImageAtIndex failed");
+        return sourceURL;
+    }
+    
+    // 生成临时文件名
+    NSString *tempFileName = [NSString stringWithFormat:@"dyyy_%@.%@", [[NSUUID UUID].UUIDString substringToIndex:8], ext.length > 0 ? ext : @"jpg"];
+    NSString *tempPath = [NSTemporaryDirectory() stringByAppendingPathComponent:tempFileName];
+    NSURL *tempURL = [NSURL fileURLWithPath:tempPath];
+    [[NSFileManager defaultManager] removeItemAtPath:tempPath error:nil];
+    
+    // 创建带元数据的新图片
+    CGImageDestinationRef destination = CGImageDestinationCreateWithURL((__bridge CFURLRef)tempURL, (__bridge CFStringRef)uti, 1, nil);
+    if (!destination) {
+        NSLog(@"[DYYY-Caption] embedCaptionInImageFile: CGImageDestinationCreateWithURL failed");
+        CGImageRelease(image);
+        return sourceURL;
+    }
+    
+    CGImageDestinationAddImage(destination, image, (__bridge CFDictionaryRef)metadata);
+    BOOL finalized = CGImageDestinationFinalize(destination);
+    CFRelease(destination);
+    CGImageRelease(image);
+    
+    if (!finalized) {
+        NSLog(@"[DYYY-Caption] embedCaptionInImageFile: CGImageDestinationFinalize failed");
+        return sourceURL;
+    }
+    
+    NSLog(@"[DYYY-Caption] embedCaptionInImageFile: 成功写入 IPTC Caption: %@", caption);
     return tempURL;
 }
 
 + (NSURL *)embedCaptionInVideoFile:(NSURL *)sourceURL {
-    // For videos: copy file with caption as filename
-    // iOS Photos also reads video filename for "添加说明"
-    NSString *captionFilename = [DYYYManager sanitizeCaptionForFilename];
-    if (!captionFilename) return sourceURL;
-    
-    NSString *tempPath = [NSTemporaryDirectory() stringByAppendingPathComponent:
-        [NSString stringWithFormat:@"%@.mp4", captionFilename]];
-    NSURL *tempURL = [NSURL fileURLWithPath:tempPath];
-    
-    // Remove existing temp file if any
-    [[NSFileManager defaultManager] removeItemAtPath:tempPath error:nil];
-    
-    NSError *copyError = nil;
-    [[NSFileManager defaultManager] copyItemAtURL:sourceURL toURL:tempURL error:&copyError];
-    if (copyError) {
-        NSLog(@"[DYYY-Caption] embedCaptionInVideoFile: copy failed: %@", copyError);
+    // 生成 caption 内容
+    NSString *caption = [self generateCaption];
+    if (!caption || caption.length == 0) {
+        NSLog(@"[DYYY-Caption] embedCaptionInVideoFile: caption为空，跳过");
         return sourceURL;
     }
     
-    NSLog(@"[DYYY-Caption] Video copied with caption filename: %@", tempPath);
+    // 使用 AVAssetWriter 添加元数据到视频
+    AVURLAsset *asset = [AVURLAsset URLAssetWithURL:sourceURL options:nil];
+    if (!asset) {
+        NSLog(@"[DYYY-Caption] embedCaptionInVideoFile: AVURLAsset init failed");
+        return sourceURL;
+    }
+    
+    // 构建元数据项
+    NSMutableArray *metadataItems = [NSMutableArray array];
+    
+    // 写入 com.apple.quicktime.description（iOS 相册显示）
+    AVMutableMetadataItem *descItem = [AVMutableMetadataItem metadataItem];
+    descItem.keySpace = AVMetadataKeySpaceQuickTimeMetadata;
+    descItem.key = @"com.apple.quicktime.description";
+    descItem.value = caption;
+    [metadataItems addObject:descItem];
+    
+    // 写入 com.apple.quicktaobao.artist 作为备用
+    AVMutableMetadataItem *artistItem = [AVMutableMetadataItem metadataItem];
+    artistItem.keySpace = AVMetadataKeySpaceQuickTimeMetadata;
+    artistItem.key = @"com.apple.quicktime.artist";
+    artistItem.value = [DYYYManager shared].currentAuthorNickname ?: @"";
+    [metadataItems addObject:artistItem];
+    
+    // 生成临时文件
+    NSString *tempFileName = [NSString stringWithFormat:@"dyyy_%@.mp4", [[NSUUID UUID].UUIDString substringToIndex:8]];
+    NSString *tempPath = [NSTemporaryDirectory() stringByAppendingPathComponent:tempFileName];
+    NSURL *tempURL = [NSURL fileURLWithPath:tempPath];
+    [[NSFileManager defaultManager] removeItemAtPath:tempPath error:nil];
+    
+    // 使用 AVAssetExportSession 导出（保留元数据）
+    AVAssetExportSession *exportSession = [[AVAssetExportSession alloc] initWithAsset:asset presetName:AVAssetExportPresetPassthrough];
+    if (!exportSession) {
+        NSLog(@"[DYYY-Caption] embedCaptionInVideoFile: export session init failed");
+        return sourceURL;
+    }
+    
+    exportSession.outputURL = tempURL;
+    exportSession.outputFileType = AVFileTypeQuickTimeMovie;
+    exportSession.metadata = metadataItems;
+    
+    dispatch_semaphore_t semaphore = dispatch_semaphore_create(0);
+    [exportSession exportAsynchronouslyWithCompletionHandler:^{
+        dispatch_semaphore_signal(semaphore);
+    }];
+    
+    dispatch_semaphore_wait(semaphore, dispatch_time(DISPATCH_TIME_NOW, 30 * NSEC_PER_SEC));
+    
+    if (exportSession.status != AVAssetExportSessionStatusCompleted) {
+        NSLog(@"[DYYY-Caption] embedCaptionInVideoFile: export failed: %@", exportSession.error);
+        [[NSFileManager defaultManager] removeItemAtPath:tempPath error:nil];
+        return sourceURL;
+    }
+    
+    NSLog(@"[DYYY-Caption] embedCaptionInVideoFile: 成功写入元数据: %@", caption);
     return tempURL;
 }
 
