@@ -318,8 +318,14 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
         return sourceURL;
     }
     
-    // 生成临时文件名
-    NSString *tempFileName = [NSString stringWithFormat:@"dyyy_%@.%@", [[NSUUID UUID].UUIDString substringToIndex:8], ext.length > 0 ? ext : @"jpg"];
+    // 生成临时文件名：用 caption 当文件名，这样 iOS 相册会把它填入"添加说明"
+    NSString *sanitizedCaption = [self sanitizeCaptionForFilename];
+    NSString *tempFileName = nil;
+    if (sanitizedCaption.length > 0) {
+        tempFileName = [NSString stringWithFormat:@"%@.%@", sanitizedCaption, ext.length > 0 ? ext : @"jpg"];
+    } else {
+        tempFileName = [NSString stringWithFormat:@"dyyy_%@.%@", [[NSUUID UUID].UUIDString substringToIndex:8], ext.length > 0 ? ext : @"jpg"];
+    }
     NSString *tempPath = [NSTemporaryDirectory() stringByAppendingPathComponent:tempFileName];
     NSURL *tempURL = [NSURL fileURLWithPath:tempPath];
     [[NSFileManager defaultManager] removeItemAtPath:tempPath error:nil];
