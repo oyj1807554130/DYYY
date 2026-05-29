@@ -157,16 +157,28 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
 + (NSString *)generateCaption {
     DYYYManager *mgr = [DYYYManager shared];
     NSMutableString *caption = [NSMutableString string];
+    BOOL hasAuthorInfo = NO;
     if (mgr.currentAuthorShortID.length > 0) {
-        [caption appendFormat:@"抖音号：%@•", mgr.currentAuthorShortID];
+        [caption appendFormat:@"抖音号：%@·", mgr.currentAuthorShortID];
+        hasAuthorInfo = YES;
     }
     if (mgr.currentAuthorNickname.length > 0) {
-        [caption appendFormat:@"抖音用户：%@•", mgr.currentAuthorNickname];
+        [caption appendFormat:@"抖音用户：%@·", mgr.currentAuthorNickname];
+        hasAuthorInfo = YES;
     }
     if (mgr.currentCreateTime.length > 0) {
         [caption appendFormat:@"发布时间：%@", mgr.currentCreateTime];
     }
     NSString *result = [caption stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+    // 如果没有任何作者信息但有时间，也返回（兜底）
+    if (!hasAuthorInfo && result.length > 0) {
+        NSLog(@"[DYYY-Caption] generateCaption: 作者信息为空，使用兜底: %@", result);
+        return result;
+    }
+    // 有作者信息时，即使时间为空也返回
+    if (hasAuthorInfo && result.length > 0) {
+        return result;
+    }
     NSLog(@"[DYYY-Caption] generateCaption: %@", result.length > 0 ? result : @"(empty)");
     return result.length > 0 ? result : nil;
 }
