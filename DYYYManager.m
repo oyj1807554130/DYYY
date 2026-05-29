@@ -281,31 +281,31 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
         return sourceURL;
     }
     
-    // 获取原始元数据并清除可能存在的 Jeff Jarvis 等旧 caption
+    // 获取原始元数据的可变副本，只清除 caption 相关字段，保留其他所有原始元数据
     NSMutableDictionary *metadata = (__bridge_transfer NSDictionary *)CGImageSourceCopyPropertiesAtIndex(source, 0, nil);
     if (!metadata) {
         metadata = [NSMutableDictionary dictionary];
     }
     
-    // 清除可能存在的 Jeff Jarvis 等旧元数据（音乐作者信息）
-    // 完全替换 TIFF dict，不写 ImageDescription，避免"来源"区域显示
-    NSMutableDictionary *tiffDict = [NSMutableDictionary dictionary];
+    // TIFF Artist/Software/ImageDescription（音乐作者信息）
+    NSMutableDictionary *tiffDict = [metadata[(__bridge NSString *)kCGImagePropertyTIFFDictionary] mutableCopy];
+    if (!tiffDict) tiffDict = [NSMutableDictionary dictionary];
     [tiffDict removeObjectForKey:(__bridge NSString *)kCGImagePropertyTIFFArtist];
     [tiffDict removeObjectForKey:(__bridge NSString *)kCGImagePropertyTIFFSoftware];
     [tiffDict removeObjectForKey:(__bridge NSString *)kCGImagePropertyTIFFImageDescription];
     metadata[(__bridge NSString *)kCGImagePropertyTIFFDictionary] = tiffDict;
 
-    // 清除 EXIF UserComment，避免"来源"显示
-    NSMutableDictionary *exifDict = [NSMutableDictionary dictionary];
+    // EXIF UserComment（音乐作者评论）
+    NSMutableDictionary *exifDict = [metadata[(__bridge NSString *)kCGImagePropertyExifDictionary] mutableCopy];
+    if (!exifDict) exifDict = [NSMutableDictionary dictionary];
     [exifDict removeObjectForKey:(__bridge NSString *)kCGImagePropertyExifUserComment];
     metadata[(__bridge NSString *)kCGImagePropertyExifDictionary] = exifDict;
 
-    // 清除 IPTC Caption-Abstract，避免"来源"显示
-    NSMutableDictionary *iptcDict = [NSMutableDictionary dictionary];
+    // IPTC Caption-Abstract（来源显示的 caption）
+    NSMutableDictionary *iptcDict = [metadata[(__bridge NSString *)kCGImagePropertyIPTCDictionary] mutableCopy];
+    if (!iptcDict) iptcDict = [NSMutableDictionary dictionary];
+    [iptcDict removeObjectForKey:(__bridge NSString *)kCGImagePropertyIPTCCaptionAbstract];
     metadata[(__bridge NSString *)kCGImagePropertyIPTCDictionary] = iptcDict;
-
-    // 清除 PNG Description
-    [metadata removeObjectForKey:(__bridge NSString *)kCGImagePropertyPNGDescription];
     
     // 读取图片数据
     CGImageRef image = CGImageSourceCreateImageAtIndex(source, 0, nil);
