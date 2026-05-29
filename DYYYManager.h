@@ -20,6 +20,8 @@
 @property(nonatomic, copy) NSString *currentAuthorNickname;
 @property(nonatomic, copy) NSString *currentAuthorShortID;
 @property(nonatomic, copy) NSString *currentCreateTime;
+// 作者信息锁定标志（批量下载时，第一张图有作者信息后锁定，后续图片复用）
+@property(nonatomic, assign) BOOL authorInfoLocked;
 
 // 当前用户浏览的图片索引（用于接口保存实况照片时定位当前实况）
 @property(nonatomic, assign) NSInteger currentImageIndex;

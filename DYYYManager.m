@@ -138,20 +138,38 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
     }
     DYYYManager *mgr = [DYYYManager shared];
     AWEUserModel *author = awemeModel.author;
-    NSLog(@"[DYYY-Caption] storeMetadata: author=%@, shortID=%@, nickname=%@, createTime=%@", 
-          author, author.shortID, author.nickname, awemeModel.createTime);
-    mgr.currentAuthorNickname = author.nickname ?: @"";
-    mgr.currentAuthorShortID = author.shortID ?: @"";
+
+    // 锁定逻辑：已有锁定值时，不覆盖
+    if (mgr.authorInfoLocked) {
+        NSLog(@"[DYYY-Caption] storeMetadata: 已锁定，跳过写入 shortID=%@ nickname=%@",
+              mgr.currentAuthorShortID, mgr.currentAuthorNickname);
+        return;
+    }
+
+    NSString *newShortID = author.shortID ?: @"";
+    NSString *newNickname = author.nickname ?: @"";
+    NSString *newCreateTime = @"";
     if (awemeModel.createTime) {
         NSDate *date = [NSDate dateWithTimeIntervalSince1970:awemeModel.createTime.doubleValue];
         NSDateFormatter *fmt = [[NSDateFormatter alloc] init];
         fmt.dateFormat = @"yyyy-MM-dd HH:mm";
-        mgr.currentCreateTime = [fmt stringFromDate:date] ?: @"";
-    } else {
-        mgr.currentCreateTime = @"";
+        newCreateTime = [fmt stringFromDate:date] ?: @"";
     }
-    NSLog(@"[DYYY-Caption] storeMetadata done: shortID=%@, nickname=%@, createTime=%@",
-          mgr.currentAuthorShortID, mgr.currentAuthorNickname, mgr.currentCreateTime);
+
+    // 如果有有效作者信息则写入并锁定
+    BOOL hasAuthorInfo = (newShortID.length > 0 || newNickname.length > 0);
+    if (hasAuthorInfo) {
+        mgr.currentAuthorNickname = newNickname;
+        mgr.currentAuthorShortID = newShortID;
+        mgr.currentCreateTime = newCreateTime;
+        mgr.authorInfoLocked = YES;
+        NSLog(@"[DYYY-Caption] storeMetadata: 锁定作者信息 shortID=%@ nickname=%@ createTime=%@",
+              newShortID, newNickname, newCreateTime);
+    } else {
+        // 无作者信息时，仅写入时间
+        mgr.currentCreateTime = newCreateTime;
+        NSLog(@"[DYYY-Caption] storeMetadata: 无作者信息，仅设置时间 createTime=%@", newCreateTime);
+    }
 }
 
 + (NSString *)generateCaption {
@@ -1065,7 +1083,8 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
     if (imageURLs.count == 0) {
         return;
     }
-
+    // 每次批量下载前解锁，确保新一批图片用新的作者信息
+    [DYYYManager shared].authorInfoLocked = NO;
     [self downloadAllImagesWithProgress:imageURLs
                                progress:nil
                              completion:^(NSInteger successCount, NSInteger totalCount){
@@ -1964,7 +1983,8 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
     if (livePhotos.count == 0) {
         return;
     }
-
+    // 每次批量下载前解锁，确保新一批图片用新的作者信息
+    [DYYYManager shared].authorInfoLocked = NO;
     [self downloadAllLivePhotosWithProgress:livePhotos
                                    progress:nil
                                  completion:^(NSInteger successCount, NSInteger totalCount){
