@@ -287,25 +287,28 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
         metadata = [NSMutableDictionary dictionary];
     }
     
-    // 清除 TIFF Artist 和 EXIF UserComment（旧抖音 CDN 自带的音乐作者信息）
-    NSMutableDictionary *tiffDict = [metadata[(__bridge NSString *)kCGImagePropertyTIFFDictionary] mutableCopy];
-    if (tiffDict) {
-        [tiffDict removeObjectForKey:(__bridge NSString *)kCGImagePropertyTIFFArtist];
-        [tiffDict removeObjectForKey:(__bridge NSString *)kCGImagePropertyTIFFSoftware];
-        metadata[(__bridge NSString *)kCGImagePropertyTIFFDictionary] = tiffDict;
-    }
-    
-    NSMutableDictionary *exifDict = [metadata[(__bridge NSString *)kCGImagePropertyExifDictionary] mutableCopy];
-    if (exifDict) {
-        [exifDict removeObjectForKey:(__bridge NSString *)kCGImagePropertyExifUserComment];
-        metadata[(__bridge NSString *)kCGImagePropertyExifDictionary] = exifDict;
-    }
-    
-    // 写入 IPTC Caption-Abstract（iOS 相册"添加说明"显示的字段）
-    NSMutableDictionary *iptcDict = [metadata[(__bridge NSString *)kCGImagePropertyIPTCDictionary] mutableCopy];
-    if (!iptcDict) iptcDict = [NSMutableDictionary dictionary];
+    // 清除可能存在的 Jeff Jarvis 等旧元数据（音乐作者信息）
+    // 完全替换 IPTC dict，避免残留
+    NSMutableDictionary *tiffDict = [NSMutableDictionary dictionary];
+    [tiffDict removeObjectForKey:(__bridge NSString *)kCGImagePropertyTIFFArtist];
+    [tiffDict removeObjectForKey:(__bridge NSString *)kCGImagePropertyTIFFSoftware];
+    tiffDict[(__bridge NSString *)kCGImagePropertyTIFFImageDescription] = caption;
+    metadata[(__bridge NSString *)kCGImagePropertyTIFFDictionary] = tiffDict;
+
+    NSMutableDictionary *exifDict = [NSMutableDictionary dictionary];
+    [exifDict removeObjectForKey:(__bridge NSString *)kCGImagePropertyExifUserComment];
+    exifDict[(__bridge NSString *)kCGImagePropertyExifUserComment] = caption;
+    metadata[(__bridge NSString *)kCGImagePropertyExifDictionary] = exifDict;
+
+    // 写入 IPTC Caption-Abstract
+    NSMutableDictionary *iptcDict = [NSMutableDictionary dictionary];
     iptcDict[(__bridge NSString *)kCGImagePropertyIPTCCaptionAbstract] = caption;
     metadata[(__bridge NSString *)kCGImagePropertyIPTCDictionary] = iptcDict;
+
+    // 写入 PNG Description（用于 PNG 图片）
+    if ([ext isEqualToString:@"png"]) {
+        metadata[(__bridge NSString *)kCGImagePropertyPNGDescription] = caption;
+    }
     
     // 读取图片数据
     CGImageRef image = CGImageSourceCreateImageAtIndex(source, 0, nil);
