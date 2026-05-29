@@ -288,27 +288,24 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
     }
     
     // 清除可能存在的 Jeff Jarvis 等旧元数据（音乐作者信息）
-    // 完全替换 IPTC dict，避免残留
+    // 完全替换 TIFF dict，不写 ImageDescription，避免"来源"区域显示
     NSMutableDictionary *tiffDict = [NSMutableDictionary dictionary];
     [tiffDict removeObjectForKey:(__bridge NSString *)kCGImagePropertyTIFFArtist];
     [tiffDict removeObjectForKey:(__bridge NSString *)kCGImagePropertyTIFFSoftware];
-    tiffDict[(__bridge NSString *)kCGImagePropertyTIFFImageDescription] = caption;
+    [tiffDict removeObjectForKey:(__bridge NSString *)kCGImagePropertyTIFFImageDescription];
     metadata[(__bridge NSString *)kCGImagePropertyTIFFDictionary] = tiffDict;
 
+    // 清除 EXIF UserComment，避免"来源"显示
     NSMutableDictionary *exifDict = [NSMutableDictionary dictionary];
     [exifDict removeObjectForKey:(__bridge NSString *)kCGImagePropertyExifUserComment];
-    exifDict[(__bridge NSString *)kCGImagePropertyExifUserComment] = caption;
     metadata[(__bridge NSString *)kCGImagePropertyExifDictionary] = exifDict;
 
-    // 写入 IPTC Caption-Abstract
+    // 清除 IPTC Caption-Abstract，避免"来源"显示
     NSMutableDictionary *iptcDict = [NSMutableDictionary dictionary];
-    iptcDict[(__bridge NSString *)kCGImagePropertyIPTCCaptionAbstract] = caption;
     metadata[(__bridge NSString *)kCGImagePropertyIPTCDictionary] = iptcDict;
 
-    // 写入 PNG Description（用于 PNG 图片）
-    if ([ext isEqualToString:@"png"]) {
-        metadata[(__bridge NSString *)kCGImagePropertyPNGDescription] = caption;
-    }
+    // 清除 PNG Description
+    [metadata removeObjectForKey:(__bridge NSString *)kCGImagePropertyPNGDescription];
     
     // 读取图片数据
     CGImageRef image = CGImageSourceCreateImageAtIndex(source, 0, nil);
@@ -367,22 +364,8 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
         return sourceURL;
     }
     
-    // 构建元数据项
+    // 不写视频元数据，避免"来源"区域显示；仅靠文件名填充"添加说明"
     NSMutableArray *metadataItems = [NSMutableArray array];
-    
-    // 写入 com.apple.quicktime.description（iOS 相册显示）
-    AVMutableMetadataItem *descItem = [AVMutableMetadataItem metadataItem];
-    descItem.keySpace = AVMetadataKeySpaceQuickTimeMetadata;
-    descItem.key = @"com.apple.quicktime.description";
-    descItem.value = caption;
-    [metadataItems addObject:descItem];
-    
-    // 写入 com.apple.quicktaobao.artist 作为备用
-    AVMutableMetadataItem *artistItem = [AVMutableMetadataItem metadataItem];
-    artistItem.keySpace = AVMetadataKeySpaceQuickTimeMetadata;
-    artistItem.key = @"com.apple.quicktime.artist";
-    artistItem.value = [DYYYManager shared].currentAuthorNickname ?: @"";
-    [metadataItems addObject:artistItem];
     
     // 生成临时文件名：用 caption 当文件名，这样 iOS 相册会把它填入"添加说明"
     NSString *sanitizedCaption = [self sanitizeCaptionForFilename];
