@@ -99,32 +99,18 @@
         UITapGestureRecognizer *tapGesture = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(handleTap:)];
         [_containerView addGestureRecognizer:tapGesture];
 
-        // 屏幕边缘全屏进度圈（添加到窗口layer，定位在屏幕中央）
-        CGFloat borderRingWidth = 4.0;
-        CGFloat borderInset = 20.0;
-        CGRect screenBounds = [UIScreen mainScreen].bounds;
-        CGFloat borderRadius = MIN(screenBounds.size.width, screenBounds.size.height) / 2 - borderInset;
-        UIBezierPath *borderPath = [UIBezierPath bezierPathWithArcCenter:CGPointMake(screenBounds.size.width / 2, screenBounds.size.height / 2)
-                                                                  radius:borderRadius
-                                                              startAngle:-M_PI / 2
-                                                                endAngle:3 * M_PI / 2
-                                                               clockwise:YES];
+        // 弹窗胶囊边缘进度圈（围绕_containerView画圈）
+        UIBezierPath *capsulePath = [UIBezierPath bezierPathWithRoundedRect:CGRectMake(0, 0, containerWidth, containerHeight)
+                                                             cornerRadius:containerHeight / 2];
         _borderProgressLayer = [CAShapeLayer layer];
-        _borderProgressLayer.frame = screenBounds;
-        _borderProgressLayer.path = borderPath.CGPath;
-        UIColor *borderColor = [UIColor colorWithRed:1.0 green:0.3 blue:0.3 alpha:1.0];  // 红色边缘
-        _borderProgressLayer.strokeColor = borderColor.CGColor;
+        _borderProgressLayer.path = capsulePath.CGPath;
+        UIColor *progressColor = isDarkMode ? [UIColor colorWithRed:48 / 255.0 green:209 / 255.0 blue:151 / 255.0 alpha:1.0] : [UIColor colorWithRed:11 / 255.0 green:195 / 255.0 blue:139 / 255.0 alpha:1.0];
+        _borderProgressLayer.strokeColor = progressColor.CGColor;
         _borderProgressLayer.fillColor = [UIColor clearColor].CGColor;
-        _borderProgressLayer.lineWidth = borderRingWidth;
+        _borderProgressLayer.lineWidth = 3;
         _borderProgressLayer.lineCap = kCALineCapRound;
         _borderProgressLayer.strokeEnd = 0;
-        _borderProgressLayer.opacity = 0.8;
-        // 添加到窗口而非toast视图layer，确保在全屏最上层
-        UIWindow *window = [DYYYUtils getActiveWindow];
-        if (!window) window = UIApplication.sharedApplication.windows.firstObject;
-        if (window) {
-            [window.layer addSublayer:_borderProgressLayer];
-        }
+        [_containerView.layer addSublayer:_borderProgressLayer];
 
         self.alpha = 0;
     }
