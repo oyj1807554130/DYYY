@@ -18,6 +18,7 @@ NS_ASSUME_NONNULL_BEGIN
 - (instancetype)initWithFrame:(CGRect)frame;
 - (void)setProgress:(float)progress;
 - (void)setOverallProgress:(float)progress;  // 仅更新label文字（批次总体进度）
+- (void)setBatchProgress:(float)progress;   // 批量下载时更新总进度（边框动画+文字）
 - (void)show;
 - (void)dismiss;
 - (void)showSuccessAnimation:(void (^)(void))completion;
