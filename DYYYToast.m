@@ -89,11 +89,12 @@
         _percentLabel.textColor = isDarkMode ? [UIColor colorWithWhite:0.9 alpha:1.0] : [UIColor colorWithWhite:0.2 alpha:1.0];
         _percentLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightMedium];
         _percentLabel.text = @"下载中... 0%";
-        CGFloat progressViewRightEdge = _progressView.frame.origin.x + _progressView.frame.size.width;
-        CGFloat labelWidth = containerWidth - progressViewRightEdge;
-        _percentLabel.frame = CGRectMake(progressViewRightEdge - 3, 0, labelWidth, containerHeight);
+        _percentLabel.frame = CGRectMake(0, 0, containerWidth, containerHeight);
         _percentLabel.textAlignment = NSTextAlignmentCenter;
         [_containerView addSubview:_percentLabel];
+
+        // 隐藏小环形进度圈，仅保留边缘全屏进度圈
+        _progressView.hidden = YES;
 
         UITapGestureRecognizer *tapGesture = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(handleTap:)];
         [_containerView addGestureRecognizer:tapGesture];
