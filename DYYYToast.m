@@ -1,5 +1,6 @@
 #import "DYYYToast.h"
 #import "DYYYUtils.h"
+#import <stdlib.h>
 
 @interface DYYYToast ()
 
