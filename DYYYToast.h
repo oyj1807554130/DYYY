@@ -10,6 +10,8 @@ NS_ASSUME_NONNULL_BEGIN
 @property(nonatomic, copy) void (^cancelBlock)(void);
 @property(nonatomic, assign) BOOL isCancelled;
 @property(nonatomic, assign) BOOL allowSuccessAnimation;
+@property(nonatomic, assign) NSInteger currentIndex;   // 当前第几张
+@property(nonatomic, assign) NSInteger totalCount;     // 总共多少张
 
 - (instancetype)initWithFrame:(CGRect)frame;
 - (void)setProgress:(float)progress;

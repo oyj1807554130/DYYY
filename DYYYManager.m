@@ -1123,6 +1123,7 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
       [progressView show];
 
       NSInteger totalCount = imageURLs.count;
+      progressView.totalCount = totalCount;
 
       // 存储批量下载的相关信息
       [[DYYYManager shared] setBatchInfo:batchID totalCount:totalCount progressBlock:progressBlock completionBlock:completion];
@@ -1223,6 +1224,8 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
 
         DYYYToast *progressView = self.progressViews[batchID];
         if (progressView) {
+            progressView.currentIndex = completedCount;
+            progressView.totalCount = totalCount;
             float progress = totalCount > 0 ? (float)completedCount / totalCount : 0;
             [progressView setProgress:progress];
         }

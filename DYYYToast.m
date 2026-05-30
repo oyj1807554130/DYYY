@@ -120,7 +120,22 @@
 
     // 更新进度百分比
     int percentage = (int)(progress * 100);
-    _percentLabel.text = [NSString stringWithFormat:@"下载中... %d%%", percentage];
+
+    // 构建序号序列：如 (1/16)(2/16)(3/16)...
+    NSMutableString *indexSequence = [NSMutableString string];
+    if (self.totalCount > 0 && self.currentIndex > 0) {
+        // 显示已完成的序号，最多显示前5个避免太长
+        NSInteger showCount = MIN(5, self.currentIndex);
+        for (NSInteger i = 1; i <= showCount; i++) {
+            [indexSequence appendFormat:@"(%ld/%ld)", (long)i, (long)self.totalCount];
+        }
+        if (self.currentIndex > 5) {
+            [indexSequence appendFormat:@"...(%ld/%ld)", (long)self.currentIndex, (long)self.totalCount];
+        }
+        _percentLabel.text = [NSString stringWithFormat:@"%@%d%% (%ld/%ld)", indexSequence, percentage, (long)self.currentIndex, (long)self.totalCount];
+    } else {
+        _percentLabel.text = [NSString stringWithFormat:@"下载中... %d%%", percentage];
+    }
 }
 
 - (void)show {
