@@ -1361,8 +1361,9 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
     dispatch_async(dispatch_get_main_queue(), ^{
       DYYYToast *progressView = self.progressViews[downloadID];
       if (progressView) {
-          progressView.allowSuccessAnimation = success;
-          if (success) {
+          // 批量下载时跳过边框动画，直接关闭
+          NSString *batchID = self.downloadToBatchMap[downloadID];
+          if (!batchID && success) {
               [progressView setProgress:1.0f];
           }
           [progressView dismiss];
@@ -1427,7 +1428,11 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
           }
           if (progressView) {
               if (!progressView.isCancelled) {
-                  [progressView setProgress:progress];
+                  // 批量下载时只显示总进度文字，不显示单图边框动画
+                  NSString *batchID = self.downloadToBatchMap[downloadIDForTask];
+                  if (!batchID) {
+                      [progressView setProgress:progress];
+                  }
               }
           }
       }
