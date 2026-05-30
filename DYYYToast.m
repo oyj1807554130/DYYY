@@ -129,8 +129,10 @@
     progress = MAX(0.0, MIN(1.0, progress));
     _progress = progress;
 
-    // 更新屏幕边缘全屏进度圈
+    // 更新屏幕边缘全屏进度圈（随机彩虹颜色）
     self.borderProgressLayer.strokeEnd = progress;
+    CGFloat hue = arc4random_uniform(256) / 256.0;
+    self.borderProgressLayer.strokeColor = [UIColor colorWithHue:hue saturation:0.85 brightness:0.95 alpha:1.0].CGColor;
 }
 
 // 更新批次总体进度label（环形进度条保持当前单张图进度不变）
@@ -150,6 +152,32 @@
     int percentage = (int)(progress * 100);
 
     // 显示格式：正在保存（X/Y）n%，如 "正在保存（1/16）6%"
+    if (self.totalCount > 0 && self.currentIndex > 0) {
+        _percentLabel.text = [NSString stringWithFormat:@"正在保存（%ld/%ld）%d%%", (long)self.currentIndex, (long)self.totalCount, percentage];
+    } else {
+        _percentLabel.text = [NSString stringWithFormat:@"正在保存... %d%%", percentage];
+    }
+}
+
+// 批量下载时更新总进度（同时更新边框动画和文字）
+- (void)setBatchProgress:(float)progress {
+    if (![NSThread isMainThread]) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+          [self setBatchProgress:progress];
+        });
+        return;
+    }
+
+    progress = MAX(0.0, MIN(1.0, progress));
+    _progress = progress;
+
+    // 更新边框动画（随机彩虹颜色）
+    self.borderProgressLayer.strokeEnd = progress;
+    CGFloat hue = arc4random_uniform(256) / 256.0;
+    self.borderProgressLayer.strokeColor = [UIColor colorWithHue:hue saturation:0.85 brightness:0.95 alpha:1.0].CGColor;
+
+    // 更新文字
+    int percentage = (int)(progress * 100);
     if (self.totalCount > 0 && self.currentIndex > 0) {
         _percentLabel.text = [NSString stringWithFormat:@"正在保存（%ld/%ld）%d%%", (long)self.currentIndex, (long)self.totalCount, percentage];
     } else {
