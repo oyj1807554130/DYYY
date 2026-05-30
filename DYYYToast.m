@@ -149,11 +149,11 @@
     // 更新进度百分比（总体批次进度）
     int percentage = (int)(progress * 100);
 
-    // 显示格式：X% (current/total)，如 "6% (1/16)"
+    // 显示格式：正在保存（X/Y）n%，如 "正在保存（1/16）6%"
     if (self.totalCount > 0 && self.currentIndex > 0) {
-        _percentLabel.text = [NSString stringWithFormat:@"%d%% (%ld/%ld)", percentage, (long)self.currentIndex, (long)self.totalCount];
+        _percentLabel.text = [NSString stringWithFormat:@"正在保存（%ld/%ld）%d%%", (long)self.currentIndex, (long)self.totalCount, percentage];
     } else {
-        _percentLabel.text = [NSString stringWithFormat:@"下载中... %d%%", percentage];
+        _percentLabel.text = [NSString stringWithFormat:@"正在保存... %d%%", percentage];
     }
 }
 
