@@ -210,4 +210,4 @@ GITHUB_ACTIONS=true make package
 <p align="center">
     <a href="https://star-history.com/#Wtrwx/DYYY">
         <img src="https://api.star-history.com/svg?repos=Wtrwx/DYYY&type=Date" width="75%" alt="Star History"></a>
-</p>
+</p>retry
