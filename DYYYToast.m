@@ -115,24 +115,29 @@
     progress = MAX(0.0, MIN(1.0, progress));
     _progress = progress;
 
-    // 设置环形进度
+    // 只更新环形进度条，不更新label（label由setOverallProgress更新）
     _progressLayer.strokeEnd = progress;
+}
 
-    // 更新进度百分比
+// 更新批次总体进度label（环形进度条保持当前单张图进度不变）
+- (void)setOverallProgress:(float)progress {
+    // 确保在主线程中更新UI
+    if (![NSThread isMainThread]) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+          [self setOverallProgress:progress];
+        });
+        return;
+    }
+
+    // 进度值限制在0到1之间
+    progress = MAX(0.0, MIN(1.0, progress));
+
+    // 更新进度百分比（总体批次进度）
     int percentage = (int)(progress * 100);
 
-    // 构建序号序列：如 (1/16)(2/16)(3/16)...
-    NSMutableString *indexSequence = [NSMutableString string];
+    // 显示格式：X% (current/total)，如 "6% (1/16)"
     if (self.totalCount > 0 && self.currentIndex > 0) {
-        // 显示已完成的序号，最多显示前5个避免太长
-        NSInteger showCount = MIN(5, self.currentIndex);
-        for (NSInteger i = 1; i <= showCount; i++) {
-            [indexSequence appendFormat:@"(%ld/%ld)", (long)i, (long)self.totalCount];
-        }
-        if (self.currentIndex > 5) {
-            [indexSequence appendFormat:@"...(%ld/%ld)", (long)self.currentIndex, (long)self.totalCount];
-        }
-        _percentLabel.text = [NSString stringWithFormat:@"%@%d%% (%ld/%ld)", indexSequence, percentage, (long)self.currentIndex, (long)self.totalCount];
+        _percentLabel.text = [NSString stringWithFormat:@"%d%% (%ld/%ld)", percentage, (long)self.currentIndex, (long)self.totalCount];
     } else {
         _percentLabel.text = [NSString stringWithFormat:@"下载中... %d%%", percentage];
     }
@@ -253,7 +258,7 @@
                                   duration:0.2
                                    options:UIViewAnimationOptionTransitionCrossDissolve
                                 animations:^{
-                                  self.percentLabel.text = @"下载完成";
+                                  self.percentLabel.text = [NSString stringWithFormat:@"全部保存完成 成功%ld张，失败%ld张", (long)self.successCount, (long)self.failCount];
                                 }
                                 completion:nil];
               }

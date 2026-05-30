@@ -1227,7 +1227,7 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
             progressView.currentIndex = completedCount;
             progressView.totalCount = totalCount;
             float progress = totalCount > 0 ? (float)completedCount / totalCount : 0;
-            [progressView setProgress:progress];
+            [progressView setOverallProgress:progress];
         }
 
         void (^progressBlock)(NSInteger current, NSInteger total) = self.batchProgressBlocks[batchID];
@@ -1244,6 +1244,8 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
             }
 
             if (progressView) {
+                progressView.successCount = successCount;
+                progressView.failCount = totalCount - successCount;
                 progressView.allowSuccessAnimation = (successCount == totalCount);
                 [progressView dismiss];
             }
