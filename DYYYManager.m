@@ -55,6 +55,10 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
 @property(nonatomic, strong) NSMutableDictionary<NSString *, NSNumber *> *batchTotalCountMap;                                                 // 批量ID到总数量的映射
 @property(nonatomic, strong) NSMutableDictionary<NSString *, void (^)(NSInteger current, NSInteger total)> *batchProgressBlocks;              // 批量进度回调
 @property(nonatomic, strong) NSMutableDictionary<NSString *, void (^)(NSInteger successCount, NSInteger totalCount)> *batchCompletionBlocks;  // 批量完成回调
+// 串行图片下载状态
+@property(nonatomic, strong) NSMutableArray *serialImageURLs;  // 剩余待下载URL列表
+@property(nonatomic, copy) NSString *serialBatchID;            // 当前串行下载的batchID
+@property(nonatomic, strong) NSMutableDictionary<NSString *, NSNumber *> *serialIndexMap;  // downloadID -> 当前索引
 @end
 
 @implementation DYYYManager
@@ -469,6 +473,9 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
         _batchTotalCountMap = [NSMutableDictionary dictionary];
         _batchProgressBlocks = [NSMutableDictionary dictionary];
         _batchCompletionBlocks = [NSMutableDictionary dictionary];
+        // 初始化串行下载状态
+        _serialImageURLs = [NSMutableArray array];
+        _serialIndexMap = [NSMutableDictionary dictionary];
     }
     return self;
 }
@@ -563,6 +570,9 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                                             reportResult(NO);
                                         }
                                       }];
+                          // 注意：fallback是异步的，reportResult已在上面的completionHandler中调用
+                          // 这里return防止再次调用
+                          return;
                       } else {
                           [[NSFileManager defaultManager] removeItemAtPath:mediaURL.path error:nil];
                       }
@@ -1077,6 +1087,9 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
 
     [[DYYYManager shared].downloadTasks removeAllObjects];
     [[DYYYManager shared].progressViews removeAllObjects];
+    // 清空串行下载状态，防止取消后 completion 还触发下一张
+    [DYYYManager shared].serialBatchID = nil;
+    [[DYYYManager shared].serialImageURLs removeAllObjects];
 }
 
 + (void)downloadAllImages:(NSMutableArray *)imageURLs {
@@ -1109,43 +1122,24 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
 
       [progressView show];
 
-      __block NSInteger completedCount = 0;
-      __block NSInteger successCount = 0;
       NSInteger totalCount = imageURLs.count;
-
-      progressView.cancelBlock = ^{
-        [self cancelAllDownloads];
-        if (completion) {
-            completion(successCount, totalCount);
-        }
-      };
 
       // 存储批量下载的相关信息
       [[DYYYManager shared] setBatchInfo:batchID totalCount:totalCount progressBlock:progressBlock completionBlock:completion];
 
-      // 为每个URL创建下载任务
-      for (NSString *urlString in imageURLs) {
-          NSURL *url = [NSURL URLWithString:urlString];
-          if (!url) {
-              [[DYYYManager shared] incrementCompletedAndUpdateProgressForBatch:batchID success:NO];
-              continue;
-          }
+      // 进度视图取消操作
+      progressView.cancelBlock = ^{
+        if (completion) {
+            completion(0, totalCount);
+        }
+      };
 
-          // 创建单个下载任务ID
-          NSString *downloadID = [NSUUID UUID].UUIDString;
-          [[DYYYManager shared] associateDownload:downloadID withBatchID:batchID];
-          NSURLSessionConfiguration *configuration = [NSURLSessionConfiguration defaultSessionConfiguration];
-          configuration.timeoutIntervalForRequest = 60.0;
-          configuration.timeoutIntervalForResource = 600.0;
-          NSURLSession *session = [NSURLSession sessionWithConfiguration:configuration delegate:[DYYYManager shared] delegateQueue:[NSOperationQueue mainQueue]];
-
-          // 创建下载任务 - 不加自定义header
-          NSURLSessionDownloadTask *downloadTask = [session downloadTaskWithURL:url];
-          [[DYYYManager shared].downloadTasks setObject:downloadTask forKey:downloadID];
-          [[DYYYManager shared].taskProgressMap setObject:@0.0 forKey:downloadID];
-          [[DYYYManager shared] setMediaType:MediaTypeImage forDownloadID:downloadID];
-          [downloadTask resume];
-      }
+      // 串行下载：先分发第一张，剩下的在 didFinishDownloadingToURL 里触发
+      [[DYYYManager shared] setSerialBatchID:batchID];
+      [[DYYYManager shared].serialImageURLs removeAllObjects];
+      [[DYYYManager shared].serialImageURLs addObjectsFromArray:imageURLs];
+      // 立即启动第一张
+      [[DYYYManager shared] startNextSerialImageForBatch:batchID];
     });
 }
 
@@ -1166,6 +1160,45 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
         [self.batchCompletionBlocks setObject:[completionBlock copy] forKey:batchID];
     }
 }
+
+// 串行下载：启动下一张图片（仅针对批量图片下载）
+- (void)startNextSerialImageForBatch:(NSString *)batchID {
+    @synchronized(self) {
+        if (self.serialImageURLs.count == 0) {
+            return; // 没有剩余图片
+        }
+        if (![self.serialBatchID isEqualToString:batchID]) {
+            return; // 不是当前串行批次，跳过
+        }
+
+        // 取下一张图的URL
+        NSString *urlString = self.serialImageURLs.firstObject;
+        [self.serialImageURLs removeObjectAtIndex:0];
+
+        NSURL *url = [NSURL URLWithString:urlString];
+        if (!url) {
+            // 无效URL，跳到下一张
+            [self startNextSerialImageForBatch:batchID];
+            return;
+        }
+
+        NSString *downloadID = [NSUUID UUID].UUIDString;
+        [self associateDownload:downloadID withBatchID:batchID];
+
+        NSURLSessionConfiguration *configuration = [NSURLSessionConfiguration defaultSessionConfiguration];
+        configuration.timeoutIntervalForRequest = 60.0;
+        configuration.timeoutIntervalForResource = 600.0;
+        NSURLSession *session = [NSURLSession sessionWithConfiguration:configuration delegate:self delegateQueue:[NSOperationQueue mainQueue]];
+
+        NSURLSessionDownloadTask *downloadTask = [session downloadTaskWithURL:url];
+        self.downloadTasks[downloadID] = downloadTask;
+        self.taskProgressMap[downloadID] = @0.0;
+        [self setMediaType:MediaTypeImage forDownloadID:downloadID];
+        [downloadTask resume];
+    }
+}
+
+// 设置批量下载信息
 
 // 关联单个下载到批量下载
 - (void)associateDownload:(NSString *)downloadID withBatchID:(NSString *)batchID {
@@ -1456,9 +1489,13 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                          mediaType:mediaType
                         completion:^(BOOL success) {
                           [[DYYYManager shared] incrementCompletedAndUpdateProgressForBatch:batchID success:success];
+                          // 串行下载：当前这张保存完成后，启动下一张
+                          [self startNextSerialImageForBatch:batchID];
                         }];
         } else {
             [[DYYYManager shared] incrementCompletedAndUpdateProgressForBatch:batchID success:NO];
+            // 串行下载：当前这张下载失败，也启动下一张
+            [self startNextSerialImageForBatch:batchID];
         }
 
         [self.downloadTasks removeObjectForKey:downloadIDForTask];
