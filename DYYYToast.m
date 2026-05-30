@@ -4,6 +4,7 @@
 @interface DYYYToast ()
 
 @property(nonatomic, strong) CAShapeLayer *progressLayer;
+@property(nonatomic, strong) CAShapeLayer *borderProgressLayer;  // 屏幕边缘全屏进度圈
 @property(nonatomic, strong) UILabel *percentLabel;
 @property(nonatomic, assign) CGFloat progress;
 @property(nonatomic, strong) UIVisualEffectView *blurEffectView;
@@ -26,7 +27,7 @@
 
         BOOL isDarkMode = [DYYYUtils isDarkMode];
 
-        CGFloat containerWidth = 160;
+        CGFloat containerWidth = 220;
         CGFloat containerHeight = 40;
         _containerView = [[UIView alloc] initWithFrame:CGRectMake(0, 0, containerWidth, containerHeight)];
         _containerView.center = CGPointMake(CGRectGetMidX(self.bounds), 130);
@@ -97,6 +98,27 @@
         UITapGestureRecognizer *tapGesture = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(handleTap:)];
         [_containerView addGestureRecognizer:tapGesture];
 
+        // 屏幕边缘全屏进度圈
+        CGFloat borderRingWidth = 4.0;
+        CGFloat borderInset = 20.0;
+        CGRect screenBounds = [UIScreen mainScreen].bounds;
+        CGFloat borderRadius = MIN(screenBounds.size.width, screenBounds.size.height) / 2 - borderInset;
+        UIBezierPath *borderPath = [UIBezierPath bezierPathWithArcCenter:CGPointMake(screenBounds.size.width / 2, screenBounds.size.height / 2)
+                                                                  radius:borderRadius
+                                                              startAngle:-M_PI / 2
+                                                                endAngle:3 * M_PI / 2
+                                                               clockwise:YES];
+        _borderProgressLayer = [CAShapeLayer layer];
+        _borderProgressLayer.path = borderPath.CGPath;
+        UIColor *borderColor = [UIColor colorWithRed:1.0 green:0.3 blue:0.3 alpha:1.0];  // 红色边缘
+        _borderProgressLayer.strokeColor = borderColor.CGColor;
+        _borderProgressLayer.fillColor = [UIColor clearColor].CGColor;
+        _borderProgressLayer.lineWidth = borderRingWidth;
+        _borderProgressLayer.lineCap = kCALineCapRound;
+        _borderProgressLayer.strokeEnd = 0;
+        _borderProgressLayer.opacity = 0.6;
+        [self.layer addSublayer:_borderProgressLayer];
+
         self.alpha = 0;
     }
     return self;
@@ -115,8 +137,11 @@
     progress = MAX(0.0, MIN(1.0, progress));
     _progress = progress;
 
-    // 只更新环形进度条，不更新label（label由setOverallProgress更新）
+    // 更新小环形进度条
     _progressLayer.strokeEnd = progress;
+
+    // 更新屏幕边缘全屏进度圈
+    self.borderProgressLayer.strokeEnd = progress;
 }
 
 // 更新批次总体进度label（环形进度条保持当前单张图进度不变）
@@ -253,6 +278,7 @@
           [UIView animateWithDuration:0.15
               animations:^{
                 self.progressLayer.opacity = 0;
+                self.borderProgressLayer.opacity = 0;
 
                 [UIView transitionWithView:self.percentLabel
                                   duration:0.2
@@ -364,6 +390,7 @@
     [UIView animateWithDuration:0.15
         animations:^{
           self.progressLayer.opacity = 0;
+          self.borderProgressLayer.opacity = 0;
 
           [UIView transitionWithView:self.percentLabel
                             duration:0.2
@@ -458,6 +485,7 @@
     self.percentLabel.text = message ?: @"成功";
 
     self.progressLayer.opacity = 0;
+    self.borderProgressLayer.opacity = 0;
 
     [UIView animateWithDuration:0.2
         animations:^{

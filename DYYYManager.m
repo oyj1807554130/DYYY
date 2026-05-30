@@ -1416,7 +1416,15 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
       if (downloadIDForTask) {
           [self.taskProgressMap setObject:@(progress) forKey:downloadIDForTask];
 
+          // 优先按downloadID查找（非批量下载）
           DYYYToast *progressView = self.progressViews[downloadIDForTask];
+          // 如果没找到，尝试通过batchID查找（批量串行下载）
+          if (!progressView) {
+              NSString *batchID = self.downloadToBatchMap[downloadIDForTask];
+              if (batchID) {
+                  progressView = self.progressViews[batchID];
+              }
+          }
           if (progressView) {
               if (!progressView.isCancelled) {
                   [progressView setProgress:progress];
