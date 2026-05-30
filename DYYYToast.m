@@ -104,7 +104,6 @@
                                                              cornerRadius:containerHeight / 2];
         _borderProgressLayer = [CAShapeLayer layer];
         _borderProgressLayer.path = capsulePath.CGPath;
-        UIColor *progressColor = isDarkMode ? [UIColor colorWithRed:48 / 255.0 green:209 / 255.0 blue:151 / 255.0 alpha:1.0] : [UIColor colorWithRed:11 / 255.0 green:195 / 255.0 blue:139 / 255.0 alpha:1.0];
         _borderProgressLayer.strokeColor = progressColor.CGColor;
         _borderProgressLayer.fillColor = [UIColor clearColor].CGColor;
         _borderProgressLayer.lineWidth = 3;
