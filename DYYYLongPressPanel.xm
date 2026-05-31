@@ -1,4 +1,5 @@
 #import "AwemeHeaders.h"
+#import <objc/runtime.h>
 #import "DYYYBottomAlertView.h"
 #import "DYYYConfirmCloseView.h"
 #import "DYYYCustomInputView.h"
@@ -8,28 +9,22 @@
 #import "DYYYToast.h"
 #import "DYYYUtils.h"
 
-%hook AWELongPressPanelViewGroupModel
-%property(nonatomic, assign) BOOL isDYYYCustomGroup;
-%end
+// 关联对象key用于液态玻璃效果
+static char kDYYYGlassLayerKey;
+static char kDYYYViewAppearedKey;
 
-// Modern风格长按面板（新版UI）
-%hook AWEModernLongPressPanelTableViewController
-%property(nonatomic, strong) CALayer *dyyyGlassLayer;
-%property(nonatomic, assign) BOOL isViewAppeared;
-
-// 长按面板液态玻璃效果
-%new
-- (void)dyyy_applyGlassEffectToPanel {
+// 液态玻璃效果实现（不使用%property）
+static void dyyy_applyGlassEffect(UIViewController *self) {
     if (!DYYYGetBool(@"DYYYEnableSheetBlur")) return;
-    if (self.isViewAppeared) return;
-    self.isViewAppeared = YES;
+    if (!self.view) return;
+
+    // 检查是否已应用过
+    NSNumber *appeared = objc_getAssociatedObject(self, &kDYYYViewAppearedKey);
+    if (appeared && appeared.boolValue) return;
+    objc_setAssociatedObject(self, &kDYYYViewAppearedKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         UIView *panelView = self.view;
-        if (!panelView) return;
-
-        // 检查是否已有玻璃层
-        if ([panelView.layer.sublayers containsObject:self.dyyyGlassLayer]) return;
 
         // 获取透明度设置
         CGFloat transparent = DYYYGetFloat(@"DYYYSheetBlurTransparent", 0.7);
@@ -66,13 +61,20 @@
         glassBorder.borderColor = [UIColor colorWithWhite:1.0 alpha:0.3].CGColor;
         [glassView.contentView.layer addSublayer:glassBorder];
 
-        self.dyyyGlassLayer = glassView.layer;
+        objc_setAssociatedObject(self, &kDYYYGlassLayerKey, glassView.layer, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     });
 }
 
+%hook AWELongPressPanelViewGroupModel
+%property(nonatomic, assign) BOOL isDYYYCustomGroup;
+%end
+
+// Modern风格长按面板（新版UI）
+%hook AWEModernLongPressPanelTableViewController
+
 - (void)viewDidAppear:(BOOL)animated {
     %orig;
-    [self dyyy_applyGlassEffectToPanel];
+    dyyy_applyGlassEffect(self);
 }
 
 - (NSArray *)dataArray {
