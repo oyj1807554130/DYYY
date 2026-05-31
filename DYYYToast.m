@@ -13,7 +13,6 @@
 @property(nonatomic, strong) UILabel *percentLabel;
 @property(nonatomic, assign) CGFloat progress;
 @property(nonatomic, strong) UIVisualEffectView *blurEffectView;
-@property(nonatomic, strong) UIVisualEffectView *bgGlassView;  // 弹窗后全屏液态玻璃背景
 @property(nonatomic, strong) CAShapeLayer *checkmarkLayer;
 @property(nonatomic, strong) UIView *progressView;
 @property(nonatomic, assign) NSInteger previousIndex;  // 追踪上一次的currentIndex，用于检测是否换图
@@ -35,33 +34,6 @@
 
         BOOL isDarkMode = [DYYYUtils isDarkMode];
 
-        // 弹窗后面全屏液态玻璃背景层
-        UIBlurEffect *bgGlassBlur = [UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemThinMaterialDark];
-        _bgGlassView = [[UIVisualEffectView alloc] initWithEffect:bgGlassBlur];
-        _bgGlassView.frame = self.bounds;
-        _bgGlassView.alpha = 0.85;
-        [self addSubview:_bgGlassView];
-
-        // 液态玻璃渐变湿感高光层
-        CAGradientLayer *bgGlassHighlight = [CAGradientLayer layer];
-        bgGlassHighlight.frame = self.bounds;
-        bgGlassHighlight.colors = @[
-            (id)[UIColor colorWithWhite:1.0 alpha:0.12].CGColor,
-            (id)[UIColor colorWithWhite:0.5 alpha:0.0].CGColor,
-            (id)[UIColor colorWithWhite:1.0 alpha:0.05].CGColor
-        ];
-        bgGlassHighlight.locations = @[@0.0, @0.5, @1.0];
-        bgGlassHighlight.startPoint = CGPointMake(0, 0);
-        bgGlassHighlight.endPoint = CGPointMake(0, 1);
-        [_bgGlassView.contentView.layer addSublayer:bgGlassHighlight];
-
-        // 液态玻璃边缘淡白描边
-        CALayer *bgGlassBorder = [CALayer layer];
-        bgGlassBorder.frame = self.bounds;
-        bgGlassBorder.borderWidth = 0.5;
-        bgGlassBorder.borderColor = [UIColor colorWithWhite:1.0 alpha:0.25].CGColor;
-        [_bgGlassView.contentView.layer addSublayer:bgGlassBorder];
-
         CGFloat containerWidth = 220;
         CGFloat containerHeight = 40;
         _containerView = [[UIView alloc] initWithFrame:CGRectMake(0, 0, containerWidth, containerHeight)];
@@ -72,13 +44,37 @@
         _containerView.clipsToBounds = YES;
         _containerView.userInteractionEnabled = YES;
 
-        // 添加毛玻璃效果
-        UIBlurEffect *blurEffect = [UIBlurEffect effectWithStyle:isDarkMode ? UIBlurEffectStyleDark : UIBlurEffectStyleLight];
-        _blurEffectView = [[UIVisualEffectView alloc] initWithEffect:blurEffect];
+        // 添加液态玻璃效果
+        UIBlurEffect *glassEffect = [UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemThinMaterialDark];
+        _blurEffectView = [[UIVisualEffectView alloc] initWithEffect:glassEffect];
         _blurEffectView.frame = _containerView.bounds;
         _blurEffectView.layer.cornerRadius = containerHeight / 2;
         _blurEffectView.clipsToBounds = YES;
+        _blurEffectView.alpha = 0.7;  // 透明液态玻璃
         [_containerView addSubview:_blurEffectView];
+
+        // 液态玻璃渐变高光层
+        CAGradientLayer *glassHighlight = [CAGradientLayer layer];
+        glassHighlight.frame = _blurEffectView.bounds;
+        glassHighlight.cornerRadius = containerHeight / 2;
+        glassHighlight.colors = @[
+            (id)[UIColor colorWithWhite:1.0 alpha:0.3].CGColor,
+            (id)[UIColor colorWithWhite:1.0 alpha:0.06].CGColor,
+            (id)[UIColor colorWithWhite:1.0 alpha:0.0].CGColor,
+            (id)[UIColor colorWithWhite:1.0 alpha:0.05].CGColor
+        ];
+        glassHighlight.locations = @[@0.0, @0.25, @0.55, @1.0];
+        glassHighlight.startPoint = CGPointMake(0, 0);
+        glassHighlight.endPoint = CGPointMake(0, 1);
+        [_blurEffectView.contentView.layer addSublayer:glassHighlight];
+
+        // 液态玻璃边缘淡白描边
+        CALayer *glassBorder = [CALayer layer];
+        glassBorder.frame = _blurEffectView.bounds;
+        glassBorder.cornerRadius = containerHeight / 2;
+        glassBorder.borderWidth = 0.6;
+        glassBorder.borderColor = [UIColor colorWithWhite:1.0 alpha:0.35].CGColor;
+        [_blurEffectView.contentView.layer addSublayer:glassBorder];
 
         [self addSubview:_containerView];
 
@@ -306,7 +302,6 @@
             [self.borderProgressLayer removeFromSuperlayer];
             [self.borderGlowLayer removeFromSuperlayer];
             [self.flowLightLayer removeFromSuperlayer];
-            [self.bgGlassView removeFromSuperview];
             [self stopRainbowColorCycle];
             [self removeFromSuperview];
           }];
