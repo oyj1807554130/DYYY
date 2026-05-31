@@ -14,6 +14,8 @@
 
 // Modern风格长按面板（新版UI）
 %hook AWEModernLongPressPanelTableViewController
+%property(nonatomic, strong) CALayer *dyyyGlassLayer;
+%property(nonatomic, assign) BOOL isViewAppeared;
 
 - (void)viewDidAppear:(BOOL)animated {
     %orig;
@@ -908,9 +910,6 @@
         self.dyyyGlassLayer = glassView.layer;
     });
 }
-
-%property(nonatomic, strong) CALayer *dyyyGlassLayer;
-%property(nonatomic, assign) BOOL isViewAppeared;
 %end
 
 // 修复Modern风格长按面板水平设置单元格的大小计算
