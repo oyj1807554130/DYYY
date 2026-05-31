@@ -89,6 +89,8 @@
         _percentLabel.textAlignment = NSTextAlignmentCenter;
         _percentLabel.textColor = isDarkMode ? [UIColor colorWithWhite:0.9 alpha:1.0] : [UIColor colorWithWhite:0.2 alpha:1.0];
         _percentLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightMedium];
+        _percentLabel.adjustsFontSizeToFitWidth = YES;
+        _percentLabel.minimumScaleFactor = 0.5;
         _percentLabel.text = @"下载中... 0%";
         _percentLabel.frame = CGRectMake(0, 0, containerWidth, containerHeight);
         _percentLabel.textAlignment = NSTextAlignmentCenter;
