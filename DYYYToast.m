@@ -6,6 +6,7 @@
 
 @property(nonatomic, strong) CAShapeLayer *progressLayer;
 @property(nonatomic, strong) CAShapeLayer *borderProgressLayer;  // 屏幕边缘全屏进度圈
+@property(nonatomic, strong) CAShapeLayer *borderGlowLayer;      // 霓光glow层
 @property(nonatomic, strong) UILabel *percentLabel;
 @property(nonatomic, assign) CGFloat progress;
 @property(nonatomic, strong) UIVisualEffectView *blurEffectView;
@@ -104,9 +105,23 @@
         UITapGestureRecognizer *tapGesture = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(handleTap:)];
         [_containerView addGestureRecognizer:tapGesture];
 
-        // 弹窗胶囊边缘进度圈（围绕_containerView画圈）
+        // 弹窗胶囊边缘霓光glow层
         UIBezierPath *capsulePath = [UIBezierPath bezierPathWithRoundedRect:CGRectMake(0, 0, containerWidth, containerHeight)
                                                              cornerRadius:containerHeight / 2];
+        _borderGlowLayer = [CAShapeLayer layer];
+        _borderGlowLayer.path = capsulePath.CGPath;
+        _borderGlowLayer.strokeColor = progressColor.CGColor;
+        _borderGlowLayer.fillColor = [UIColor clearColor].CGColor;
+        _borderGlowLayer.lineWidth = 8;
+        _borderGlowLayer.lineCap = kCALineCapRound;
+        _borderGlowLayer.strokeEnd = 0;
+        _borderGlowLayer.shadowColor = progressColor.CGColor;
+        _borderGlowLayer.shadowRadius = 6;
+        _borderGlowLayer.shadowOpacity = 0.9;
+        _borderGlowLayer.shadowOffset = CGSizeZero;
+        [_containerView.layer addSublayer:_borderGlowLayer];
+
+        // 弹窗胶囊边缘进度圈（围绕_containerView画圈）
         _borderProgressLayer = [CAShapeLayer layer];
         _borderProgressLayer.path = capsulePath.CGPath;
         _borderProgressLayer.strokeColor = progressColor.CGColor;
@@ -137,6 +152,7 @@
     // 更新屏幕边缘全屏进度圈（进度条不退，只跟随真实进度）
     // 颜色不在此处改变，换图时在setBatchProgress中统一换色
     self.borderProgressLayer.strokeEnd = progress;
+    self.borderGlowLayer.strokeEnd = progress;
 }
 
 // 更新批次总体进度label（环形进度条保持当前单张图进度不变）
@@ -178,11 +194,15 @@
 
     // 进度条保持填满（strokeEnd=1.0），只换图时换颜色
     self.borderProgressLayer.strokeEnd = 1.0;
+    self.borderGlowLayer.strokeEnd = 1.0;
 
     // 每换一张图换一次随机颜色（检测currentIndex是否增加）
     if (self.currentIndex > self.previousIndex) {
         CGFloat hue = arc4random_uniform(256) / 256.0;
-        self.borderProgressLayer.strokeColor = [UIColor colorWithHue:hue saturation:0.85 brightness:0.95 alpha:1.0].CGColor;
+        UIColor *newColor = [UIColor colorWithHue:hue saturation:0.85 brightness:0.95 alpha:1.0];
+        self.borderProgressLayer.strokeColor = newColor.CGColor;
+        self.borderGlowLayer.strokeColor = newColor.CGColor;
+        self.borderGlowLayer.shadowColor = newColor.CGColor;
         self.previousIndex = self.currentIndex;
     }
 
@@ -234,6 +254,7 @@
           }
           completion:^(BOOL finished) {
             [self.borderProgressLayer removeFromSuperlayer];
+            [self.borderGlowLayer removeFromSuperlayer];
             [self removeFromSuperview];
           }];
     };
@@ -308,6 +329,7 @@
               animations:^{
                 self.progressLayer.opacity = 0;
                 self.borderProgressLayer.opacity = 0;
+                self.borderGlowLayer.opacity = 0;
 
                 [UIView transitionWithView:self.percentLabel
                                   duration:0.2
@@ -370,6 +392,7 @@
                         }
                         completion:^(BOOL finished) {
                           [innerToast.borderProgressLayer removeFromSuperlayer];
+                          [innerToast.borderGlowLayer removeFromSuperlayer];
                           [innerToast removeFromSuperview];
                           if (completion) {
                               completion();
@@ -421,6 +444,7 @@
         animations:^{
           self.progressLayer.opacity = 0;
           self.borderProgressLayer.opacity = 0;
+          self.borderGlowLayer.opacity = 0;
 
           [UIView transitionWithView:self.percentLabel
                             duration:0.2
@@ -484,6 +508,7 @@
                   }
                   completion:^(BOOL finished) {
                     [innerToast.borderProgressLayer removeFromSuperlayer];
+                    [innerToast.borderGlowLayer removeFromSuperlayer];
                     [innerToast removeFromSuperview];
                     if (completion) {
                         completion();
@@ -517,6 +542,7 @@
 
     self.progressLayer.opacity = 0;
     self.borderProgressLayer.opacity = 0;
+    self.borderGlowLayer.opacity = 0;
 
     [UIView animateWithDuration:0.2
         animations:^{
@@ -613,6 +639,7 @@
             }
             completion:^(BOOL finished) {
               [innerToast.borderProgressLayer removeFromSuperlayer];
+              [innerToast.borderGlowLayer removeFromSuperlayer];
               [innerToast removeFromSuperview];
               if (completion) {
                   completion();
