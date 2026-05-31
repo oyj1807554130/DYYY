@@ -14,6 +14,49 @@
 
 // Modern风格长按面板（新版UI）
 %hook AWEModernLongPressPanelTableViewController
+
+- (void)viewDidAppear:(BOOL)animated {
+    %orig;
+    if (!DYYYGetBool(@"DYYYEnableSheetBlur")) return;
+    if (!self.view) return;
+    if (objc_getAssociatedObject(self, @selector(dyyy_glass_applied))) return;
+    objc_setAssociatedObject(self, @selector(dyyy_glass_applied), @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.15 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        UIView *panelView = self.view;
+        CGFloat transparent = DYYYGetFloat(@"DYYYSheetBlurTransparent", 0.7);
+
+        UIBlurEffect *glassBlur = [UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemThinMaterialDark];
+        UIVisualEffectView *glassView = [[UIVisualEffectView alloc] initWithEffect:glassBlur];
+        glassView.frame = panelView.bounds;
+        glassView.alpha = transparent;
+        glassView.layer.cornerRadius = panelView.layer.cornerRadius > 0 ? panelView.layer.cornerRadius : 20;
+        glassView.clipsToBounds = YES;
+        [panelView.layer insertSublayer:glassView.layer atIndex:0];
+
+        CAGradientLayer *glassHighlight = [CAGradientLayer layer];
+        glassHighlight.frame = glassView.bounds;
+        glassHighlight.cornerRadius = glassView.layer.cornerRadius;
+        glassHighlight.colors = @[
+            (id)[UIColor colorWithWhite:1.0 alpha:0.25].CGColor,
+            (id)[UIColor colorWithWhite:1.0 alpha:0.05].CGColor,
+            (id)[UIColor colorWithWhite:1.0 alpha:0.0].CGColor,
+            (id)[UIColor colorWithWhite:1.0 alpha:0.04].CGColor
+        ];
+        glassHighlight.locations = @[@0.0, @0.2, @0.55, @1.0];
+        glassHighlight.startPoint = CGPointMake(0, 0);
+        glassHighlight.endPoint = CGPointMake(0, 1);
+        [glassView.contentView.layer addSublayer:glassHighlight];
+
+        CALayer *glassBorder = [CALayer layer];
+        glassBorder.frame = glassView.bounds;
+        glassBorder.cornerRadius = glassView.layer.cornerRadius;
+        glassBorder.borderWidth = 0.5;
+        glassBorder.borderColor = [UIColor colorWithWhite:1.0 alpha:0.3].CGColor;
+        [glassView.contentView.layer addSublayer:glassBorder];
+    });
+}
+
 - (NSArray *)dataArray {
     // 检查是否开启精简模式
     BOOL simplifyPanel = DYYYGetBool(@"DYYYSimplifyLongPressPanel");
