@@ -11,6 +11,7 @@
 @property(nonatomic, strong) UIVisualEffectView *blurEffectView;
 @property(nonatomic, strong) CAShapeLayer *checkmarkLayer;
 @property(nonatomic, strong) UIView *progressView;
+@property(nonatomic, assign) NSInteger previousIndex;  // 追踪上一次的currentIndex，用于检测是否换图
 @property(nonatomic, assign) BOOL isShowingSuccessAnimation;
 
 @end
@@ -25,6 +26,7 @@
         self.userInteractionEnabled = YES;
         self.isCancelled = NO;
         self.allowSuccessAnimation = NO;
+        self.previousIndex = 0;
 
         BOOL isDarkMode = [DYYYUtils isDarkMode];
 
@@ -132,10 +134,9 @@
     progress = MAX(0.0, MIN(1.0, progress));
     _progress = progress;
 
-    // 更新屏幕边缘全屏进度圈（随机彩虹颜色）
+    // 更新屏幕边缘全屏进度圈（进度条不退，只跟随真实进度）
+    // 颜色不在此处改变，换图时在setBatchProgress中统一换色
     self.borderProgressLayer.strokeEnd = progress;
-    CGFloat hue = arc4random_uniform(256) / 256.0;
-    self.borderProgressLayer.strokeColor = [UIColor colorWithHue:hue saturation:0.85 brightness:0.95 alpha:1.0].CGColor;
 }
 
 // 更新批次总体进度label（环形进度条保持当前单张图进度不变）
@@ -175,10 +176,15 @@
     progress = MAX(0.0, MIN(1.0, progress));
     _progress = progress;
 
-    // 更新边框动画（随机彩虹颜色）
-    self.borderProgressLayer.strokeEnd = progress;
-    CGFloat hue = arc4random_uniform(256) / 256.0;
-    self.borderProgressLayer.strokeColor = [UIColor colorWithHue:hue saturation:0.85 brightness:0.95 alpha:1.0].CGColor;
+    // 进度条保持填满（strokeEnd=1.0），只换图时换颜色
+    self.borderProgressLayer.strokeEnd = 1.0;
+
+    // 每换一张图换一次随机颜色（检测currentIndex是否增加）
+    if (self.currentIndex > self.previousIndex) {
+        CGFloat hue = arc4random_uniform(256) / 256.0;
+        self.borderProgressLayer.strokeColor = [UIColor colorWithHue:hue saturation:0.85 brightness:0.95 alpha:1.0].CGColor;
+        self.previousIndex = self.currentIndex;
+    }
 
     // 更新文字
     int percentage = (int)(progress * 100);
