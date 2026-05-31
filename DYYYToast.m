@@ -168,7 +168,7 @@
     self.flowLightLayer.strokeEnd = progress > 0 ? 0.15 : 0;
     if (progress > 0 && self.flowLightLayer.opacity == 0) {
         [self startFlowLight];
-        [self startRainbowColorCycle];
+        [self stopRainbowColorCycle];
     }
 }
 
@@ -214,11 +214,17 @@
     self.borderGlowLayer.strokeEnd = 1.0;
     self.flowLightLayer.strokeEnd = 1.0;
     [self startFlowLight];
-    [self startRainbowColorCycle];
+    [self stopRainbowColorCycle];  // 停掉彩虹循环
 
-    // 每换一张图重置一次彩虹色相（检测currentIndex是否增加）
+    // 每换一张图换一次随机颜色（检测currentIndex是否增加）
     if (self.currentIndex > self.previousIndex) {
-        self.rainbowHue = 0;  // 重置色相起点，重新开始循环
+        CGFloat hue1 = arc4random_uniform(256) / 256.0;
+        CGFloat hue2 = arc4random_uniform(256) / 256.0;
+        UIColor *innerColor = [UIColor colorWithHue:hue1 saturation:0.85 brightness:0.95 alpha:1.0];
+        UIColor *outerColor = [UIColor colorWithHue:hue2 saturation:0.85 brightness:0.95 alpha:1.0];
+        self.borderProgressLayer.strokeColor = innerColor.CGColor;
+        self.borderGlowLayer.strokeColor = [outerColor colorWithAlphaComponent:0.5].CGColor;
+        self.flowLightLayer.strokeColor = [UIColor colorWithHue:hue1 saturation:0.6 brightness:1.0 alpha:1.0].CGColor;
         self.previousIndex = self.currentIndex;
     }
 
