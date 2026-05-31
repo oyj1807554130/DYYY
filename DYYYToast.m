@@ -41,16 +41,39 @@
 
         _containerView.backgroundColor = [UIColor clearColor];
         _containerView.layer.cornerRadius = containerHeight / 2;
-        _containerView.clipsToBounds = YES;
+        _containerView.clipsToBounds = NO;
         _containerView.userInteractionEnabled = YES;
 
-        // 添加毛玻璃效果
-        UIBlurEffect *blurEffect = [UIBlurEffect effectWithStyle:isDarkMode ? UIBlurEffectStyleDark : UIBlurEffectStyleLight];
-        _blurEffectView = [[UIVisualEffectView alloc] initWithEffect:blurEffect];
+        // 液态玻璃底层：超淡模糊
+        UIBlurEffect *glassBlur = [UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemThinMaterial];
+        _blurEffectView = [[UIVisualEffectView alloc] initWithEffect:glassBlur];
         _blurEffectView.frame = _containerView.bounds;
         _blurEffectView.layer.cornerRadius = containerHeight / 2;
         _blurEffectView.clipsToBounds = YES;
         [_containerView addSubview:_blurEffectView];
+
+        // 液态玻璃渐变高光层（从内部反射玻璃质感）
+        CAGradientLayer *glassHighlight = [CAGradientLayer layer];
+        glassHighlight.frame = _blurEffectView.bounds;
+        glassHighlight.cornerRadius = containerHeight / 2;
+        glassHighlight.colors = @[
+            (id)[UIColor colorWithWhite:1.0 alpha:0.35].CGColor,
+            (id)[UIColor colorWithWhite:1.0 alpha:0.08].CGColor,
+            (id)[UIColor colorWithWhite:1.0 alpha:0.0].CGColor,
+            (id)[UIColor colorWithWhite:1.0 alpha:0.06].CGColor
+        ];
+        glassHighlight.locations = @[@0.0, @0.3, @0.6, @1.0];
+        glassHighlight.startPoint = CGPointMake(0, 0);
+        glassHighlight.endPoint = CGPointMake(0, 1);
+        [_blurEffectView.contentView.layer addSublayer:glassHighlight];
+
+        // 液态玻璃边缘：淡白描边（玻璃边缘高光）
+        CALayer *glassBorder = [CALayer layer];
+        glassBorder.frame = _blurEffectView.bounds;
+        glassBorder.cornerRadius = containerHeight / 2;
+        glassBorder.borderWidth = 0.5;
+        glassBorder.borderColor = [UIColor colorWithWhite:1.0 alpha:0.4].CGColor;
+        [_blurEffectView.contentView.layer addSublayer:glassBorder];
 
         [self addSubview:_containerView];
 
