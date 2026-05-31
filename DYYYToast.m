@@ -126,6 +126,7 @@
         _flowLightLayer.fillColor = [UIColor clearColor].CGColor;
         _flowLightLayer.lineWidth = 3;
         _flowLightLayer.lineCap = kCALineCapRound;
+        _flowLightLayer.strokeStart = 0;
         _flowLightLayer.strokeEnd = 0.15;  // 光点占路径的15%
         _flowLightLayer.opacity = 0;
         [_containerView.layer addSublayer:_flowLightLayer];
