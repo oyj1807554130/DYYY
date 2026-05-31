@@ -106,17 +106,17 @@
         UITapGestureRecognizer *tapGesture = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(handleTap:)];
         [_containerView addGestureRecognizer:tapGesture];
 
-        // 弹窗胶囊边缘霓光glow层（底层的宽模糊光晕）
+        // 弹窗胶囊边缘霓光glow层（底层的宽模糊光晕，散发荧光效果）
         UIBezierPath *capsulePath = [UIBezierPath bezierPathWithRoundedRect:CGRectMake(0, 0, containerWidth, containerHeight)
                                                              cornerRadius:containerHeight / 2];
         _borderGlowLayer = [CAShapeLayer layer];
         _borderGlowLayer.path = capsulePath.CGPath;
         _borderGlowLayer.strokeColor = progressColor.CGColor;
         _borderGlowLayer.fillColor = [UIColor clearColor].CGColor;
-        _borderGlowLayer.lineWidth = 8;
+        _borderGlowLayer.lineWidth = 12;
         _borderGlowLayer.lineCap = kCALineCapRound;
         _borderGlowLayer.strokeEnd = 1.0;
-        _borderGlowLayer.opacity = 0.4;
+        _borderGlowLayer.opacity = 0.25;
         [_containerView.layer addSublayer:_borderGlowLayer];
 
         // 流动光效层（亮点绕边框跑）
@@ -136,7 +136,7 @@
         _borderProgressLayer.path = capsulePath.CGPath;
         _borderProgressLayer.strokeColor = progressColor.CGColor;
         _borderProgressLayer.fillColor = [UIColor clearColor].CGColor;
-        _borderProgressLayer.lineWidth = 3;
+        _borderProgressLayer.lineWidth = 4;
         _borderProgressLayer.lineCap = kCALineCapRound;
         _borderProgressLayer.strokeEnd = 0;
         [_containerView.layer addSublayer:_borderProgressLayer];
