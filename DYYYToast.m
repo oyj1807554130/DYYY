@@ -8,6 +8,8 @@
 @property(nonatomic, strong) CAShapeLayer *borderProgressLayer;  // 屏幕边缘全屏进度圈
 @property(nonatomic, strong) CAShapeLayer *borderGlowLayer;      // 霓光glow层
 @property(nonatomic, strong) CAShapeLayer *flowLightLayer;        // 流动光效层
+@property(nonatomic, strong) CADisplayLink *colorTimer;           // 颜色循环定时器
+@property(nonatomic, assign) CGFloat rainbowHue;                 // 当前彩虹色相值
 @property(nonatomic, strong) UILabel *percentLabel;
 @property(nonatomic, assign) CGFloat progress;
 @property(nonatomic, strong) UIVisualEffectView *blurEffectView;
@@ -166,6 +168,7 @@
     self.flowLightLayer.strokeEnd = progress > 0 ? 0.15 : 0;
     if (progress > 0 && self.flowLightLayer.opacity == 0) {
         [self startFlowLight];
+        [self startRainbowColorCycle];
     }
 }
 
@@ -211,15 +214,11 @@
     self.borderGlowLayer.strokeEnd = 1.0;
     self.flowLightLayer.strokeEnd = 1.0;
     [self startFlowLight];
+    [self startRainbowColorCycle];
 
-    // 每换一张图换一次随机颜色（检测currentIndex是否增加）
+    // 每换一张图重置一次彩虹色相（检测currentIndex是否增加）
     if (self.currentIndex > self.previousIndex) {
-        CGFloat hue = arc4random_uniform(256) / 256.0;
-        UIColor *newColor = [UIColor colorWithHue:hue saturation:0.85 brightness:0.95 alpha:1.0];
-        self.borderProgressLayer.strokeColor = newColor.CGColor;
-        self.borderGlowLayer.strokeColor = newColor.CGColor;
-        // 流动光效跟随进度颜色
-        self.flowLightLayer.strokeColor = [UIColor colorWithHue:hue saturation:0.6 brightness:1.0 alpha:1.0].CGColor;
+        self.rainbowHue = 0;  // 重置色相起点，重新开始循环
         self.previousIndex = self.currentIndex;
     }
 
@@ -272,6 +271,8 @@
           completion:^(BOOL finished) {
             [self.borderProgressLayer removeFromSuperlayer];
             [self.borderGlowLayer removeFromSuperlayer];
+            [self.flowLightLayer removeFromSuperlayer];
+            [self stopRainbowColorCycle];
             [self removeFromSuperview];
           }];
     };
@@ -348,6 +349,7 @@
                 self.borderProgressLayer.opacity = 0;
                 self.borderGlowLayer.opacity = 0;
                 self.flowLightLayer.opacity = 0;
+                [self stopRainbowColorCycle];
 
                 [UIView transitionWithView:self.percentLabel
                                   duration:0.2
@@ -464,6 +466,7 @@
           self.borderProgressLayer.opacity = 0;
           self.borderGlowLayer.opacity = 0;
           self.flowLightLayer.opacity = 0;
+          [self stopRainbowColorCycle];
 
           [UIView transitionWithView:self.percentLabel
                             duration:0.2
@@ -563,6 +566,7 @@
     self.borderProgressLayer.opacity = 0;
     self.borderGlowLayer.opacity = 0;
     self.flowLightLayer.opacity = 0;
+    [self stopRainbowColorCycle];
 
     [UIView animateWithDuration:0.2
         animations:^{
@@ -690,6 +694,38 @@
 - (void)stopFlowLight {
     [self.flowLightLayer removeAnimationForKey:@"flowLight"];
     self.flowLightLayer.opacity = 0;
+    [self stopRainbowColorCycle];
+}
+
+// 启动彩虹色循环（进度条颜色平滑流动渐变）
+- (void)startRainbowColorCycle {
+    if (self.colorTimer) {
+        return;
+    }
+    self.rainbowHue = 0;
+
+    __weak __typeof(self) weakSelf = self;
+    self.colorTimer = [CADisplayLink displayLinkWithTarget:weakSelf selector:@selector(tickRainbowColor)];
+    self.colorTimer.preferredFramesPerSecond = 30;
+    [self.colorTimer addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSRunLoopCommonModes];
+}
+
+// 彩虹色循环 tick
+- (void)tickRainbowColor {
+    self.rainbowHue += 0.02;
+    if (self.rainbowHue > 1.0) {
+        self.rainbowHue -= 1.0;
+    }
+    UIColor *color = [UIColor colorWithHue:self.rainbowHue saturation:0.85 brightness:0.95 alpha:1.0];
+    self.borderProgressLayer.strokeColor = color.CGColor;
+    self.borderGlowLayer.strokeColor = [color colorWithAlphaComponent:0.25].CGColor;
+    self.flowLightLayer.strokeColor = [UIColor colorWithHue:self.rainbowHue saturation:0.6 brightness:1.0 alpha:1.0].CGColor;
+}
+
+// 停止彩虹色循环
+- (void)stopRainbowColorCycle {
+    [self.colorTimer invalidate];
+    self.colorTimer = nil;
 }
 
 @end
