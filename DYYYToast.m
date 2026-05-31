@@ -156,7 +156,8 @@
 
     // 显示格式：正在保存（X/Y）n%，如 "正在保存（1/16）6%"
     if (self.totalCount > 0 && self.currentIndex > 0) {
-        _percentLabel.text = [NSString stringWithFormat:@"正在保存（%ld/%ld）%d%%", (long)self.currentIndex, (long)self.totalCount, percentage];
+        int totalPercentage = (int)((CGFloat)self.currentIndex / self.totalCount * 100);
+        _percentLabel.text = [NSString stringWithFormat:@"正在保存（%ld/%ld）%d%% 总%d%%", (long)self.currentIndex, (long)self.totalCount, percentage, totalPercentage];
     } else {
         _percentLabel.text = [NSString stringWithFormat:@"正在保存... %d%%", percentage];
     }
@@ -182,7 +183,8 @@
     // 更新文字
     int percentage = (int)(progress * 100);
     if (self.totalCount > 0 && self.currentIndex > 0) {
-        _percentLabel.text = [NSString stringWithFormat:@"正在保存（%ld/%ld）%d%%", (long)self.currentIndex, (long)self.totalCount, percentage];
+        int totalPercentage = (int)((CGFloat)self.currentIndex / self.totalCount * 100);
+        _percentLabel.text = [NSString stringWithFormat:@"正在保存（%ld/%ld）%d%% 总%d%%", (long)self.currentIndex, (long)self.totalCount, percentage, totalPercentage];
     } else {
         _percentLabel.text = [NSString stringWithFormat:@"正在保存... %d%%", percentage];
     }
