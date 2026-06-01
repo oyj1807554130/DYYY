@@ -320,27 +320,11 @@
                                       duration:0.2
                                        options:UIViewAnimationOptionTransitionCrossDissolve
                                     animations:^{
-                                        self.percentLabel.text = @"下载完成";
+                                        self.percentLabel.text = @"✅ 下载完成";
                                     }
                                     completion:nil];
                 }
                 completion:^(BOOL finished) {
-                    CABasicAnimation *circleAnimation = [CABasicAnimation animationWithKeyPath:@"opacity"];
-                    circleAnimation.fromValue = @0.0;
-                    circleAnimation.toValue = @1.0;
-                    circleAnimation.duration = 0.1;
-                    circleLayer.opacity = 1.0;
-                    [circleLayer addAnimation:circleAnimation forKey:@"fadeIn"];
-
-                    CABasicAnimation *checkmarkAnimation = [CABasicAnimation animationWithKeyPath:@"strokeEnd"];
-                    checkmarkAnimation.fromValue = @0.0;
-                    checkmarkAnimation.toValue = @1.0;
-                    checkmarkAnimation.duration = 0.2;
-                    checkmarkAnimation.timingFunction = [CAMediaTimingFunction functionWithName:kCAMediaTimingFunctionEaseInEaseOut];
-                    checkmarkAnimation.fillMode = kCAFillModeForwards;
-                    checkmarkAnimation.removedOnCompletion = NO;
-                    [checkmarkLayer addAnimation:checkmarkAnimation forKey:@"strokeEnd"];
-
                     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
                         [UIView animateWithDuration:0.2
                             animations:^{
