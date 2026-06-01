@@ -6,7 +6,6 @@
 @property(nonatomic, strong) CAShapeLayer *progressLayer;
 @property(nonatomic, strong) UILabel *percentLabel;
 @property(nonatomic, assign) CGFloat progress;
-@property(nonatomic, strong) UIVisualEffectView *blurEffectView;
 @property(nonatomic, strong) CAShapeLayer *checkmarkLayer;
 @property(nonatomic, strong) UIView *progressView;
 @property(nonatomic, assign) BOOL isShowingSuccessAnimation;
@@ -35,28 +34,16 @@
         _containerView.clipsToBounds = YES;
         _containerView.userInteractionEnabled = YES;
 
-        // SystemThinMaterialDark 液态玻璃
-        UIBlurEffect *blurEffect = [UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemThinMaterialDark];
-        _blurEffectView = [[UIVisualEffectView alloc] initWithEffect:blurEffect];
-        _blurEffectView.frame = _containerView.bounds;
-        _blurEffectView.layer.cornerRadius = pillHeight / 2;
-        _blurEffectView.clipsToBounds = YES;
-        [_containerView addSubview:_blurEffectView];
+        // 透明背景
+        // 淡白描边-透明液态玻璃效果
+        _containerView.layer.borderWidth = 1.0;
+        _containerView.layer.borderColor = [UIColor colorWithWhite:1.0 alpha:0.15].CGColor;
 
-        // 渐变高光层
-        CAGradientLayer *highlightLayer = [CAGradientLayer layer];
-        highlightLayer.frame = _blurEffectView.bounds;
-        highlightLayer.colors = @[
-            (id)[UIColor colorWithWhite:1.0 alpha:0.15].CGColor,
-            (id)[UIColor colorWithWhite:1.0 alpha:0.05].CGColor,
-            (id)[UIColor clearColor].CGColor
-        ];
-        highlightLayer.locations = @[@0.0, @0.5, @1.0];
-        [_blurEffectView.contentView.layer addSublayer:highlightLayer];
-
-        // 淡白描边
-        _blurEffectView.layer.borderWidth = 0.5;
-        _blurEffectView.layer.borderColor = [UIColor colorWithWhite:1.0 alpha:0.2].CGColor;
+        // 外发光效果
+        _containerView.layer.shadowColor = [UIColor whiteColor].CGColor;
+        _containerView.layer.shadowOffset = CGSizeZero;
+        _containerView.layer.shadowRadius = 8;
+        _containerView.layer.shadowOpacity = 0.1;
 
         [self addSubview:_containerView];
 
