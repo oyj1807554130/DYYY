@@ -322,7 +322,15 @@
                                     animations:^{
                                         self.percentLabel.text = @"✅ 下载完成";
                                     }
-                                    completion:nil];
+                                    completion:^(BOOL finished) {
+                                        // 打勾弹出动画
+                                        CAKeyframeAnimation *scaleAnim = [CAKeyframeAnimation animationWithKeyPath:@"transform.scale"];
+                                        scaleAnim.values = @[@1.0, @1.3, @1.0];
+                                        scaleAnim.keyTimes = @[@0, @0.5, @1.0];
+                                        scaleAnim.duration = 0.3;
+                                        scaleAnim.timingFunction = [CAMediaTimingFunction functionWithName:kCAMediaTimingFunctionEaseInEaseOut];
+                                        [self.percentLabel.layer addAnimation:scaleAnim forKey:@"popIn"];
+                                    }];
                 }
                 completion:^(BOOL finished) {
                     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
