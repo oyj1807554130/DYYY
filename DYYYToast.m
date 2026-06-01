@@ -120,24 +120,21 @@
         _dotView.layer.cornerRadius = dotSize / 2;
         [_containerView addSubview:_dotView];
 
-        // 百分比标签（白字+黑描边，左侧固定）
-        CGFloat labelX = 36;
-        _percentLabel = [[UILabel alloc] initWithFrame:CGRectMake(labelX, 0, 0, pillHeight)];
+        // 百分比标签（白字+黑描边）
+        CGFloat labelX = 34;
+        _percentLabel = [[UILabel alloc] initWithFrame:CGRectMake(labelX, 0, 38, pillHeight)];
         _percentLabel.text = @"0%";
         _percentLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightMedium];
         _percentLabel.textAlignment = NSTextAlignmentLeft;
-        [_percentLabel sizeThatFits:CGSizeMake(100, pillHeight)];
-        CGFloat labelWidth = MAX(35, _percentLabel.frame.size.width);
-        _percentLabel.frame = CGRectMake(labelX, 0, labelWidth, pillHeight);
         [self applyStrokeToLabel:_percentLabel];
         [_containerView addSubview:_percentLabel];
 
-        // 进度条轨道（从胶囊50%位置开始，往右延伸）
-        CGFloat trackStartX = pillWidth * 0.45;
-        CGFloat trackEndPadding = 36;
+        // 进度条轨道（居中，从50%位置往右延伸）
+        CGFloat trackStartX = pillWidth * 0.5;
+        CGFloat trackEndX = pillWidth - 14;
+        CGFloat trackWidth = trackEndX - trackStartX;
         CGFloat trackHeight = 4;
         CGFloat trackY = (pillHeight - trackHeight) / 2;
-        CGFloat trackWidth = pillWidth - trackStartX - trackEndPadding;
         _progressBarBackground = [[UIView alloc] initWithFrame:CGRectMake(trackStartX, trackY, trackWidth, trackHeight)];
         _progressBarBackground.backgroundColor = [UIColor colorWithWhite:0.4 alpha:1.0];
         _progressBarBackground.layer.cornerRadius = trackHeight / 2;
@@ -150,9 +147,8 @@
         [_progressBarBackground addSubview:_progressBar];
 
         // 右边状态标签（白字+黑描边）
-        CGFloat statusX = pillWidth - trackEndPadding + 4;
-        CGFloat statusWidth = 56;
-        _statusLabel = [[UILabel alloc] initWithFrame:CGRectMake(statusX, 0, statusWidth, pillHeight)];
+        CGFloat statusX = pillWidth - 14 - 32;
+        _statusLabel = [[UILabel alloc] initWithFrame:CGRectMake(statusX, 0, 32, pillHeight)];
         _statusLabel.text = @"下载中";
         _statusLabel.font = [UIFont systemFontOfSize:12 weight:UIFontWeightRegular];
         _statusLabel.textAlignment = NSTextAlignmentLeft;
