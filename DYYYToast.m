@@ -118,6 +118,10 @@
         _percentLabel.textColor = [UIColor whiteColor];
         _percentLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightMedium];
         _percentLabel.textAlignment = NSTextAlignmentLeft;
+        _percentLabel.layer.shadowColor = [UIColor blackColor].CGColor;
+        _percentLabel.layer.shadowOffset = CGSizeMake(0, 1);
+        _percentLabel.layer.shadowRadius = 2;
+        _percentLabel.layer.shadowOpacity = 0.6;
         [_containerView addSubview:_percentLabel];
 
         // 右边进度条轨道
