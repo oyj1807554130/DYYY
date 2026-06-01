@@ -4,18 +4,24 @@ NS_ASSUME_NONNULL_BEGIN
 
 @interface DYYYToast : UIView
 
-@property(nonatomic, strong) UIView *containerView;
-@property(nonatomic, strong) UIView *progressBarBackground;
-@property(nonatomic, strong) UIView *progressBar;
+@property(nonatomic, strong) UIView *pillView;
+@property(nonatomic, strong) UIView *progressTrack;
 @property(nonatomic, copy) void (^cancelBlock)(void);
 @property(nonatomic, assign) BOOL isCancelled;
 @property(nonatomic, assign) BOOL allowSuccessAnimation;
+@property(nonatomic, assign) NSInteger currentIndex;
+@property(nonatomic, assign) NSInteger totalCount;
+@property(nonatomic, assign) NSInteger successCount;
+@property(nonatomic, assign) NSInteger failCount;
 
 - (instancetype)initWithFrame:(CGRect)frame;
 - (void)setProgress:(float)progress;
+- (void)setOverallProgress:(float)progress;
+- (void)setBatchProgress:(float)progress;
 - (void)show;
 - (void)dismiss;
 - (void)showSuccessAnimation:(void (^)(void))completion;
+- (void)showCancelAnimation:(void (^)(void))completion;
 
 + (void)showSuccessToastWithMessage:(NSString *)message;
 - (void)showSuccessToastWithMessage:(NSString *)message completion:(void (^)(void))completion;
