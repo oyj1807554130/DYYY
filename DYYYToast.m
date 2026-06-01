@@ -119,10 +119,9 @@
         _percentLabel.textColor = [UIColor whiteColor];
         _percentLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightMedium];
         _percentLabel.textAlignment = NSTextAlignmentLeft;
-        _percentLabel.layer.shadowColor = [UIColor blackColor].CGColor;
-        _percentLabel.layer.shadowOffset = CGSizeMake(0, 1);
-        _percentLabel.layer.shadowRadius = 2;
-        _percentLabel.layer.shadowOpacity = 0.6;
+        _percentLabel.backgroundColor = [UIColor colorWithWhite:0.1 alpha:0.5];
+        _percentLabel.layer.cornerRadius = 4;
+        _percentLabel.clipsToBounds = YES;
         [_containerView addSubview:_percentLabel];
 
         // 右边进度条轨道
@@ -145,13 +144,12 @@
         CGFloat statusX = trackX + trackWidth + 6;
         _statusLabel = [[UILabel alloc] initWithFrame:CGRectMake(statusX, 0, 50, pillHeight)];
         _statusLabel.text = @"下载中";
-        _statusLabel.textColor = [UIColor colorWithWhite:0.7 alpha:1.0];
+        _statusLabel.textColor = [UIColor whiteColor];
         _statusLabel.font = [UIFont systemFontOfSize:12 weight:UIFontWeightRegular];
         _statusLabel.textAlignment = NSTextAlignmentLeft;
-        _statusLabel.layer.shadowColor = [UIColor blackColor].CGColor;
-        _statusLabel.layer.shadowOffset = CGSizeMake(0, 1);
-        _statusLabel.layer.shadowRadius = 2;
-        _statusLabel.layer.shadowOpacity = 0.6;
+        _statusLabel.backgroundColor = [UIColor colorWithWhite:0.1 alpha:0.7];
+        _statusLabel.layer.cornerRadius = 4;
+        _statusLabel.clipsToBounds = YES;
         [_containerView addSubview:_statusLabel];
 
         UITapGestureRecognizer *tapGesture = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(handleTap:)];
