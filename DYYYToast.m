@@ -136,14 +136,6 @@
         _progressBar.layer.cornerRadius = trackHeight / 2;
         [_progressBarBackground addSubview:_progressBar];
 
-        // "下载中"标签
-        UILabel *downloadingLabel = [[UILabel alloc] initWithFrame:CGRectMake(trackX + trackWidth + 6, 0, 44, pillHeight)];
-        downloadingLabel.text = @"下载中";
-        downloadingLabel.textColor = [UIColor colorWithWhite:0.7 alpha:1.0];
-        downloadingLabel.font = [UIFont systemFontOfSize:12 weight:UIFontWeightRegular];
-        downloadingLabel.textAlignment = NSTextAlignmentLeft;
-        [_containerView addSubview:downloadingLabel];
-
         UITapGestureRecognizer *tapGesture = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(handleTap:)];
         [_containerView addGestureRecognizer:tapGesture];
 
@@ -187,9 +179,9 @@
     // 更新百分比文字
     int percentage = (int)(progress * 100);
     if (self.totalCount > 0 && self.currentIndex > 0) {
-        _percentLabel.text = [NSString stringWithFormat:@"下载中 %d%% (%ld/%ld)", percentage, (long)self.currentIndex, (long)self.totalCount];
+        _percentLabel.text = [NSString stringWithFormat:@"%d%% (%ld/%ld)", percentage, (long)self.currentIndex, (long)self.totalCount];
     } else {
-        _percentLabel.text = [NSString stringWithFormat:@"下载中 %d%%", percentage];
+        _percentLabel.text = [NSString stringWithFormat:@"%d%%", percentage];
     }
 }
 
