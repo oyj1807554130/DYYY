@@ -178,11 +178,7 @@
 
     // 更新百分比文字
     int percentage = (int)(progress * 100);
-    if (self.totalCount > 0 && self.currentIndex > 0) {
-        _percentLabel.text = [NSString stringWithFormat:@"%d%% (%ld/%ld)", percentage, (long)self.currentIndex, (long)self.totalCount];
-    } else {
-        _percentLabel.text = [NSString stringWithFormat:@"%d%%", percentage];
-    }
+    _percentLabel.text = [NSString stringWithFormat:@"%d%%", percentage];
 }
 
 - (void)show {
