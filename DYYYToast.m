@@ -13,6 +13,7 @@
 @property(nonatomic, strong) UIColor *innerRandomColor;
 @property(nonatomic, strong) UIColor *dotRandomColor;
 @property(nonatomic, strong) UIView *dotView;
+@property(nonatomic, strong) UILabel *statusLabel;
 
 @end
 
@@ -140,6 +141,19 @@
         _progressBar.layer.cornerRadius = trackHeight / 2;
         [_progressBarBackground addSubview:_progressBar];
 
+        // 右边状态标签
+        CGFloat statusX = trackX + trackWidth + 6;
+        _statusLabel = [[UILabel alloc] initWithFrame:CGRectMake(statusX, 0, 50, pillHeight)];
+        _statusLabel.text = @"下载中";
+        _statusLabel.textColor = [UIColor colorWithWhite:0.7 alpha:1.0];
+        _statusLabel.font = [UIFont systemFontOfSize:12 weight:UIFontWeightRegular];
+        _statusLabel.textAlignment = NSTextAlignmentLeft;
+        _statusLabel.layer.shadowColor = [UIColor blackColor].CGColor;
+        _statusLabel.layer.shadowOffset = CGSizeMake(0, 1);
+        _statusLabel.layer.shadowRadius = 2;
+        _statusLabel.layer.shadowOpacity = 0.6;
+        [_containerView addSubview:_statusLabel];
+
         UITapGestureRecognizer *tapGesture = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(handleTap:)];
         [_containerView addGestureRecognizer:tapGesture];
 
@@ -256,6 +270,7 @@
 
 - (void)showCancelAnimation:(void (^)(void))completion {
     _percentLabel.text = @"已取消";
+    _statusLabel.text = @"";
     [UIView animateWithDuration:0.2
         animations:^{
             self.alpha = 0;
@@ -315,7 +330,8 @@
                                       duration:0.2
                                        options:UIViewAnimationOptionTransitionCrossDissolve
                                     animations:^{
-                                        self.percentLabel.text = @"下载完成";
+                                        self.percentLabel.text = @"100%";
+                                        self.statusLabel.text = @"下载完成";
                                     }
                                     completion:nil];
                 }
