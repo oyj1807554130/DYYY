@@ -122,19 +122,21 @@
 
         // 百分比标签（白字+黑描边）
         CGFloat labelX = dotX + dotSize + 10;
-        CGFloat labelWidth = 60;
-        _percentLabel = [[UILabel alloc] initWithFrame:CGRectMake(labelX, 0, labelWidth, pillHeight)];
+        _percentLabel = [[UILabel alloc] initWithFrame:CGRectMake(labelX, 0, 0, pillHeight)];
         _percentLabel.text = @"0%";
         _percentLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightMedium];
         _percentLabel.textAlignment = NSTextAlignmentLeft;
+        [_percentLabel sizeThatFits:CGSizeMake(100, pillHeight)];
+        CGFloat labelWidth = MAX(35, _percentLabel.frame.size.width);
+        _percentLabel.frame = CGRectMake(labelX, 0, labelWidth, pillHeight);
         [self applyStrokeToLabel:_percentLabel];
         [_containerView addSubview:_percentLabel];
 
-        // 右边进度条轨道（加长）
+        // 进度条轨道
         CGFloat trackX = labelX + labelWidth + 10;
-        CGFloat trackWidth = pillWidth - trackX - 14;
         CGFloat trackHeight = 4;
         CGFloat trackY = (pillHeight - trackHeight) / 2;
+        CGFloat trackWidth = pillWidth - trackX - 60;
         _progressBarBackground = [[UIView alloc] initWithFrame:CGRectMake(trackX, trackY, trackWidth, trackHeight)];
         _progressBarBackground.backgroundColor = [UIColor colorWithWhite:0.4 alpha:1.0];
         _progressBarBackground.layer.cornerRadius = trackHeight / 2;
@@ -147,8 +149,9 @@
         [_progressBarBackground addSubview:_progressBar];
 
         // 右边状态标签（白字+黑描边）
-        CGFloat statusX = trackX + trackWidth + 6;
-        _statusLabel = [[UILabel alloc] initWithFrame:CGRectMake(statusX, 0, 50, pillHeight)];
+        CGFloat statusX = trackX + trackWidth + 4;
+        CGFloat statusWidth = 56;
+        _statusLabel = [[UILabel alloc] initWithFrame:CGRectMake(statusX, 0, statusWidth, pillHeight)];
         _statusLabel.text = @"下载中";
         _statusLabel.font = [UIFont systemFontOfSize:12 weight:UIFontWeightRegular];
         _statusLabel.textAlignment = NSTextAlignmentLeft;
