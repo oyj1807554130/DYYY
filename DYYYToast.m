@@ -9,6 +9,7 @@
 @property(nonatomic, strong) CAShapeLayer *checkmarkLayer;
 @property(nonatomic, strong) UIView *progressView;
 @property(nonatomic, assign) BOOL isShowingSuccessAnimation;
+@property(nonatomic, strong) UIColor *randomColor;
 
 @end
 
@@ -22,7 +23,11 @@
         self.isCancelled = NO;
         self.allowSuccessAnimation = NO;
 
-        BOOL isDarkMode = [DYYYUtils isDarkMode];
+        // 随机颜色
+        CGFloat hue = (CGFloat)arc4random_uniform(256) / 256.0;
+        CGFloat saturation = 0.6 + (CGFloat)arc4random_uniform(128) / 256.0;
+        CGFloat brightness = 0.8 + (CGFloat)arc4random_uniform(64) / 256.0;
+        _randomColor = [UIColor colorWithHue:hue saturation:saturation brightness:brightness alpha:1.0];
 
         // 透明液态玻璃 - 灵动岛胶囊样式
         CGFloat pillWidth = 200;
@@ -34,18 +39,44 @@
         _containerView.clipsToBounds = YES;
         _containerView.userInteractionEnabled = YES;
 
-        // 透明背景
-        // 淡白描边-透明液态玻璃效果
+        // 透明背景 + 淡白描边
         _containerView.layer.borderWidth = 1.0;
         _containerView.layer.borderColor = [UIColor colorWithWhite:1.0 alpha:0.15].CGColor;
 
-        // 外发光效果
-        _containerView.layer.shadowColor = [UIColor whiteColor].CGColor;
+        // 彩虹外发光
+        _containerView.layer.shadowColor = _randomColor.CGColor;
         _containerView.layer.shadowOffset = CGSizeZero;
         _containerView.layer.shadowRadius = 8;
-        _containerView.layer.shadowOpacity = 0.1;
+        _containerView.layer.shadowOpacity = 0.4;
 
         [self addSubview:_containerView];
+
+        // === 外圈环形进度（胶囊边缘） ===
+        CGFloat ringWidth = 3;
+        CGFloat ringPadding = 1.5;
+        CGFloat ringRadius = (pillHeight / 2) - ringPadding;
+
+        UIBezierPath *ringPath = [UIBezierPath bezierPathWithRoundedRect:CGRectMake(ringPadding, ringPadding, pillWidth - 2 * ringPadding, pillHeight - 2 * ringPadding) cornerRadius:ringRadius];
+
+        // 背景环
+        CAShapeLayer *backgroundRing = [CAShapeLayer layer];
+        backgroundRing.path = ringPath.CGPath;
+        backgroundRing.fillColor = [UIColor clearColor].CGColor;
+        backgroundRing.strokeColor = [UIColor colorWithWhite:0.3 alpha:1.0].CGColor;
+        backgroundRing.lineWidth = ringWidth;
+        backgroundRing.lineCap = kCALineCapRound;
+        [_containerView.layer addSublayer:backgroundRing];
+
+        // 外圈彩虹进度环
+        _progressLayer = [CAShapeLayer layer];
+        _progressLayer.path = ringPath.CGPath;
+        _progressLayer.fillColor = [UIColor clearColor].CGColor;
+        _progressLayer.strokeColor = _randomColor.CGColor;
+        _progressLayer.lineWidth = ringWidth;
+        _progressLayer.lineCap = kCALineCapRound;
+        _progressLayer.strokeStart = 0;
+        _progressLayer.strokeEnd = 0;
+        [_containerView.layer addSublayer:_progressLayer];
 
         // 左边小绿点
         CGFloat dotSize = 8;
@@ -68,7 +99,7 @@
 
         // 右边进度条轨道
         CGFloat trackX = labelX + labelWidth + 10;
-        CGFloat trackWidth = pillWidth - trackX - 14 - 50; // 留出"下载中"空间
+        CGFloat trackWidth = pillWidth - trackX - 14 - 50;
         CGFloat trackHeight = 4;
         CGFloat trackY = (pillHeight - trackHeight) / 2;
         _progressBarBackground = [[UIView alloc] initWithFrame:CGRectMake(trackX, trackY, trackWidth, trackHeight)];
@@ -94,6 +125,7 @@
         [_containerView addGestureRecognizer:tapGesture];
 
         self.alpha = 0;
+        _progressView = _containerView;
     }
     return self;
 }
@@ -109,9 +141,25 @@
     progress = MAX(0.0, MIN(1.0, progress));
     _progress = progress;
 
+    // 外圈环形进度（平滑递进动画）
+    CABasicAnimation *ringAnim = [CABasicAnimation animationWithKeyPath:@"strokeEnd"];
+    ringAnim.fromValue = @(_progressLayer.strokeEnd);
+    ringAnim.toValue = @(progress);
+    ringAnim.duration = 0.25;
+    ringAnim.timingFunction = [CAMediaTimingFunction functionWithName:kCAMediaTimingFunctionEaseOut];
+    ringAnim.fillMode = kCAFillModeForwards;
+    ringAnim.removedOnCompletion = NO;
+    _progressLayer.strokeEnd = progress;
+    [_progressLayer addAnimation:ringAnim forKey:@"progressAnimation"];
+
     // 更新进度条
     CGFloat trackWidth = _progressBarBackground.bounds.size.width;
-    _progressBar.frame = CGRectMake(0, 0, trackWidth * progress, 4);
+    [UIView animateWithDuration:0.25
+                          delay:0
+                        options:UIViewAnimationOptionCurveEaseOut
+                     animations:^{
+        self->_progressBar.frame = CGRectMake(0, 0, trackWidth * progress, 4);
+    } completion:nil];
 
     // 更新百分比文字
     int percentage = (int)(progress * 100);
