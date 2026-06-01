@@ -3,15 +3,13 @@
 
 @interface DYYYToast ()
 
-@property(nonatomic, strong) CALayer *progressBar;
-@property(nonatomic, strong) UIView *progressTrack;
+@property(nonatomic, strong) CAShapeLayer *progressLayer;
 @property(nonatomic, strong) UILabel *percentLabel;
 @property(nonatomic, assign) CGFloat progress;
 @property(nonatomic, strong) UIVisualEffectView *blurEffectView;
 @property(nonatomic, strong) CAShapeLayer *checkmarkLayer;
 @property(nonatomic, strong) UIView *progressView;
 @property(nonatomic, assign) BOOL isShowingSuccessAnimation;
-@property(nonatomic, strong) UIView *pillView;
 
 @end
 
@@ -27,21 +25,25 @@
 
         BOOL isDarkMode = [DYYYUtils isDarkMode];
 
-        // 灵动岛样式：透明液态玻璃
+        // 透明液态玻璃 - 灵动岛胶囊样式
         CGFloat pillWidth = 200;
         CGFloat pillHeight = 36;
-        _pillView = [[UIView alloc] initWithFrame:CGRectMake(0, 0, pillWidth, pillHeight)];
-        _pillView.center = CGPointMake(CGRectGetMidX(self.bounds), 130);
+        _containerView = [[UIView alloc] initWithFrame:CGRectMake(0, 0, pillWidth, pillHeight)];
+        _containerView.center = CGPointMake(CGRectGetMidX(self.bounds), 130);
+        _containerView.backgroundColor = [UIColor clearColor];
+        _containerView.layer.cornerRadius = pillHeight / 2;
+        _containerView.clipsToBounds = YES;
+        _containerView.userInteractionEnabled = YES;
 
-        // 液态玻璃：SystemThinMaterial 毛玻璃 + 渐变高光层 + 描边
+        // SystemThinMaterialDark 液态玻璃
         UIBlurEffect *blurEffect = [UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemThinMaterialDark];
         _blurEffectView = [[UIVisualEffectView alloc] initWithEffect:blurEffect];
-        _blurEffectView.frame = _pillView.bounds;
+        _blurEffectView.frame = _containerView.bounds;
         _blurEffectView.layer.cornerRadius = pillHeight / 2;
         _blurEffectView.clipsToBounds = YES;
-        [_pillView addSubview:_blurEffectView];
+        [_containerView addSubview:_blurEffectView];
 
-        // 白色渐变高光层
+        // 渐变高光层
         CAGradientLayer *highlightLayer = [CAGradientLayer layer];
         highlightLayer.frame = _blurEffectView.bounds;
         highlightLayer.colors = @[
@@ -56,54 +58,53 @@
         _blurEffectView.layer.borderWidth = 0.5;
         _blurEffectView.layer.borderColor = [UIColor colorWithWhite:1.0 alpha:0.2].CGColor;
 
-        [self addSubview:_pillView];
+        [self addSubview:_containerView];
 
-        // 左边下载图标（小圆点）
-        CGFloat iconSize = 8;
-        CGFloat iconX = 16;
-        CGFloat iconY = (pillHeight - iconSize) / 2;
-        UIView *iconDot = [[UIView alloc] initWithFrame:CGRectMake(iconX, iconY, iconSize, iconSize)];
-        iconDot.backgroundColor = [UIColor colorWithRed:48/255.0 green:209/255.0 blue:151/255.0 alpha:1.0];
-        iconDot.layer.cornerRadius = iconSize / 2;
-        [_pillView addSubview:iconDot];
+        // 左边小绿点
+        CGFloat dotSize = 8;
+        CGFloat dotX = 14;
+        CGFloat dotY = (pillHeight - dotSize) / 2;
+        UIView *dot = [[UIView alloc] initWithFrame:CGRectMake(dotX, dotY, dotSize, dotSize)];
+        dot.backgroundColor = [UIColor colorWithRed:48/255.0 green:209/255.0 blue:151/255.0 alpha:1.0];
+        dot.layer.cornerRadius = dotSize / 2;
+        [_containerView addSubview:dot];
 
-        // 中间文字
-        CGFloat labelX = iconX + iconSize + 10;
-        CGFloat labelWidth = 70;
+        // 中间百分比文字
+        CGFloat labelX = dotX + dotSize + 10;
+        CGFloat labelWidth = 60;
         _percentLabel = [[UILabel alloc] initWithFrame:CGRectMake(labelX, 0, labelWidth, pillHeight)];
         _percentLabel.text = @"0%";
         _percentLabel.textColor = [UIColor whiteColor];
         _percentLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightMedium];
         _percentLabel.textAlignment = NSTextAlignmentLeft;
-        [_pillView addSubview:_percentLabel];
+        [_containerView addSubview:_percentLabel];
 
         // 右边进度条轨道
         CGFloat trackX = labelX + labelWidth + 10;
-        CGFloat trackWidth = pillWidth - trackX - 16;
+        CGFloat trackWidth = pillWidth - trackX - 14 - 50; // 留出"下载中"空间
         CGFloat trackHeight = 4;
         CGFloat trackY = (pillHeight - trackHeight) / 2;
-        _progressTrack = [[UIView alloc] initWithFrame:CGRectMake(trackX, trackY, trackWidth, trackHeight)];
-        _progressTrack.backgroundColor = [UIColor colorWithWhite:0.4 alpha:1.0];
-        _progressTrack.layer.cornerRadius = trackHeight / 2;
-        [_pillView addSubview:_progressTrack];
+        _progressBarBackground = [[UIView alloc] initWithFrame:CGRectMake(trackX, trackY, trackWidth, trackHeight)];
+        _progressBarBackground.backgroundColor = [UIColor colorWithWhite:0.4 alpha:1.0];
+        _progressBarBackground.layer.cornerRadius = trackHeight / 2;
+        [_containerView addSubview:_progressBarBackground];
 
         // 进度条
-        _progressBar = [CALayer layer];
-        _progressBar.frame = CGRectMake(0, 0, 0, trackHeight);
-        _progressBar.backgroundColor = [UIColor colorWithRed:48/255.0 green:209/255.0 blue:151/255.0 alpha:1.0].CGColor;
-        _progressBar.cornerRadius = trackHeight / 2;
-        [_progressTrack.layer addSublayer:_progressBar];
+        _progressBar = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 0, trackHeight)];
+        _progressBar.backgroundColor = [UIColor colorWithRed:48/255.0 green:209/255.0 blue:151/255.0 alpha:1.0];
+        _progressBar.layer.cornerRadius = trackHeight / 2;
+        [_progressBarBackground addSubview:_progressBar];
 
-        // 下载中文字
-        UILabel *downloadingLabel = [[UILabel alloc] initWithFrame:CGRectMake(trackX + trackWidth + 8, 0, 50, pillHeight)];
+        // "下载中"标签
+        UILabel *downloadingLabel = [[UILabel alloc] initWithFrame:CGRectMake(trackX + trackWidth + 6, 0, 44, pillHeight)];
         downloadingLabel.text = @"下载中";
         downloadingLabel.textColor = [UIColor colorWithWhite:0.7 alpha:1.0];
         downloadingLabel.font = [UIFont systemFontOfSize:12 weight:UIFontWeightRegular];
         downloadingLabel.textAlignment = NSTextAlignmentLeft;
-        [_pillView addSubview:downloadingLabel];
+        [_containerView addSubview:downloadingLabel];
 
         UITapGestureRecognizer *tapGesture = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(handleTap:)];
-        [_pillView addGestureRecognizer:tapGesture];
+        [_containerView addGestureRecognizer:tapGesture];
 
         self.alpha = 0;
     }
@@ -122,7 +123,7 @@
     _progress = progress;
 
     // 更新进度条
-    CGFloat trackWidth = _progressTrack.bounds.size.width;
+    CGFloat trackWidth = _progressBarBackground.bounds.size.width;
     _progressBar.frame = CGRectMake(0, 0, trackWidth * progress, 4);
 
     // 更新百分比文字
@@ -143,32 +144,32 @@
 
     [UIView animateWithDuration:0.3
                      animations:^{
-                       self.alpha = 1.0;
+                         self.alpha = 1.0;
                      }];
 }
 
 - (void)dismiss {
     void (^dismissBlock)(void) = ^{
-      if (self.isCancelled) {
-          [self showCancelAnimation:nil];
-          return;
-      }
+        if (self.isCancelled) {
+            [self showCancelAnimation:nil];
+            return;
+        }
 
-      if (self.allowSuccessAnimation) {
-          if (!self.isShowingSuccessAnimation) {
-              self.isShowingSuccessAnimation = YES;
-              [self showSuccessAnimation:nil];
-          }
-          return;
-      }
+        if (self.allowSuccessAnimation) {
+            if (!self.isShowingSuccessAnimation) {
+                self.isShowingSuccessAnimation = YES;
+                [self showSuccessAnimation:nil];
+            }
+            return;
+        }
 
-      [UIView animateWithDuration:0.2
-          animations:^{
-            self.alpha = 0;
-          }
-          completion:^(BOOL finished) {
-            [self removeFromSuperview];
-          }];
+        [UIView animateWithDuration:0.2
+            animations:^{
+                self.alpha = 0;
+            }
+            completion:^(BOOL finished) {
+                [self removeFromSuperview];
+            }];
     };
 
     if ([NSThread isMainThread]) {
@@ -191,34 +192,12 @@
         return nil;
     }
 
-    CGPoint containerPoint = [self convertPoint:point toView:_pillView];
-    if ([_pillView pointInside:containerPoint withEvent:event]) {
+    CGPoint containerPoint = [self convertPoint:point toView:_containerView];
+    if ([_containerView pointInside:containerPoint withEvent:event]) {
         return [super hitTest:point withEvent:event];
     }
 
     return nil;
-}
-
-// 下载成功动画方法
-- (void)showSuccessAnimation:(void (^)(void))completion {
-    BOOL isDarkMode = [DYYYUtils isDarkMode];
-
-    UIColor *successColor =
-        isDarkMode ? [UIColor colorWithRed:48 / 255.0 green:209 / 255.0 blue:151 / 255.0 alpha:1.0] : [UIColor colorWithRed:11 / 255.0 green:195 / 255.0 blue:139 / 255.0 alpha:1.0];
-
-    // 动画完成后显示成功文字
-    _percentLabel.text = @"完成";
-
-    [UIView animateWithDuration:0.3
-        animations:^{
-            // 进度条变绿
-            _progressBar.backgroundColor = successColor.CGColor;
-        }
-        completion:^(BOOL finished) {
-            if (completion) {
-                completion();
-            }
-        }];
 }
 
 - (void)showCancelAnimation:(void (^)(void))completion {
@@ -235,20 +214,96 @@
         }];
 }
 
-- (void)setOverallProgress:(float)progress {
-    [self setProgress:progress];
-}
+// 下载成功动画方法
+- (void)showSuccessAnimation:(void (^)(void))completion {
+    BOOL isDarkMode = [DYYYUtils isDarkMode];
 
-- (void)setBatchProgress:(float)progress {
-    [self setProgress:progress];
+    UIColor *successColor =
+        isDarkMode ? [UIColor colorWithRed:48 / 255.0 green:209 / 255.0 blue:151 / 255.0 alpha:1.0] : [UIColor colorWithRed:11 / 255.0 green:195 / 255.0 blue:139 / 255.0 alpha:1.0];
+
+    [UIView animateWithDuration:0.3
+        animations:^{
+            [self setProgress:1.0];
+        }
+        completion:^(BOOL finished) {
+            CAShapeLayer *circleLayer = [CAShapeLayer layer];
+            CGFloat circleSize = 30;
+            UIBezierPath *circlePath = [UIBezierPath bezierPathWithOvalInRect:CGRectMake(0, 0, circleSize, circleSize)];
+
+            circleLayer.path = circlePath.CGPath;
+            circleLayer.fillColor = successColor.CGColor;
+            circleLayer.opacity = 0;
+
+            [self.progressView.layer addSublayer:circleLayer];
+
+            CAShapeLayer *checkmarkLayer = [CAShapeLayer layer];
+
+            UIBezierPath *checkPath = [UIBezierPath bezierPath];
+            [checkPath moveToPoint:CGPointMake(circleSize * 0.25, circleSize * 0.5)];
+            [checkPath addLineToPoint:CGPointMake(circleSize * 0.45, circleSize * 0.7)];
+            [checkPath addLineToPoint:CGPointMake(circleSize * 0.75, circleSize * 0.3)];
+
+            checkmarkLayer.path = checkPath.CGPath;
+            checkmarkLayer.fillColor = nil;
+            checkmarkLayer.strokeColor = [UIColor whiteColor].CGColor;
+            checkmarkLayer.lineWidth = 2.5;
+            checkmarkLayer.lineCap = kCALineCapRound;
+            checkmarkLayer.lineJoin = kCALineJoinRound;
+            checkmarkLayer.strokeEnd = 0;
+
+            [self.progressView.layer addSublayer:checkmarkLayer];
+
+            [UIView animateWithDuration:0.15
+                animations:^{
+                    self.progressLayer.opacity = 0;
+
+                    [UIView transitionWithView:self.percentLabel
+                                      duration:0.2
+                                       options:UIViewAnimationOptionTransitionCrossDissolve
+                                    animations:^{
+                                        self.percentLabel.text = @"下载完成";
+                                    }
+                                    completion:nil];
+                }
+                completion:^(BOOL finished) {
+                    CABasicAnimation *circleAnimation = [CABasicAnimation animationWithKeyPath:@"opacity"];
+                    circleAnimation.fromValue = @0.0;
+                    circleAnimation.toValue = @1.0;
+                    circleAnimation.duration = 0.1;
+                    circleLayer.opacity = 1.0;
+                    [circleLayer addAnimation:circleAnimation forKey:@"fadeIn"];
+
+                    CABasicAnimation *checkmarkAnimation = [CABasicAnimation animationWithKeyPath:@"strokeEnd"];
+                    checkmarkAnimation.fromValue = @0.0;
+                    checkmarkAnimation.toValue = @1.0;
+                    checkmarkAnimation.duration = 0.2;
+                    checkmarkAnimation.timingFunction = [CAMediaTimingFunction functionWithName:kCAMediaTimingFunctionEaseInEaseOut];
+                    checkmarkAnimation.fillMode = kCAFillModeForwards;
+                    checkmarkAnimation.removedOnCompletion = NO;
+                    [checkmarkLayer addAnimation:checkmarkAnimation forKey:@"strokeEnd"];
+
+                    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                        [UIView animateWithDuration:0.2
+                            animations:^{
+                                self.alpha = 0;
+                            }
+                            completion:^(BOOL finished) {
+                                [self removeFromSuperview];
+                                if (completion) {
+                                    completion();
+                                }
+                            }];
+                    });
+                }];
+        }];
 }
 
 + (void)showSuccessToastWithMessage:(NSString *)message {
-    // 空实现，兼容旧代码
+    // 空实现
 }
 
 - (void)showSuccessToastWithMessage:(NSString *)message completion:(void (^)(void))completion {
-    // 空实现，兼容旧代码
+    // 空实现
 }
 
 @end
