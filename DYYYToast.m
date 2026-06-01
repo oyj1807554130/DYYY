@@ -27,21 +27,34 @@
 
         BOOL isDarkMode = [DYYYUtils isDarkMode];
 
-        // 灵动岛样式：黑色圆角长条
+        // 灵动岛样式：透明液态玻璃
         CGFloat pillWidth = 200;
         CGFloat pillHeight = 36;
         _pillView = [[UIView alloc] initWithFrame:CGRectMake(0, 0, pillWidth, pillHeight)];
         _pillView.center = CGPointMake(CGRectGetMidX(self.bounds), 130);
-        _pillView.backgroundColor = isDarkMode ? [UIColor colorWithWhite:0.1 alpha:0.95] : [UIColor colorWithWhite:0.15 alpha:0.95];
-        _pillView.layer.cornerRadius = pillHeight / 2;
-        _pillView.clipsToBounds = YES;
 
-        // 添加阴影效果
-        _pillView.layer.shadowColor = [UIColor blackColor].CGColor;
-        _pillView.layer.shadowOffset = CGSizeMake(0, 2);
-        _pillView.layer.shadowRadius = 8;
-        _pillView.layer.shadowOpacity = 0.3;
-        _pillView.layer.masksToBounds = NO;
+        // 液态玻璃：SystemThinMaterial 毛玻璃 + 渐变高光层 + 描边
+        UIBlurEffect *blurEffect = [UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemThinMaterialDark];
+        _blurEffectView = [[UIVisualEffectView alloc] initWithEffect:blurEffect];
+        _blurEffectView.frame = _pillView.bounds;
+        _blurEffectView.layer.cornerRadius = pillHeight / 2;
+        _blurEffectView.clipsToBounds = YES;
+        [_pillView addSubview:_blurEffectView];
+
+        // 白色渐变高光层
+        CAGradientLayer *highlightLayer = [CAGradientLayer layer];
+        highlightLayer.frame = _blurEffectView.bounds;
+        highlightLayer.colors = @[
+            (id)[UIColor colorWithWhite:1.0 alpha:0.15].CGColor,
+            (id)[UIColor colorWithWhite:1.0 alpha:0.05].CGColor,
+            (id)[UIColor clearColor].CGColor
+        ];
+        highlightLayer.locations = @[@0.0, @0.5, @1.0];
+        [_blurEffectView.contentView.layer addSublayer:highlightLayer];
+
+        // 淡白描边
+        _blurEffectView.layer.borderWidth = 0.5;
+        _blurEffectView.layer.borderColor = [UIColor colorWithWhite:1.0 alpha:0.2].CGColor;
 
         [self addSubview:_pillView];
 
