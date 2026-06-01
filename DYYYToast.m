@@ -43,6 +43,15 @@
     _dotView.backgroundColor = _dotRandomColor;
 }
 
+- (void)applyStrokeToLabel:(UILabel *)label {
+    label.textColor = [UIColor whiteColor];
+    label.layer.shadowColor = [UIColor blackColor].CGColor;
+    label.layer.shadowOffset = CGSizeMake(0, 1);
+    label.layer.shadowRadius = 3;
+    label.layer.shadowOpacity = 0.8;
+    label.layer.masksToBounds = NO;
+}
+
 - (instancetype)initWithFrame:(CGRect)frame {
     self = [super initWithFrame:frame];
     if (self) {
@@ -111,22 +120,19 @@
         _dotView.layer.cornerRadius = dotSize / 2;
         [_containerView addSubview:_dotView];
 
-        // 中间百分比文字
+        // 百分比标签（白字+黑描边）
         CGFloat labelX = dotX + dotSize + 10;
         CGFloat labelWidth = 60;
         _percentLabel = [[UILabel alloc] initWithFrame:CGRectMake(labelX, 0, labelWidth, pillHeight)];
         _percentLabel.text = @"0%";
-        _percentLabel.textColor = [UIColor whiteColor];
         _percentLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightMedium];
         _percentLabel.textAlignment = NSTextAlignmentLeft;
-        _percentLabel.backgroundColor = [UIColor colorWithWhite:0.1 alpha:0.5];
-        _percentLabel.layer.cornerRadius = 4;
-        _percentLabel.clipsToBounds = YES;
+        [self applyStrokeToLabel:_percentLabel];
         [_containerView addSubview:_percentLabel];
 
-        // 右边进度条轨道
+        // 右边进度条轨道（加长）
         CGFloat trackX = labelX + labelWidth + 10;
-        CGFloat trackWidth = pillWidth - trackX - 14 - 50;
+        CGFloat trackWidth = pillWidth - trackX - 14;
         CGFloat trackHeight = 4;
         CGFloat trackY = (pillHeight - trackHeight) / 2;
         _progressBarBackground = [[UIView alloc] initWithFrame:CGRectMake(trackX, trackY, trackWidth, trackHeight)];
@@ -140,16 +146,13 @@
         _progressBar.layer.cornerRadius = trackHeight / 2;
         [_progressBarBackground addSubview:_progressBar];
 
-        // 右边状态标签
+        // 右边状态标签（白字+黑描边）
         CGFloat statusX = trackX + trackWidth + 6;
         _statusLabel = [[UILabel alloc] initWithFrame:CGRectMake(statusX, 0, 50, pillHeight)];
         _statusLabel.text = @"下载中";
-        _statusLabel.textColor = [UIColor whiteColor];
         _statusLabel.font = [UIFont systemFontOfSize:12 weight:UIFontWeightRegular];
         _statusLabel.textAlignment = NSTextAlignmentLeft;
-        _statusLabel.backgroundColor = [UIColor colorWithWhite:0.1 alpha:0.7];
-        _statusLabel.layer.cornerRadius = 4;
-        _statusLabel.clipsToBounds = YES;
+        [self applyStrokeToLabel:_statusLabel];
         [_containerView addSubview:_statusLabel];
 
         UITapGestureRecognizer *tapGesture = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(handleTap:)];
