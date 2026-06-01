@@ -13,7 +13,6 @@
 @property(nonatomic, strong) UIColor *innerRandomColor;
 @property(nonatomic, strong) UIColor *dotRandomColor;
 @property(nonatomic, strong) UIView *dotView;
-@property(nonatomic, strong) UILabel *statusLabel;
 
 @end
 
@@ -122,17 +121,17 @@
 
         // 百分比标签（白字+黑描边）
         CGFloat labelX = 34;
-        _percentLabel = [[UILabel alloc] initWithFrame:CGRectMake(labelX, 0, 38, pillHeight)];
-        _percentLabel.text = @"0%";
+        _percentLabel = [[UILabel alloc] initWithFrame:CGRectMake(labelX, 0, 90, pillHeight)];
+        _percentLabel.text = @"下载中 0%";
         _percentLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightMedium];
         _percentLabel.textAlignment = NSTextAlignmentLeft;
         [self applyStrokeToLabel:_percentLabel];
         [_containerView addSubview:_percentLabel];
 
-        // 进度条轨道（居中，从50%位置往右延伸）
-        CGFloat trackStartX = pillWidth * 0.5;
-        CGFloat trackEndX = pillWidth - 14;
-        CGFloat trackWidth = trackEndX - trackStartX;
+        // 进度条轨道（紧跟文字右侧，延伸到胶囊边缘）
+        CGFloat trackStartX = labelX + 90 + 8;
+        CGFloat trackEndPadding = 14;
+        CGFloat trackWidth = pillWidth - trackStartX - trackEndPadding;
         CGFloat trackHeight = 4;
         CGFloat trackY = (pillHeight - trackHeight) / 2;
         _progressBarBackground = [[UIView alloc] initWithFrame:CGRectMake(trackStartX, trackY, trackWidth, trackHeight)];
@@ -145,15 +144,6 @@
         _progressBar.backgroundColor = _innerRandomColor;
         _progressBar.layer.cornerRadius = trackHeight / 2;
         [_progressBarBackground addSubview:_progressBar];
-
-        // 右边状态标签（白字+黑描边）
-        CGFloat statusX = pillWidth - 14 - 32;
-        _statusLabel = [[UILabel alloc] initWithFrame:CGRectMake(statusX, 0, 32, pillHeight)];
-        _statusLabel.text = @"下载中";
-        _statusLabel.font = [UIFont systemFontOfSize:12 weight:UIFontWeightRegular];
-        _statusLabel.textAlignment = NSTextAlignmentLeft;
-        [self applyStrokeToLabel:_statusLabel];
-        [_containerView addSubview:_statusLabel];
 
         UITapGestureRecognizer *tapGesture = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(handleTap:)];
         [_containerView addGestureRecognizer:tapGesture];
@@ -197,7 +187,7 @@
 
     // 更新百分比文字
     int percentage = (int)(progress * 100);
-    _percentLabel.text = [NSString stringWithFormat:@"%d%%", percentage];
+    _percentLabel.text = [NSString stringWithFormat:@"下载中 %d%%", percentage];
 }
 
 - (void)show {
@@ -271,7 +261,6 @@
 
 - (void)showCancelAnimation:(void (^)(void))completion {
     _percentLabel.text = @"已取消";
-    _statusLabel.text = @"";
     [UIView animateWithDuration:0.2
         animations:^{
             self.alpha = 0;
@@ -331,8 +320,7 @@
                                       duration:0.2
                                        options:UIViewAnimationOptionTransitionCrossDissolve
                                     animations:^{
-                                        self.percentLabel.text = @"100%";
-                                        self.statusLabel.text = @"下载完成";
+                                        self.percentLabel.text = @"下载完成";
                                     }
                                     completion:nil];
                 }
