@@ -1183,6 +1183,10 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
         self.downloadTasks[downloadID] = downloadTask;
         self.taskProgressMap[downloadID] = @0.0;
         [self setMediaType:MediaTypeImage forDownloadID:downloadID];
+        DYYYToast *progressView = self.progressViews[batchID];
+        if (progressView) {
+            [progressView refreshRandomColor];
+        }
         [downloadTask resume];
     }
 }

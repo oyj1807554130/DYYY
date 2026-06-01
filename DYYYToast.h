@@ -18,6 +18,7 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)show;
 - (void)dismiss;
 - (void)showSuccessAnimation:(void (^)(void))completion;
+- (void)refreshRandomColor;
 
 + (void)showSuccessToastWithMessage:(NSString *)message;
 - (void)showSuccessToastWithMessage:(NSString *)message completion:(void (^)(void))completion;

@@ -10,10 +10,37 @@
 @property(nonatomic, strong) UIView *progressView;
 @property(nonatomic, assign) BOOL isShowingSuccessAnimation;
 @property(nonatomic, strong) UIColor *randomColor;
+@property(nonatomic, strong) UIColor *innerRandomColor;
+@property(nonatomic, strong) UIColor *dotRandomColor;
+@property(nonatomic, strong) UIView *dotView;
 
 @end
 
 @implementation DYYYToast
+
+// 生成三色
+- (void)generateRandomColors {
+    _randomColor = [UIColor colorWithHue:(CGFloat)arc4random_uniform(256)/256.0
+                              saturation:0.6+(CGFloat)arc4random_uniform(128)/256.0
+                              brightness:0.8+(CGFloat)arc4random_uniform(64)/256.0
+                                   alpha:1.0];
+    _innerRandomColor = [UIColor colorWithHue:(CGFloat)arc4random_uniform(256)/256.0
+                                  saturation:0.6+(CGFloat)arc4random_uniform(128)/256.0
+                                  brightness:0.8+(CGFloat)arc4random_uniform(64)/256.0
+                                       alpha:1.0];
+    _dotRandomColor = [UIColor colorWithHue:(CGFloat)arc4random_uniform(256)/256.0
+                                saturation:0.6+(CGFloat)arc4random_uniform(128)/256.0
+                                brightness:0.8+(CGFloat)arc4random_uniform(64)/256.0
+                                     alpha:1.0];
+}
+
+- (void)refreshRandomColor {
+    [self generateRandomColors];
+    _progressLayer.strokeColor = _randomColor.CGColor;
+    _containerView.layer.shadowColor = _randomColor.CGColor;
+    _progressBar.backgroundColor = _innerRandomColor;
+    _dotView.backgroundColor = _dotRandomColor;
+}
 
 - (instancetype)initWithFrame:(CGRect)frame {
     self = [super initWithFrame:frame];
@@ -23,11 +50,7 @@
         self.isCancelled = NO;
         self.allowSuccessAnimation = NO;
 
-        // 随机颜色
-        CGFloat hue = (CGFloat)arc4random_uniform(256) / 256.0;
-        CGFloat saturation = 0.6 + (CGFloat)arc4random_uniform(128) / 256.0;
-        CGFloat brightness = 0.8 + (CGFloat)arc4random_uniform(64) / 256.0;
-        _randomColor = [UIColor colorWithHue:hue saturation:saturation brightness:brightness alpha:1.0];
+        [self generateRandomColors];
 
         // 透明液态玻璃 - 灵动岛胶囊样式
         CGFloat pillWidth = 200;
@@ -78,14 +101,14 @@
         _progressLayer.strokeEnd = 0;
         [_containerView.layer addSublayer:_progressLayer];
 
-        // 左边小绿点
+        // 左边小圆点
         CGFloat dotSize = 8;
         CGFloat dotX = 14;
         CGFloat dotY = (pillHeight - dotSize) / 2;
-        UIView *dot = [[UIView alloc] initWithFrame:CGRectMake(dotX, dotY, dotSize, dotSize)];
-        dot.backgroundColor = [UIColor colorWithRed:48/255.0 green:209/255.0 blue:151/255.0 alpha:1.0];
-        dot.layer.cornerRadius = dotSize / 2;
-        [_containerView addSubview:dot];
+        _dotView = [[UIView alloc] initWithFrame:CGRectMake(dotX, dotY, dotSize, dotSize)];
+        _dotView.backgroundColor = _dotRandomColor;
+        _dotView.layer.cornerRadius = dotSize / 2;
+        [_containerView addSubview:_dotView];
 
         // 中间百分比文字
         CGFloat labelX = dotX + dotSize + 10;
@@ -109,7 +132,7 @@
 
         // 进度条
         _progressBar = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 0, trackHeight)];
-        _progressBar.backgroundColor = [UIColor colorWithRed:48/255.0 green:209/255.0 blue:151/255.0 alpha:1.0];
+        _progressBar.backgroundColor = _innerRandomColor;
         _progressBar.layer.cornerRadius = trackHeight / 2;
         [_progressBarBackground addSubview:_progressBar];
 
