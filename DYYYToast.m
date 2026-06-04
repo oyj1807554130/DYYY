@@ -320,7 +320,11 @@
                                       duration:0.2
                                        options:UIViewAnimationOptionTransitionCrossDissolve
                                     animations:^{
-                                        self.percentLabel.text = @"✅ 下载完成";
+                                        if (self.totalCount > 0) {
+                                            self.percentLabel.text = [NSString stringWithFormat:@"✅ 下载完成（共%ld张）", (long)self.totalCount];
+                                        } else {
+                                            self.percentLabel.text = @"✅ 下载完成";
+                                        }
                                     }
                                     completion:^(BOOL finished) {
                                         // 打勾弹出动画

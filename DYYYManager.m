@@ -2063,6 +2063,7 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
     dispatch_async(dispatch_get_main_queue(), ^{
       CGRect screenBounds = [UIScreen mainScreen].bounds;
       DYYYToast *progressView = [[DYYYToast alloc] initWithFrame:screenBounds];
+      progressView.totalCount = livePhotos.count;  // 设置总张数
       [progressView show];
 
       progressView.cancelBlock = ^{
