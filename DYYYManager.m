@@ -2142,6 +2142,7 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                                                                         queue:localQueue
                                                                         group:localGroup
                                                                      complete:^(BOOL success, NSString *videoOutFile, NSError *error) {
+                                                                       if (success) {
                                                                        // 用真实的photoFile路径，不用completion返回的错误路径
                                                                        NSURL *photo = [NSURL fileURLWithPath:realPhotoFile];
                                                                        NSURL *video = [NSURL fileURLWithPath:videoOutFile];
