@@ -121,7 +121,7 @@
 
         // 百分比标签（白字+黑描边）
         CGFloat labelX = 34;
-        _percentLabel = [[UILabel alloc] initWithFrame:CGRectMake(labelX, 0, 90, pillHeight)];
+        _percentLabel = [[UILabel alloc] initWithFrame:CGRectMake(labelX, 0, 150, pillHeight)];
         _percentLabel.text = @"下载中 0%";
         _percentLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightMedium];
         _percentLabel.textAlignment = NSTextAlignmentLeft;
