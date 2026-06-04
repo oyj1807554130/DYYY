@@ -2192,8 +2192,10 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                                                                    float prog = (float)nextIndex / livePhotos.count;
                                                                    [progressView setProgress:prog];
 
-                                                                   // 处理下一张
-                                                                   processNext();
+                                                                   // 间隔0.5秒再处理下一张，避免iOS相册写入频率限制
+                                                                   dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                                                                     processNext();
+                                                                   });
                                                                  }];
                                                          } else {
                                                              // 视频元数据处理失败
