@@ -2017,17 +2017,30 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
 + (void)downloadAllLivePhotosWithProgress:(NSArray<NSDictionary *> *)livePhotos
                                  progress:(void (^)(NSInteger current, NSInteger total))progressBlock
                                completion:(void (^)(NSInteger successCount, NSInteger totalCount))completion {
-    if (livePhotos.count == 0) {
+    [self downloadAllLivePhotosWithProgress:livePhotos extraImageURLs:nil progress:progressBlock completion:completion];
+}
+
++ (void)downloadAllLivePhotosWithProgress:(NSArray<NSDictionary *> *)livePhotos
+                           extraImageURLs:(NSMutableArray *)extraImageURLs
+                                 progress:(void (^)(NSInteger current, NSInteger total))progressBlock
+                               completion:(void (^)(NSInteger successCount, NSInteger totalCount))completion {
+    NSInteger totalCount = livePhotos.count + (extraImageURLs ? extraImageURLs.count : 0);
+    if (totalCount == 0) {
         if (completion) {
             completion(0, 0);
         }
+        return;
+    }
+    if (livePhotos.count == 0 && extraImageURLs.count > 0) {
+        // 没有实况，只有普通图片，直接走图片下载
+        [self downloadAllImagesWithProgress:extraImageURLs progress:progressBlock completion:completion];
         return;
     }
 
     dispatch_async(dispatch_get_main_queue(), ^{
       CGRect screenBounds = [UIScreen mainScreen].bounds;
       DYYYToast *progressView = [[DYYYToast alloc] initWithFrame:screenBounds];
-      progressView.totalCount = livePhotos.count;
+      progressView.totalCount = totalCount;
       [progressView show];
 
       __block NSInteger successCount = 0;
@@ -2039,7 +2052,7 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
         progressView.allowSuccessAnimation = NO;
         [progressView dismiss];
         if (completion) {
-            completion(successCount, livePhotos.count);
+            completion(successCount, totalCount);
         }
       };
 
@@ -2049,11 +2062,68 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
       processNext = ^(void) {
         if (cancelled) return;
         if (nextIndex >= livePhotos.count) {
+            // 实况全部完成，检查是否有额外普通图片需要下载
+            if (extraImageURLs.count > 0) {
+                __block NSInteger imgIndex = 0;
+                __block void (^processNextImage)(void);
+                processNextImage = ^(void) {
+                    if (cancelled || imgIndex >= extraImageURLs.count) {
+                        // 全部完成（实况+普通图片）
+                        progressView.allowSuccessAnimation = (successCount == totalCount);
+                        [progressView dismiss];
+                        if (completion) {
+                            completion(successCount, totalCount);
+                        }
+                        return;
+                    }
+                    NSString *urlStr = extraImageURLs[imgIndex];
+                    imgIndex++;
+                    NSURL *imgURL = [NSURL URLWithString:urlStr];
+                    if (!imgURL) {
+                        processNextImage();
+                        return;
+                    }
+                    // 更新进度
+                    float currentProgress = (float)(livePhotos.count + imgIndex - 1) / totalCount;
+                    [progressView setProgress:currentProgress];
+                    [progressView refreshRandomColor];
+
+                    NSURLSessionConfiguration *config = [NSURLSessionConfiguration defaultSessionConfiguration];
+                    config.timeoutIntervalForRequest = 60.0;
+                    NSURLSession *session = [NSURLSession sessionWithConfiguration:config];
+                    NSURLSessionDataTask *task = [session dataTaskWithURL:imgURL completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
+                        [session invalidateAndCancel];
+                        if (!error && data) {
+                            [DYYYManager shared].authorInfoLocked = NO;
+                            [[PHPhotoLibrary sharedPhotoLibrary] performChanges:^{
+                                PHAssetCreationRequest *request = [PHAssetCreationRequest creationRequestForAsset];
+                                NSString *captionFilename = [DYYYManager sanitizeCaptionForFilename];
+                                PHAssetResourceCreationOptions *opts = [PHAssetResourceCreationOptions new];
+                                if (captionFilename) opts.originalFilename = [NSString stringWithFormat:@"%@.jpeg", captionFilename];
+                                [request addResourceWithType:PHAssetResourceTypePhoto data:data options:opts];
+                                @try { [request setValue:@"" forKey:@"localizedTitle"]; } @catch (NSException *e) {}
+                            } completionHandler:^(BOOL saved, NSError *saveError) {
+                                if (saved) successCount++;
+                                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                                    processNextImage();
+                                });
+                            }];
+                        } else {
+                            dispatch_async(dispatch_get_main_queue(), ^{
+                                processNextImage();
+                            });
+                        }
+                    }];
+                    [task resume];
+                };
+                processNextImage();
+                return;
+            }
             // 全部完成
-            progressView.allowSuccessAnimation = (successCount == livePhotos.count);
+            progressView.allowSuccessAnimation = (successCount == totalCount);
             [progressView dismiss];
             if (completion) {
-                completion(successCount, livePhotos.count);
+                completion(successCount, totalCount);
             }
             return;
         }
@@ -2071,7 +2141,7 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
         }
 
         // 更新进度
-        float currentProgress = (float)(nextIndex - 1) / livePhotos.count;
+        float currentProgress = (float)(nextIndex - 1) / totalCount;
         [progressView setProgress:currentProgress];
         [progressView refreshRandomColor];
 
@@ -2194,7 +2264,7 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                                                                    [fm removeItemAtPath:tmpPath error:nil];
 
                                                                    // 更新进度
-                                                                   float prog = (float)nextIndex / livePhotos.count;
+                                                                   float prog = (float)nextIndex / totalCount;
                                                                    [progressView setProgress:prog];
 
                                                                    // 间隔1.5秒再处理下一张，避免iOS相册写入频率限制

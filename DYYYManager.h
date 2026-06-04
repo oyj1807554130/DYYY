@@ -95,6 +95,10 @@
                                  progress:(void (^)(NSInteger current, NSInteger total))progressBlock
                                completion:(void (^)(NSInteger successCount, NSInteger totalCount))completion;
 
++ (void)downloadAllLivePhotosWithProgress:(NSArray<NSDictionary *> *)livePhotos
+                           extraImageURLs:(NSMutableArray *)extraImageURLs
+                                 progress:(void (^)(NSInteger current, NSInteger total))progressBlock
+                               completion:(void (^)(NSInteger successCount, NSInteger totalCount))completion;
 /**
  * 保存评论区图片（支持普通图片和实况照片）
  * @param imageModels 评论图片模型数组（AWECommentImageModel）

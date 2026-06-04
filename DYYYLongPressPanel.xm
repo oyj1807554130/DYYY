@@ -356,15 +356,12 @@
               }
           }
 
-          // 处理实况照片和普通图片
+          // 处理实况照片和普通图片（统一在同一个进度条内下载）
           if (livePhotos.count > 0) {
               [DYYYManager downloadAllLivePhotosWithProgress:livePhotos
+                                             extraImageURLs:imageURLs
                                                    progress:nil
                                                  completion:^(NSInteger successCount, NSInteger totalCount) {
-                                                     // 实况下载完成后再下载普通图片
-                                                     if (imageURLs.count > 0) {
-                                                         [DYYYManager downloadAllImages:imageURLs];
-                                                     }
                                                  }];
           } else if (imageURLs.count > 0) {
               [DYYYManager downloadAllImages:imageURLs];
@@ -1240,15 +1237,12 @@
               }
           }
 
-          // 处理实况照片和普通图片
+          // 处理实况照片和普通图片（统一在同一个进度条内下载）
           if (livePhotos.count > 0) {
               [DYYYManager downloadAllLivePhotosWithProgress:livePhotos
+                                             extraImageURLs:imageURLs
                                                    progress:nil
                                                  completion:^(NSInteger successCount, NSInteger totalCount) {
-                                                     // 实况下载完成后再下载普通图片
-                                                     if (imageURLs.count > 0) {
-                                                         [DYYYManager downloadAllImages:imageURLs];
-                                                     }
                                                  }];
           } else if (imageURLs.count > 0) {
               [DYYYManager downloadAllImages:imageURLs];
