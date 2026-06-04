@@ -870,20 +870,18 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
 
         BOOL downloadSucceeded = imageExists && videoExists;
         progressView.allowSuccessAnimation = downloadSucceeded;
-        [progressView dismiss];
+        progressView.totalCount = 1;  // 单张实况下载
 
         if (downloadSucceeded) {
             @try {
-                // 添加iOS版本检查
-                if (@available(iOS 15.0, *)) {
-                    [[DYYYManager shared] saveLivePhoto:imagePath videoUrl:videoPath];
-                }
+                [[DYYYManager shared] saveLivePhoto:imagePath videoUrl:videoPath];
             } @catch (NSException *exception) {
                 // 删除失败的文件
                 [[NSFileManager defaultManager] removeItemAtPath:imagePath error:nil];
                 [[NSFileManager defaultManager] removeItemAtPath:videoPath error:nil];
                 [manager.fileLinks removeObjectForKey:uniqueKey];
                 [DYYYUtils showToast:@"保存实况照片失败"];
+                downloadSucceeded = NO;
             }
         } else {
             // 清理不完整的文件
@@ -894,6 +892,8 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
             [manager.fileLinks removeObjectForKey:uniqueKey];
             [DYYYUtils showToast:@"下载实况照片失败"];
         }
+
+        [progressView dismiss];
 
         if (completion) {
             completion();
@@ -2019,22 +2019,6 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
         if (completion) {
             completion(0, 0);
         }
-        return;
-    }
-
-    // 检查iOS版本是否支持实况照片
-    BOOL supportsLivePhoto = NO;
-    if (@available(iOS 15.0, *)) {
-        supportsLivePhoto = YES;
-    }
-
-    if (!supportsLivePhoto) {
-        dispatch_async(dispatch_get_main_queue(), ^{
-          [DYYYUtils showToast:@"当前iOS版本不支持实况照片"];
-          if (completion) {
-              completion(0, livePhotos.count);
-          }
-        });
         return;
     }
 
