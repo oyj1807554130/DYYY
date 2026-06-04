@@ -300,7 +300,7 @@
     }
 
     // 保存所有图片/实况功能
-    if (enableSaveAllImages && self.awemeModel.awemeType == 68 && self.awemeModel.albumImages.count > 1) {
+    if (false && enableSaveAllImages && self.awemeModel.awemeType == 68 && self.awemeModel.albumImages.count > 1) {
         AWELongPressPanelBaseViewModel *allImagesViewModel = [[%c(AWELongPressPanelBaseViewModel) alloc] init];
         allImagesViewModel.awemeModel = self.awemeModel;
         allImagesViewModel.actionType = 670;
@@ -351,12 +351,10 @@
               }
           }
 
-          // 分别处理普通图片和实况照片
+          // 分别处理普通图片和实况照片 - 有实况时只保存实况，避免两个弹窗重叠
           if (livePhotos.count > 0) {
               [DYYYManager downloadAllLivePhotos:livePhotos];
-          }
-
-          if (imageURLs.count > 0) {
+          } else if (imageURLs.count > 0) {
               [DYYYManager downloadAllImages:imageURLs];
           }
 
@@ -1222,12 +1220,10 @@
               }
           }
 
-          // 分别处理普通图片和实况照片
+          // 分别处理普通图片和实况照片 - 有实况时只保存实况，避免两个弹窗重叠
           if (livePhotos.count > 0) {
               [DYYYManager downloadAllLivePhotos:livePhotos];
-          }
-
-          if (imageURLs.count > 0) {
+          } else if (imageURLs.count > 0) {
               [DYYYManager downloadAllImages:imageURLs];
           }
 
