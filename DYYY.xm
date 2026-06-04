@@ -6242,25 +6242,26 @@ static NSHashTable *processedParentViews = nil;
                                       }
 
                                       // 检查是否是实况照片
-                                      if (imageModel.clipVideo != nil) {
+                                      if (imageModel.clipVideo != nil && downloadURL != nil) {
                                           NSURL *videoURL = [imageModel.clipVideo.playURL getDYYYSrcURLDownload];
-                                          [livePhotos addObject:@{@"imageURL" : downloadURL.absoluteString, @"videoURL" : videoURL.absoluteString}];
-                                      } else {
+                                          if (videoURL) {
+                                              [livePhotos addObject:@{@"imageURL" : downloadURL.absoluteString, @"videoURL" : videoURL.absoluteString}];
+                                          } else {
+                                              // 视频URL获取失败，降级当普通图片保存
+                                              [imageURLs addObject:downloadURL.absoluteString];
+                                          }
+                                      } else if (downloadURL != nil) {
                                           [imageURLs addObject:downloadURL.absoluteString];
                                       }
                                   }
                               }
 
-                              // 分别处理普通图片和实况照片
+                              // 处理实况照片和普通图片
                               if (livePhotos.count > 0) {
                                   [DYYYManager downloadAllLivePhotos:livePhotos];
-                              }
-
-                              if (imageURLs.count > 0) {
+                              } else if (imageURLs.count > 0) {
                                   [DYYYManager downloadAllImages:imageURLs];
-                              }
-
-                              if (livePhotos.count == 0 && imageURLs.count == 0) {
+                              } else {
                                   [DYYYUtils showToast:@"没有找到合适格式的图片"];
                               }
                             }];
