@@ -1555,6 +1555,9 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
         [self.taskProgressMap removeObjectForKey:downloadIDForTask];
         [self.mediaTypeMap removeObjectForKey:downloadIDForTask];
         [self.downloadToBatchMap removeObjectForKey:downloadIDForTask];
+
+        // 串行下载：当前这张下载失败，也启动下一张
+        [self startNextSerialImageForBatch:batchID];
     } else {
         // 单个下载错误处理
         void (^completionBlock)(BOOL success, NSURL *fileURL) = self.completionBlocks[downloadIDForTask];
