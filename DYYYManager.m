@@ -2132,6 +2132,8 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                         NSString *videoFile = [[DYYYManager shared] filePathFromTmp:videoName];
 
                         // 使用本地变量而非全局共享变量
+                        // 保存真实的photoFile路径，completion里用这个而不是addMetadataToVideoWithLocalVars返回的
+                        NSString *realPhotoFile = photoFile;
                         [[DYYYManager shared] addMetadataToVideoWithLocalVars:[NSURL fileURLWithPath:videoPath]
                                                                    outputFile:videoFile
                                                                    identifier:identifier
@@ -2139,10 +2141,10 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                                                                        writer:&localWriter
                                                                         queue:localQueue
                                                                         group:localGroup
-                                                                     complete:^(BOOL success, NSString *photoFile, NSString *videoFile, NSError *error) {
-                                                                       if (success) {
-                                                                           NSURL *photo = [NSURL fileURLWithPath:photoFile];
-                                                                           NSURL *video = [NSURL fileURLWithPath:videoFile];
+                                                                     complete:^(BOOL success, NSString *videoOutFile, NSError *error) {
+                                                                       // 用真实的photoFile路径，不用completion返回的错误路径
+                                                                       NSURL *photo = [NSURL fileURLWithPath:realPhotoFile];
+                                                                       NSURL *video = [NSURL fileURLWithPath:videoOutFile];
 
                                                                            [[PHPhotoLibrary sharedPhotoLibrary]
                                                                                performChanges:^{
@@ -2161,7 +2163,7 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                                                                                      successCount++;
                                                                                  }
 
-                                                                                 NSArray *filesToDelete = @[ imagePath, videoPath, photoFile, videoFile ];
+                                                                                 NSArray *filesToDelete = @[ imagePath, videoPath, realPhotoFile, videoOutFile ];
                                                                                  for (NSString *path in filesToDelete) {
                                                                                      [fileManager removeItemAtPath:path error:nil];
                                                                                  }
@@ -2176,10 +2178,10 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                                                                        } else {
                                                                            [fileManager removeItemAtPath:imagePath error:nil];
                                                                            [fileManager removeItemAtPath:videoPath error:nil];
-                                                                           if (photoFile)
-                                                                               [fileManager removeItemAtPath:photoFile error:nil];
-                                                                           if (videoFile)
-                                                                               [fileManager removeItemAtPath:videoFile error:nil];
+                                                                           if (realPhotoFile)
+                                                                               [fileManager removeItemAtPath:realPhotoFile error:nil];
+                                                                           if (videoOutFile)
+                                                                               [fileManager removeItemAtPath:videoOutFile error:nil];
 
                                                                            // 增加进度步数（即使失败也增加）
                                                                            processedCount++;
@@ -2348,13 +2350,13 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                                  writer:(AVAssetWriter **)writerPtr
                                   queue:(dispatch_queue_t)queue
                                   group:(dispatch_group_t)group
-                               complete:(void (^)(BOOL success, NSString *photoFile, NSString *videoFile, NSError *error))complete {
+                               complete:(void (^)(BOOL success, NSString *videoOutFile, NSError *error))complete {
     NSError *error = nil;
     AVAsset *asset = [AVAsset assetWithURL:videoURL];
     AVAssetReader *reader = [AVAssetReader assetReaderWithAsset:asset error:&error];
     if (error || !reader) {
         if (complete)
-            complete(NO, nil, nil, error);
+            complete(NO, nil, error);
         return;
     }
 
@@ -2369,7 +2371,7 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
     AVAssetWriter *writer = [AVAssetWriter assetWriterWithURL:videoFileURL fileType:AVFileTypeQuickTimeMovie error:&error];
     if (error || !writer) {
         if (complete)
-            complete(NO, nil, nil, error);
+            complete(NO, nil, error);
         return;
     }
 
@@ -2419,13 +2421,11 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
       [writer finishWritingWithCompletionHandler:^{
         AVAssetWriterStatus status = writer.status;
         if (status == AVAssetWriterStatusCompleted) {
-            NSString *photoName = [[videoURL lastPathComponent] stringByDeletingPathExtension];
-            NSString *photoFile = [self filePathFromTmp:[photoName stringByAppendingPathExtension:@"heic"]];
             if (complete)
-                complete(YES, photoFile, outputFile, nil);
+                complete(YES, outputFile, nil);
         } else {
             if (complete)
-                complete(NO, nil, nil, writer.error);
+                complete(NO, nil, writer.error);
         }
       }];
     });
