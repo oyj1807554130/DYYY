@@ -2044,9 +2044,9 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
       };
 
       // 串行下载：一张一张处理，和普通图片批量下载同样的逻辑
-      __block void (^processNext)(void) = nil;
-
-      void (^doProcessNext)(void) = ^(void) {
+      // 使用 __block 递归 block 模式，block 内部通过 __block 变量引用自身
+      __block void (^processNext)(void);
+      processNext = ^(void) {
         if (cancelled) return;
         if (nextIndex >= livePhotos.count) {
             // 全部完成
@@ -2066,7 +2066,7 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
 
         if (!imageURL || !videoURL) {
             // URL无效，跳过
-            doProcessNext();
+            processNext();
             return;
         }
 
@@ -2122,7 +2122,7 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
           if (!imageOK || !videoOK) {
               // 下载失败，清理并处理下一张
               [fm removeItemAtPath:tmpPath error:nil];
-              doProcessNext();
+              processNext();
               return;
           }
 
@@ -2138,7 +2138,7 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
           // 检查照片文件是否生成成功
           if (![fm fileExistsAtPath:photoFile]) {
               [fm removeItemAtPath:tmpPath error:nil];
-              doProcessNext();
+              processNext();
               return;
           }
 
@@ -2193,7 +2193,7 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                                                                    [progressView setProgress:prog];
 
                                                                    // 处理下一张
-                                                                   doProcessNext();
+                                                                   processNext();
                                                                  }];
                                                          } else {
                                                              // 视频元数据处理失败
@@ -2202,14 +2202,13 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                                                              if (realPhotoFile) [fm removeItemAtPath:realPhotoFile error:nil];
                                                              if (videoOutFile) [fm removeItemAtPath:videoOutFile error:nil];
                                                              [fm removeItemAtPath:tmpPath error:nil];
-                                                             doProcessNext();
+                                                             processNext();
                                                          }
                                                        }];
         });
       };
 
-      processNext = doProcessNext;
-      doProcessNext();
+      processNext();
     });
 }
 
