@@ -894,6 +894,11 @@
 // 经典风格长按面板
 %hook AWELongPressPanelTableViewController
 - (NSArray *)dataArray {
+    // 如果self实际是Modern类的实例，跳过Old hook，让Modern hook独立处理
+    // 避免两个hook同时执行导致按钮重复/下载两次
+    if ([self isKindOfClass:%c(AWEModernLongPressPanelTableViewController)]) {
+        return %orig;
+    }
     NSArray *originalArray = %orig;
     if (!originalArray) {
         originalArray = @[];
