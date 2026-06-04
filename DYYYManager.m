@@ -1821,15 +1821,28 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
 }
 
 - (void)addMetadataToPhoto:(NSURL *)photoURL outputFile:(NSString *)outputFile identifier:(NSString *)identifier {
-    // 先直接复制原始文件，确保图片能保存
-    NSError *error = nil;
-    if ([[NSFileManager defaultManager] fileExistsAtPath:outputFile]) {
-        [[NSFileManager defaultManager] removeItemAtPath:outputFile error:nil];
+    NSData *rawData = [NSData dataWithContentsOfURL:photoURL];
+    if (!rawData || rawData.length == 0) {
+        NSLog(@"[DYYY-LivePhoto] addMetadataToPhoto: photo data is nil or empty");
+        [[NSFileManager defaultManager] copyItemAtURL:photoURL toURL:[NSURL fileURLWithPath:outputFile] error:nil];
+        return;
     }
-    BOOL copied = [[NSFileManager defaultManager] copyItemAtURL:photoURL toURL:[NSURL fileURLWithPath:outputFile] error:&error];
-    if (!copied) {
-        NSLog(@"[DYYY-LivePhoto] copy file failed: %@", error);
+    NSMutableData *data = rawData.mutableCopy;
+    UIImage *image = [UIImage imageWithData:data];
+    if (!image || !image.CGImage) {
+        NSLog(@"[DYYY-LivePhoto] addMetadataToPhoto: cannot create image from data");
+        [data writeToFile:outputFile atomically:YES];
+        return;
     }
+    CGImageRef imageRef = image.CGImage;
+    NSDictionary *imageMetadata = @{(NSString *)kCGImagePropertyMakerAppleDictionary : @{@"17" : identifier}};
+    CGImageDestinationRef dest = CGImageDestinationCreateWithData((CFMutableDataRef)data, kUTTypeJPEG, 1, nil);
+    if (dest) {
+        CGImageDestinationAddImage(dest, imageRef, (CFDictionaryRef)imageMetadata);
+        CGImageDestinationFinalize(dest);
+        CFRelease(dest);
+    }
+    [data writeToFile:outputFile atomically:YES];
 }
 
 - (AVMetadataItem *)createContentIdentifierMetadataItem:(NSString *)identifier {
