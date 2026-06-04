@@ -2098,6 +2098,7 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
             if (!error && data && [data writeToFile:imagePath atomically:YES]) {
                 imageOK = YES;
             }
+            [session invalidateAndCancel];
             dispatch_group_leave(downloadGroup);
         }];
         [imgTask resume];
@@ -2108,6 +2109,7 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
             if (!error && data && [data writeToFile:videoPath atomically:YES]) {
                 videoOK = YES;
             }
+            [session2 invalidateAndCancel];
             dispatch_group_leave(downloadGroup);
         }];
         [vidTask resume];
@@ -2152,6 +2154,7 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
           dispatch_group_t localGroup = dispatch_group_create();
 
           NSString *realPhotoFile = photoFile;
+          __block BOOL videoCompleteCalled = NO;
           [[DYYYManager shared] addMetadataToVideoWithLocalVars:[NSURL fileURLWithPath:videoPath]
                                                      outputFile:videoFile
                                                      identifier:identifier
@@ -2160,6 +2163,8 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                                                           queue:localQueue
                                                           group:localGroup
                                                        complete:^(BOOL success, NSString *videoOutFile, NSError *error) {
+                                                         if (videoCompleteCalled) return; // 防止超时和正常回调重复调用
+                                                         videoCompleteCalled = YES;
                                                          if (success && videoOutFile) {
                                                              NSURL *photo = [NSURL fileURLWithPath:realPhotoFile];
                                                              NSURL *video = [NSURL fileURLWithPath:videoOutFile];
@@ -2192,8 +2197,8 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                                                                    float prog = (float)nextIndex / livePhotos.count;
                                                                    [progressView setProgress:prog];
 
-                                                                   // 间隔0.5秒再处理下一张，避免iOS相册写入频率限制
-                                                                   dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                                                                   // 间隔1.5秒再处理下一张，避免iOS相册写入频率限制
+                                                                   dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
                                                                      processNext();
                                                                    });
                                                                  }];
@@ -2207,6 +2212,18 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                                                              processNext();
                                                          }
                                                        }];
+          // 超时保底：如果30秒内addMetadataToVideoWithLocalVars未回调，跳过当前张继续下一张
+          dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(30.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            if (!videoCompleteCalled) {
+                videoCompleteCalled = YES;
+                NSLog(@"[DYYY] ⚠️ addMetadataToVideoWithLocalVars超时，跳过第%ld张", (long)nextIndex);
+                [fm removeItemAtPath:imagePath error:nil];
+                [fm removeItemAtPath:videoPath error:nil];
+                if (realPhotoFile) [fm removeItemAtPath:realPhotoFile error:nil];
+                [fm removeItemAtPath:tmpPath error:nil];
+                processNext();
+            }
+          });
         });
       };
 

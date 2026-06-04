@@ -220,7 +220,7 @@
 
 
     // 当前图片/实况下载功能
-    if (enableSaveCurrentImage && self.awemeModel.awemeType == 68 && self.awemeModel.albumImages.count > 0) {
+    if (enableSaveCurrentImage && (self.awemeModel.awemeType == 68 || self.awemeModel.albumImages.count > 0) && self.awemeModel.albumImages.count > 0) {
         AWELongPressPanelBaseViewModel *imageViewModel = [[%c(AWELongPressPanelBaseViewModel) alloc] init];
         imageViewModel.awemeModel = self.awemeModel;
         imageViewModel.actionType = 669;
@@ -300,7 +300,7 @@
     }
 
     // 保存所有图片/实况功能
-    if (false && enableSaveAllImages && self.awemeModel.awemeType == 68 && self.awemeModel.albumImages.count > 1) {
+    if (enableSaveAllImages && (self.awemeModel.awemeType == 68 || self.awemeModel.albumImages.count > 0) && self.awemeModel.albumImages.count > 1) {
         AWELongPressPanelBaseViewModel *allImagesViewModel = [[%c(AWELongPressPanelBaseViewModel) alloc] init];
         allImagesViewModel.awemeModel = self.awemeModel;
         allImagesViewModel.actionType = 670;
@@ -342,23 +342,33 @@
                   }
 
                   // 检查是否是实况照片
-                  if (imageModel.clipVideo != nil) {
+                  if (imageModel.clipVideo != nil && downloadURL != nil) {
                       NSURL *videoURL = [imageModel.clipVideo.playURL getDYYYSrcURLDownload];
-                      [livePhotos addObject:@{@"imageURL" : downloadURL.absoluteString, @"videoURL" : videoURL.absoluteString}];
-                  } else {
+                      if (videoURL) {
+                          [livePhotos addObject:@{@"imageURL" : downloadURL.absoluteString, @"videoURL" : videoURL.absoluteString}];
+                      } else {
+                          // 视频URL获取失败，降级当普通图片保存
+                          [imageURLs addObject:downloadURL.absoluteString];
+                      }
+                  } else if (downloadURL != nil) {
                       [imageURLs addObject:downloadURL.absoluteString];
                   }
               }
           }
 
-          // 分别处理普通图片和实况照片 - 有实况时只保存实况，避免两个弹窗重叠
+          // 处理实况照片和普通图片
           if (livePhotos.count > 0) {
-              [DYYYManager downloadAllLivePhotos:livePhotos];
+              [DYYYManager downloadAllLivePhotosWithProgress:livePhotos
+                                                   progress:nil
+                                                 completion:^(NSInteger successCount, NSInteger totalCount) {
+                                                     // 实况下载完成后再下载普通图片
+                                                     if (imageURLs.count > 0) {
+                                                         [DYYYManager downloadAllImages:imageURLs];
+                                                     }
+                                                 }];
           } else if (imageURLs.count > 0) {
               [DYYYManager downloadAllImages:imageURLs];
-          }
-
-          if (livePhotos.count == 0 && imageURLs.count == 0) {
+          } else {
               [DYYYUtils showToast:@"没有找到合适格式的图片"];
           }
 
@@ -1088,7 +1098,7 @@
 
 
     // 当前图片/实况下载功能
-    if (enableSaveCurrentImage && self.awemeModel.awemeType == 68 && self.awemeModel.albumImages.count > 0) {
+    if (enableSaveCurrentImage && (self.awemeModel.awemeType == 68 || self.awemeModel.albumImages.count > 0) && self.awemeModel.albumImages.count > 0) {
         AWELongPressPanelBaseViewModel *imageViewModel = [[%c(AWELongPressPanelBaseViewModel) alloc] init];
         imageViewModel.awemeModel = self.awemeModel;
         imageViewModel.actionType = 669;
@@ -1169,7 +1179,7 @@
     }
 
     // 保存所有图片/实况功能
-    if (enableSaveAllImages && self.awemeModel.awemeType == 68 && self.awemeModel.albumImages.count > 1) {
+    if (enableSaveAllImages && (self.awemeModel.awemeType == 68 || self.awemeModel.albumImages.count > 0) && self.awemeModel.albumImages.count > 1) {
         AWELongPressPanelBaseViewModel *allImagesViewModel = [[%c(AWELongPressPanelBaseViewModel) alloc] init];
         allImagesViewModel.awemeModel = self.awemeModel;
         allImagesViewModel.actionType = 670;
@@ -1211,23 +1221,33 @@
                   }
 
                   // 检查是否是实况照片
-                  if (imageModel.clipVideo != nil) {
+                  if (imageModel.clipVideo != nil && downloadURL != nil) {
                       NSURL *videoURL = [imageModel.clipVideo.playURL getDYYYSrcURLDownload];
-                      [livePhotos addObject:@{@"imageURL" : downloadURL.absoluteString, @"videoURL" : videoURL.absoluteString}];
-                  } else {
+                      if (videoURL) {
+                          [livePhotos addObject:@{@"imageURL" : downloadURL.absoluteString, @"videoURL" : videoURL.absoluteString}];
+                      } else {
+                          // 视频URL获取失败，降级当普通图片保存
+                          [imageURLs addObject:downloadURL.absoluteString];
+                      }
+                  } else if (downloadURL != nil) {
                       [imageURLs addObject:downloadURL.absoluteString];
                   }
               }
           }
 
-          // 分别处理普通图片和实况照片 - 有实况时只保存实况，避免两个弹窗重叠
+          // 处理实况照片和普通图片
           if (livePhotos.count > 0) {
-              [DYYYManager downloadAllLivePhotos:livePhotos];
+              [DYYYManager downloadAllLivePhotosWithProgress:livePhotos
+                                                   progress:nil
+                                                 completion:^(NSInteger successCount, NSInteger totalCount) {
+                                                     // 实况下载完成后再下载普通图片
+                                                     if (imageURLs.count > 0) {
+                                                         [DYYYManager downloadAllImages:imageURLs];
+                                                     }
+                                                 }];
           } else if (imageURLs.count > 0) {
               [DYYYManager downloadAllImages:imageURLs];
-          }
-
-          if (livePhotos.count == 0 && imageURLs.count == 0) {
+          } else {
               [DYYYUtils showToast:@"没有找到合适格式的图片"];
           }
 
