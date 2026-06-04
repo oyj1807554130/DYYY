@@ -6258,7 +6258,14 @@ static NSHashTable *processedParentViews = nil;
 
                               // 处理实况照片和普通图片
                               if (livePhotos.count > 0) {
-                                  [DYYYManager downloadAllLivePhotos:livePhotos];
+                                  [DYYYManager downloadAllLivePhotosWithProgress:livePhotos
+                                                                       progress:nil
+                                                                     completion:^(NSInteger successCount, NSInteger totalCount) {
+                                                                       // 实况下载完成后再下载普通图片
+                                                                       if (imageURLs.count > 0) {
+                                                                           [DYYYManager downloadAllImages:imageURLs];
+                                                                       }
+                                                                     }];
                               } else if (imageURLs.count > 0) {
                                   [DYYYManager downloadAllImages:imageURLs];
                               } else {
