@@ -6216,8 +6216,11 @@ static NSHashTable *processedParentViews = nil;
                         }];
             [actions addObject:downloadAction];
 
-            // 如果是图集，添加下载所有图片选项（放宽条件：不依赖awemeType==68，只要有albumImages就行）
-            if (awemeModel.albumImages.count > 1) {
+            // 如果是图集，添加下载所有图片选项
+            // 兼容iOS 26：albumImages可能为空，也检查isLivePhoto和animatedImageVideoInfo
+            NSInteger albumCount = awemeModel.albumImages.count;
+            BOOL isLivePhotoAlbum = (awemeModel.isLivePhoto || awemeModel.animatedImageVideoInfo != nil);
+            if (albumCount > 1 || (isImageContent && albumCount > 0) || (isLivePhotoAlbum && albumCount > 0)) {
                 // 检查是否有实况照片
                 BOOL hasLivePhoto = NO;
                 for (AWEImageAlbumImageModel *imageModel in awemeModel.albumImages) {
