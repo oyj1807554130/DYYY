@@ -1821,38 +1821,32 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
 }
 
 - (void)addMetadataToPhoto:(NSURL *)photoURL outputFile:(NSString *)outputFile identifier:(NSString *)identifier {
-    NSData *rawData = [NSData dataWithContentsOfURL:photoURL];
-    if (!rawData || rawData.length == 0) {
-        NSLog(@"[DYYY-LivePhoto] addMetadataToPhoto: photo data is nil or empty");
+    CGImageSourceRef source = CGImageSourceCreateWithURL((CFURLRef)photoURL, NULL);
+    if (!source) {
+        NSLog(@"[DYYY-LivePhoto] addMetadataToPhoto: cannot create image source");
         [[NSFileManager defaultManager] copyItemAtURL:photoURL toURL:[NSURL fileURLWithPath:outputFile] error:nil];
         return;
     }
-    UIImage *image = [UIImage imageWithData:rawData];
-    if (!image || !image.CGImage) {
-        NSLog(@"[DYYY-LivePhoto] addMetadataToPhoto: cannot create image from data");
-        [rawData writeToFile:outputFile atomically:YES];
-        return;
-    }
-    CGImageRef imageRef = image.CGImage;
+    
+    CFDictionaryRef props = CGImageSourceCopyPropertiesAtIndex(source, 0, NULL);
+    NSMutableDictionary *mutableProps = [(__bridge NSDictionary *)props mutableCopy];
     NSDictionary *imageMetadata = @{(NSString *)kCGImagePropertyMakerAppleDictionary : @{@"17" : identifier}};
+    [mutableProps addEntriesFromDictionary:imageMetadata];
     
-    // 检测文件格式，HEIC格式直接复制原始文件，不重新编码
-    NSString *fileFormat = [DYYYUtils detectFileFormat:photoURL];
-    if ([fileFormat isEqualToString:@"heic"] || [fileFormat isEqualToString:@"heif"]) {
-        // HEIC格式直接复制原始文件，不重新编码，避免损坏
-        [[NSFileManager defaultManager] copyItemAtURL:photoURL toURL:[NSURL fileURLWithPath:outputFile] error:nil];
-        return;
-    }
-    
-    // JPEG格式添加元数据
-    NSMutableData *data = [NSMutableData data];
-    CGImageDestinationRef dest = CGImageDestinationCreateWithData((CFMutableDataRef)data, kUTTypeJPEG, 1, nil);
+    CGImageDestinationRef dest = CGImageDestinationCreateWithURL((CFURLRef)[NSURL fileURLWithPath:outputFile], CGImageSourceGetType(source), 1, NULL);
     if (dest) {
-        CGImageDestinationAddImage(dest, imageRef, (CFDictionaryRef)imageMetadata);
+        CGImageDestinationAddImageFromSource(dest, source, 0, (CFDictionaryRef)mutableProps);
         CGImageDestinationFinalize(dest);
         CFRelease(dest);
+    } else {
+        NSLog(@"[DYYY-LivePhoto] addMetadataToPhoto: cannot create image destination");
+        [[NSFileManager defaultManager] copyItemAtURL:photoURL toURL:[NSURL fileURLWithPath:outputFile] error:nil];
     }
-    [data writeToFile:outputFile atomically:YES];
+    
+    if (props) {
+        CFRelease(props);
+    }
+    CFRelease(source);
 }
 
 - (AVMetadataItem *)createContentIdentifierMetadataItem:(NSString *)identifier {
