@@ -1636,9 +1636,6 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
 - (void)saveLivePhoto:(NSString *)imageSourcePath videoUrl:(NSString *)videoSourcePath {
     // 串行化保存操作，防止多个实况照片并发保存时 reader/writer/group 被覆盖导致闪退
     dispatch_async(self.livePhotoSaveQueue, ^{
-      // 首先检查iOS版本
-      if (@available(iOS 15.0, *)) {
-        // iOS 15及更高版本使用原有的实现
         NSURL *photoURL = [NSURL fileURLWithPath:imageSourcePath];
         NSURL *videoURL = [NSURL fileURLWithPath:videoSourcePath];
         BOOL available = [PHAssetCreationRequest supportsAssetResourceTypes:@[ @(PHAssetResourceTypePhoto), @(PHAssetResourceTypePairedVideo) ]];
@@ -1659,7 +1656,6 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                         [[PHPhotoLibrary sharedPhotoLibrary]
                             performChanges:^{
                               PHAssetCreationRequest *request = [PHAssetCreationRequest creationRequestForAsset];
-                              // Set originalFilename via PHAssetResourceCreationOptions so iOS populates "添加说明"
                               NSString *captionFilename = [DYYYManager sanitizeCaptionForFilename];
                               PHAssetResourceCreationOptions *photoOptions = [PHAssetResourceCreationOptions new];
                               if (captionFilename) photoOptions.originalFilename = [NSString stringWithFormat:@"%@.heic", captionFilename];
@@ -1667,30 +1663,21 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                               if (captionFilename) videoOptions.originalFilename = [NSString stringWithFormat:@"%@.mp4", captionFilename];
                               [request addResourceWithType:PHAssetResourceTypePhoto fileURL:photo options:photoOptions];
                               [request addResourceWithType:PHAssetResourceTypePairedVideo fileURL:video options:videoOptions];
-                              // Set localizedTitle to empty so caption doesn't appear in title area
                               @try { [request setValue:@"" forKey:@"localizedTitle"]; } @catch (NSException *e) {}
                             }
                             completionHandler:^(BOOL success, NSError *_Nullable error) {
                               dispatch_async(dispatch_get_main_queue(), ^{
                                 if (success) {
-                                    // 删除临时文件
                                     [[NSFileManager defaultManager] removeItemAtPath:imageSourcePath error:nil];
                                     [[NSFileManager defaultManager] removeItemAtPath:videoSourcePath error:nil];
                                     [[NSFileManager defaultManager] removeItemAtPath:photoFile error:nil];
                                     [[NSFileManager defaultManager] removeItemAtPath:videoFile error:nil];
-                                    
-                                    // Caption for live photos: write caption via KVC after save
                                     [DYYYManager writeCaptionToLatestAsset];
                                 }
                               });
                             }];
                       }];
         }];
-    } else {
-        dispatch_async(dispatch_get_main_queue(), ^{
-          [DYYYUtils showToast:@"当前iOS版本不支持实况照片，将分别保存图片和视频"];
-        });
-    }
     }); // livePhotoSaveQueue
 }
 
