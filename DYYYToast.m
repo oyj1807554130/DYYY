@@ -315,6 +315,16 @@
             [UIView animateWithDuration:0.15
                 animations:^{
                     self.progressLayer.opacity = 0;
+                    // 隐藏进度条相关元素
+                    self.dotView.hidden = YES;
+                    self.progressBarBackground.hidden = YES;
+                    self.progressBar.hidden = YES;
+                    // 让percentLabel撑满剩余空间，居中显示
+                    CGRect labelFrame = self.percentLabel.frame;
+                    labelFrame.origin.x = 20;
+                    labelFrame.size.width = self.containerView.bounds.size.width - 40;
+                    self.percentLabel.frame = labelFrame;
+                    self.percentLabel.textAlignment = NSTextAlignmentCenter;
 
                     [UIView transitionWithView:self.percentLabel
                                       duration:0.2
