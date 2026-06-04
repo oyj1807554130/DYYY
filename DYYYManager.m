@@ -1821,32 +1821,15 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
 }
 
 - (void)addMetadataToPhoto:(NSURL *)photoURL outputFile:(NSString *)outputFile identifier:(NSString *)identifier {
-    CGImageSourceRef source = CGImageSourceCreateWithURL((CFURLRef)photoURL, NULL);
-    if (!source) {
-        NSLog(@"[DYYY-LivePhoto] addMetadataToPhoto: cannot create image source");
-        [[NSFileManager defaultManager] copyItemAtURL:photoURL toURL:[NSURL fileURLWithPath:outputFile] error:nil];
-        return;
+    // 先直接复制原始文件，确保图片能保存
+    NSError *error = nil;
+    if ([[NSFileManager defaultManager] fileExistsAtPath:outputFile]) {
+        [[NSFileManager defaultManager] removeItemAtPath:outputFile error:nil];
     }
-    
-    CFDictionaryRef props = CGImageSourceCopyPropertiesAtIndex(source, 0, NULL);
-    NSMutableDictionary *mutableProps = [(__bridge NSDictionary *)props mutableCopy];
-    NSDictionary *imageMetadata = @{(NSString *)kCGImagePropertyMakerAppleDictionary : @{@"17" : identifier}};
-    [mutableProps addEntriesFromDictionary:imageMetadata];
-    
-    CGImageDestinationRef dest = CGImageDestinationCreateWithURL((CFURLRef)[NSURL fileURLWithPath:outputFile], CGImageSourceGetType(source), 1, NULL);
-    if (dest) {
-        CGImageDestinationAddImageFromSource(dest, source, 0, (CFDictionaryRef)mutableProps);
-        CGImageDestinationFinalize(dest);
-        CFRelease(dest);
-    } else {
-        NSLog(@"[DYYY-LivePhoto] addMetadataToPhoto: cannot create image destination");
-        [[NSFileManager defaultManager] copyItemAtURL:photoURL toURL:[NSURL fileURLWithPath:outputFile] error:nil];
+    BOOL copied = [[NSFileManager defaultManager] copyItemAtURL:photoURL toURL:[NSURL fileURLWithPath:outputFile] error:&error];
+    if (!copied) {
+        NSLog(@"[DYYY-LivePhoto] copy file failed: %@", error);
     }
-    
-    if (props) {
-        CFRelease(props);
-    }
-    CFRelease(source);
 }
 
 - (AVMetadataItem *)createContentIdentifierMetadataItem:(NSString *)identifier {
