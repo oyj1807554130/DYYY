@@ -6092,6 +6092,18 @@ static NSHashTable *processedParentViews = nil;
             audioURL = [NSURL URLWithString:musicModel.playURL.originURLList.firstObject];
         }
 
+        // 调试：打印awemeModel关键属性，排查iOS 26上图集识别问题
+        {
+            NSInteger awemeType = awemeModel.awemeType;
+            NSInteger albumCount = awemeModel.albumImages.count;
+            NSLog(@"[DYYY-DEBUG] awemeType=%ld, albumImages.count=%ld, isLivePhoto=%d, animatedImageVideoInfo=%@", 
+                  (long)awemeType, (long)albumCount, awemeModel.isLivePhoto, awemeModel.animatedImageVideoInfo);
+            // 尝试用KVC获取可能的替代属性
+            @try { id imgArr = [awemeModel valueForKey:@"images"]; NSLog(@"[DYYY-DEBUG] images=%@", imgArr); } @catch(NSException *e) {}
+            @try { id imgArr = [awemeModel valueForKey:@"imageList"]; NSLog(@"[DYYY-DEBUG] imageList=%@", imgArr); } @catch(NSException *e) {}
+            @try { id imgArr = [awemeModel valueForKey:@"photoImages"]; NSLog(@"[DYYY-DEBUG] photoImages=%@", imgArr); } @catch(NSException *e) {}
+        }
+
         // 确定内容类型（视频或图片）— 兼容iOS 26：awemeType可能不再是68，用albumImages判断
         BOOL isImageContent = (awemeModel.awemeType == 68 || awemeModel.albumImages.count > 0);
         // 判断是否为新版实况照片
