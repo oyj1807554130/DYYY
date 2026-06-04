@@ -6092,8 +6092,8 @@ static NSHashTable *processedParentViews = nil;
             audioURL = [NSURL URLWithString:musicModel.playURL.originURLList.firstObject];
         }
 
-        // 确定内容类型（视频或图片）
-        BOOL isImageContent = (awemeModel.awemeType == 68);
+        // 确定内容类型（视频或图片）— 兼容iOS 26：awemeType可能不再是68，用albumImages判断
+        BOOL isImageContent = (awemeModel.awemeType == 68 || awemeModel.albumImages.count > 0);
         // 判断是否为新版实况照片
         BOOL isNewLivePhoto = (awemeModel.video && awemeModel.animatedImageVideoInfo != nil);
         NSString *downloadTitle;
@@ -6204,8 +6204,8 @@ static NSHashTable *processedParentViews = nil;
                         }];
             [actions addObject:downloadAction];
 
-            // 如果是图集，添加下载所有图片选项
-            if (isImageContent && awemeModel.albumImages.count > 1) {
+            // 如果是图集，添加下载所有图片选项（放宽条件：不依赖awemeType==68，只要有albumImages就行）
+            if (awemeModel.albumImages.count > 1) {
                 // 检查是否有实况照片
                 BOOL hasLivePhoto = NO;
                 for (AWEImageAlbumImageModel *imageModel in awemeModel.albumImages) {
