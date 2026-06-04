@@ -1836,7 +1836,15 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
     }
     CGImageRef imageRef = image.CGImage;
     NSDictionary *imageMetadata = @{(NSString *)kCGImagePropertyMakerAppleDictionary : @{@"17" : identifier}};
-    CGImageDestinationRef dest = CGImageDestinationCreateWithData((CFMutableDataRef)data, kUTTypeJPEG, 1, nil);
+    
+    // 检测文件格式，HEIC格式用public.heic，否则用kUTTypeJPEG
+    NSString *fileFormat = [DYYYUtils detectFileFormat:photoURL];
+    CFStringRef utType = kUTTypeJPEG;
+    if ([fileFormat isEqualToString:@"heic"] || [fileFormat isEqualToString:@"heif"]) {
+        utType = CFSTR("public.heic");
+    }
+    
+    CGImageDestinationRef dest = CGImageDestinationCreateWithData((CFMutableDataRef)data, utType, 1, nil);
     if (dest) {
         CGImageDestinationAddImage(dest, imageRef, (CFDictionaryRef)imageMetadata);
         CGImageDestinationFinalize(dest);
