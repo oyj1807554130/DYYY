@@ -1658,7 +1658,7 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                               PHAssetCreationRequest *request = [PHAssetCreationRequest creationRequestForAsset];
                               NSString *captionFilename = [DYYYManager sanitizeCaptionForFilename];
                               PHAssetResourceCreationOptions *photoOptions = [PHAssetResourceCreationOptions new];
-                              if (captionFilename) photoOptions.originalFilename = [NSString stringWithFormat:@"%@.heic", captionFilename];
+                              if (captionFilename) photoOptions.originalFilename = [NSString stringWithFormat:@"%@.jpeg", captionFilename];
                               PHAssetResourceCreationOptions *videoOptions = [PHAssetResourceCreationOptions new];
                               if (captionFilename) videoOptions.originalFilename = [NSString stringWithFormat:@"%@.mp4", captionFilename];
                               [request addResourceWithType:PHAssetResourceTypePhoto fileURL:photo options:photoOptions];
@@ -1683,6 +1683,8 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
 
 - (void)useAssetWriter:(NSURL *)photoURL video:(NSURL *)videoURL identifier:(NSString *)identifier complete:(void (^)(BOOL success, NSString *photoFile, NSString *videoFile, NSError *error))complete {
     NSString *photoName = [photoURL lastPathComponent];
+    // 强制.jpeg扩展名，因为addMetadataToPhoto用kUTTypeJPEG输出
+    photoName = [[photoName stringByDeletingPathExtension] stringByAppendingPathExtension:@"jpeg"];
     NSString *photoFile = [self filePathFromTmp:photoName];
     [self addMetadataToPhoto:photoURL outputFile:photoFile identifier:identifier];
     NSString *videoName = [videoURL lastPathComponent];
@@ -2122,8 +2124,10 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                         dispatch_queue_t localQueue = dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0);
                         dispatch_group_t localGroup = dispatch_group_create();
 
-                        // 处理照片和元数据
+                        // 处理照片和元数据（addMetadataToPhoto输出JPEG，确保扩展名匹配）
                         NSString *photoName = [imagePath lastPathComponent];
+                        // 强制用.jpeg扩展名，因为addMetadataToPhoto用kUTTypeJPEG输出
+                        photoName = [[photoName stringByDeletingPathExtension] stringByAppendingPathExtension:@"jpeg"];
                         NSString *photoFile = [[DYYYManager shared] filePathFromTmp:photoName];
                         [[DYYYManager shared] addMetadataToPhoto:[NSURL fileURLWithPath:imagePath] outputFile:photoFile identifier:identifier];
 
@@ -2152,7 +2156,7 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                                                                                  PHAssetCreationRequest *request = [PHAssetCreationRequest creationRequestForAsset];
                                                                                  NSString *captionFilename = [DYYYManager sanitizeCaptionForFilename];
                                                                                  PHAssetResourceCreationOptions *photoOpts = [PHAssetResourceCreationOptions new];
-                                                                                 if (captionFilename) photoOpts.originalFilename = [NSString stringWithFormat:@"%@.heic", captionFilename];
+                                                                                 if (captionFilename) photoOpts.originalFilename = [NSString stringWithFormat:@"%@.jpeg", captionFilename];
                                                                                  PHAssetResourceCreationOptions *videoOpts = [PHAssetResourceCreationOptions new];
                                                                                  if (captionFilename) videoOpts.originalFilename = [NSString stringWithFormat:@"%@.mp4", captionFilename];
                                                                                  [request addResourceWithType:PHAssetResourceTypePhoto fileURL:photo options:photoOpts];
