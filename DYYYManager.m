@@ -1827,24 +1827,26 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
         [[NSFileManager defaultManager] copyItemAtURL:photoURL toURL:[NSURL fileURLWithPath:outputFile] error:nil];
         return;
     }
-    NSMutableData *data = rawData.mutableCopy;
-    UIImage *image = [UIImage imageWithData:data];
+    UIImage *image = [UIImage imageWithData:rawData];
     if (!image || !image.CGImage) {
         NSLog(@"[DYYY-LivePhoto] addMetadataToPhoto: cannot create image from data");
-        [data writeToFile:outputFile atomically:YES];
+        [rawData writeToFile:outputFile atomically:YES];
         return;
     }
     CGImageRef imageRef = image.CGImage;
     NSDictionary *imageMetadata = @{(NSString *)kCGImagePropertyMakerAppleDictionary : @{@"17" : identifier}};
     
-    // 检测文件格式，HEIC格式用public.heic，否则用kUTTypeJPEG
+    // 检测文件格式，HEIC格式直接复制原始文件，不重新编码
     NSString *fileFormat = [DYYYUtils detectFileFormat:photoURL];
-    CFStringRef utType = kUTTypeJPEG;
     if ([fileFormat isEqualToString:@"heic"] || [fileFormat isEqualToString:@"heif"]) {
-        utType = CFSTR("public.heic");
+        // HEIC格式直接复制原始文件，不重新编码，避免损坏
+        [[NSFileManager defaultManager] copyItemAtURL:photoURL toURL:[NSURL fileURLWithPath:outputFile] error:nil];
+        return;
     }
     
-    CGImageDestinationRef dest = CGImageDestinationCreateWithData((CFMutableDataRef)data, utType, 1, nil);
+    // JPEG格式添加元数据
+    NSMutableData *data = [NSMutableData data];
+    CGImageDestinationRef dest = CGImageDestinationCreateWithData((CFMutableDataRef)data, kUTTypeJPEG, 1, nil);
     if (dest) {
         CGImageDestinationAddImage(dest, imageRef, (CFDictionaryRef)imageMetadata);
         CGImageDestinationFinalize(dest);
