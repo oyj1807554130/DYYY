@@ -135,6 +135,58 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
 
 #pragma mark - 作者元数据 Caption 功能
 
++ (NSString *)_resolveCustomDouyinID:(AWEUserModel *)author {
+    if (!author) return nil;
+
+    // 1. 优先尝试 uniqueId（自定义抖音号的标准字段）
+    @try {
+        NSString *uniqueId = [author valueForKey:@"uniqueId"];
+        if (uniqueId && [uniqueId isKindOfClass:[NSString class]] && uniqueId.length > 0) {
+            NSLog(@"[DYYY-Caption] _resolveCustomDouyinID: uniqueId=%@", uniqueId);
+            return uniqueId;
+        }
+    } @catch (NSException *e) {}
+
+    // 2. 运行时遍历所有字符串属性，找非纯数字的候选ID
+    @try {
+        unsigned int propCount = 0;
+        objc_property_t *props = class_copyPropertyList([author class], &propCount);
+        NSMutableDictionary *allStringProps = [NSMutableDictionary dictionary];
+        for (unsigned int i = 0; i < propCount; i++) {
+            const char *propName = property_getName(props[i]);
+            NSString *name = @(propName);
+            @try {
+                id value = [author valueForKey:name];
+                if ([value isKindOfClass:[NSString class]] && [(NSString *)value length] > 0) {
+                    allStringProps[name] = value;
+                }
+            } @catch (NSException *e) {}
+        }
+        free(props);
+        NSLog(@"[DYYY-Caption] AWEUserModel 所有字符串属性: %@", allStringProps);
+
+        // 找非纯数字、非nickname/signature/avatar的属性
+        NSCharacterSet *digits = [NSCharacterSet decimalDigitCharacterSet];
+        for (NSString *key in allStringProps) {
+            if ([key isEqualToString:@"nickname"] || [key isEqualToString:@"signature"] ||
+                [key isEqualToString:@"shortID"] || [key hasPrefix:@"avatar"]) continue;
+            NSString *val = allStringProps[key];
+            if (![[val stringByTrimmingCharactersInSet:digits] isEqualToString:@""]) {
+                // 包含非数字字符 → 可能是自定义抖音号
+                NSLog(@"[DYYY-Caption] _resolveCustomDouyinID: 候选属性 %@=%@", key, val);
+                return val;
+            }
+        }
+    } @catch (NSException *e) {
+        NSLog(@"[DYYY-Caption] _resolveCustomDouyinID: 运行时探测失败: %@", e);
+    }
+
+    // 3. 回退到 shortID
+    NSString *sid = author.shortID ?: @"";
+    NSLog(@"[DYYY-Caption] _resolveCustomDouyinID: 回退到 shortID=%@", sid);
+    return sid;
+}
+
 + (void)storeMetadataFromAwemeModel:(AWEAwemeModel *)awemeModel {
     if (!awemeModel) {
         NSLog(@"[DYYY-Caption] storeMetadata: awemeModel is nil");
@@ -143,14 +195,8 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
     DYYYManager *mgr = [DYYYManager shared];
     AWEUserModel *author = awemeModel.author;
 
-    // 锁定逻辑：已有锁定值时，不覆盖
-    if (mgr.authorInfoLocked) {
-        NSLog(@"[DYYY-Caption] storeMetadata: 已锁定，跳过写入 shortID=%@ nickname=%@",
-              mgr.currentAuthorShortID, mgr.currentAuthorNickname);
-        return;
-    }
-
-    NSString *newShortID = author.shortID ?: @"";
+    // 每次调用都重新写入（不再锁定，避免不同视频的作者信息串用）
+    NSString *newShortID = [self _resolveCustomDouyinID:author];
     NSString *newNickname = author.nickname ?: @"";
     NSString *newCreateTime = @"";
     if (awemeModel.createTime) {
@@ -160,17 +206,13 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
         newCreateTime = [fmt stringFromDate:date] ?: @"";
     }
 
-    // 如果有有效作者信息则写入并锁定
-    BOOL hasAuthorInfo = (newShortID.length > 0 || newNickname.length > 0);
-    if (hasAuthorInfo) {
+    if (newShortID.length > 0 || newNickname.length > 0) {
         mgr.currentAuthorNickname = newNickname;
         mgr.currentAuthorShortID = newShortID;
         mgr.currentCreateTime = newCreateTime;
-        mgr.authorInfoLocked = YES;
-        NSLog(@"[DYYY-Caption] storeMetadata: 锁定作者信息 shortID=%@ nickname=%@ createTime=%@",
+        NSLog(@"[DYYY-Caption] storeMetadata: 写入作者信息 shortID=%@ nickname=%@ createTime=%@",
               newShortID, newNickname, newCreateTime);
     } else {
-        // 无作者信息时，仅写入时间
         mgr.currentCreateTime = newCreateTime;
         NSLog(@"[DYYY-Caption] storeMetadata: 无作者信息，仅设置时间 createTime=%@", newCreateTime);
     }
@@ -1084,8 +1126,6 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
     if (imageURLs.count == 0) {
         return;
     }
-    // 每次批量下载前解锁，确保新一批图片用新的作者信息
-    [DYYYManager shared].authorInfoLocked = NO;
     [self downloadAllImagesWithProgress:imageURLs
                                progress:nil
                              completion:^(NSInteger successCount, NSInteger totalCount){
@@ -2007,8 +2047,6 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
     if (livePhotos.count == 0) {
         return;
     }
-    // 每次批量下载前解锁，确保新一批图片用新的作者信息
-    [DYYYManager shared].authorInfoLocked = NO;
     [self downloadAllLivePhotosWithProgress:livePhotos
                                    progress:nil
                                  completion:^(NSInteger successCount, NSInteger totalCount){
