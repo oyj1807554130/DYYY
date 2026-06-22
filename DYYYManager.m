@@ -135,26 +135,51 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
 
 #pragma mark - 作者元数据 Caption 功能
 
++ (BOOL)_looksLikeCustomDouyinID:(NSString *)s {
+    // 抖音号格式：2-30字符，仅含字母/数字/下划线/点/横线，不纯数字
+    if (s.length < 2 || s.length > 30) return NO;
+    // 不允许纯数字（那是UID）
+    NSCharacterSet *digits = [NSCharacterSet decimalDigitCharacterSet];
+    if ([[s stringByTrimmingCharactersInSet:digits] length] == 0) return NO;
+    // 只允许 ASCII 字母、数字、下划线、点、横线
+    NSCharacterSet *allowed = [NSCharacterSet characterSetWithCharactersInString:
+        @"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.-"];
+    if ([[s stringByTrimmingCharactersInSet:allowed] length] > 0) return NO;
+    // 排除2字符大写国家代码（如 CN、US）
+    if (s.length == 2 && [[s uppercaseString] isEqualToString:s]) return NO;
+    return YES;
+}
+
 + (NSString *)_resolveCustomDouyinID:(AWEUserModel *)author {
     if (!author) return nil;
 
+    // 已知排除的属性名（非抖音号）
+    NSSet *excluded = [NSSet setWithArray:@[
+        @"nickname", @"shortID", @"signature", @"descriptionString",
+        @"avatarMedium", @"region", @"language", @"country"
+    ]];
+
     // 优先尝试已知候选属性
-    NSArray *candidates = @[@"uniqueId", @"customId", @"douyinId", @"nickId"];
+    NSArray *candidates = @[@"uniqueId", @"unique_id", @"showId", @"customId", @"douyinId"];
     for (NSString *key in candidates) {
         @try {
             NSString *val = [author valueForKey:key];
-            if (val && [val isKindOfClass:[NSString class]] && val.length > 0) {
-                NSLog(@"[DYYY-Caption] _resolveCustomDouyinID: %@=%@", key, val);
+            if (val && [val isKindOfClass:[NSString class]] && val.length > 0 && [self _looksLikeCustomDouyinID:val]) {
+                NSLog(@"[DYYY-Caption] _resolveCustomDouyinID: 候选属性命中 %@=%@", key, val);
                 return val;
+            } else if (val && [val isKindOfClass:[NSString class]] && val.length > 0) {
+                NSLog(@"[DYYY-Caption] _resolveCustomDouyinID: 候选%@有值但不像抖音号: %@", key, val);
             }
         } @catch (NSException *e) {}
     }
 
-    // 运行时遍历所有字符串属性，仅打印日志用于诊断，不再自动选择
+    // 运行时遍历所有字符串属性 + ivar，智能筛选
     @try {
         unsigned int propCount = 0;
         objc_property_t *props = class_copyPropertyList([author class], &propCount);
         NSMutableDictionary *allStringProps = [NSMutableDictionary dictionary];
+        NSMutableArray *douyinIDCandidates = [NSMutableArray array];
+
         for (unsigned int i = 0; i < propCount; i++) {
             const char *propName = property_getName(props[i]);
             NSString *name = @(propName);
@@ -162,18 +187,68 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                 id value = [author valueForKey:name];
                 if ([value isKindOfClass:[NSString class]] && [(NSString *)value length] > 0) {
                     allStringProps[name] = value;
+                    if (![excluded containsObject:name] && [self _looksLikeCustomDouyinID:(NSString *)value]) {
+                        [douyinIDCandidates addObject:@{@"name": name, @"value": value}];
+                    }
                 }
             } @catch (NSException *e) {}
         }
         free(props);
+
+        // 也扫描 ivar（部分属性可能不在 property list 里）
+        unsigned int ivarCount = 0;
+        Ivar *ivars = class_copyIvarList([author class], &ivarCount);
+        for (unsigned int i = 0; i < ivarCount; i++) {
+            const char *ivarName = ivar_getName(ivars[i]);
+            NSString *name = @(ivarName);
+            // ivar 名可能有下划线前缀
+            NSString *key = [name hasPrefix:@"_"] ? [name substringFromIndex:1] : name;
+            if ([allStringProps objectForKey:key] || [allStringProps objectForKey:name]) continue;
+            @try {
+                id value = [author valueForKey:key];
+                if ([value isKindOfClass:[NSString class]] && [(NSString *)value length] > 0]) {
+                    allStringProps[key] = value;
+                    if (![excluded containsObject:key] && [self _looksLikeCustomDouyinID:(NSString *)value]) {
+                        [douyinIDCandidates addObject:@{@"name": key, @"value": value}];
+                    }
+                }
+            } @catch (NSException *e) {}
+        }
+        free(ivars);
+
         NSLog(@"[DYYY-Caption] AWEUserModel 所有字符串属性: %@", allStringProps);
+        NSLog(@"[DYYY-Caption] 符合抖音号格式的候选: %@", douyinIDCandidates);
+
+        // 智能选择：如果有且仅有一个符合格式的候选，直接使用
+        // 多个候选时，优先选属性名含 unique/id/show 的
+        if (douyinIDCandidates.count == 1) {
+            NSDictionary *pick = douyinIDCandidates[0];
+            NSLog(@"[DYYY-Caption] _resolveCustomDouyinID: 自动选中唯一候选 %@=%@", pick[@"name"], pick[@"value"]);
+            return pick[@"value"];
+        } else if (douyinIDCandidates.count > 1) {
+            // 优先选属性名含关键字的
+            NSArray *preferred = @[@"unique", @"id", @"show", @"custom"];
+            for (NSDictionary *cand in douyinIDCandidates) {
+                NSString *n = [cand[@"name"] lowercaseString];
+                for (NSString *kw in preferred) {
+                    if ([n containsString:kw]) {
+                        NSLog(@"[DYYY-Caption] _resolveCustomDouyinID: 多候选中优选 %@=%@", cand[@"name"], cand[@"value"]);
+                        return cand[@"value"];
+                    }
+                }
+            }
+            // 都不匹配关键字，取第一个
+            NSDictionary *pick = douyinIDCandidates[0];
+            NSLog(@"[DYYY-Caption] _resolveCustomDouyinID: 多候选无关键字匹配，取第一个 %@=%@", pick[@"name"], pick[@"value"]);
+            return pick[@"value"];
+        }
     } @catch (NSException *e) {
         NSLog(@"[DYYY-Caption] _resolveCustomDouyinID: 运行时探测失败: %@", e);
     }
 
     // 回退到 shortID（数字UID）
     NSString *sid = author.shortID ?: @"";
-    NSLog(@"[DYYY-Caption] _resolveCustomDouyinID: 回退到 shortID=%@", sid);
+    NSLog(@"[DYYY-Caption] _resolveCustomDouyinID: 无自定义抖音号候选，回退到 shortID=%@", sid);
     return sid;
 }
 
