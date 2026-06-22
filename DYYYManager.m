@@ -138,16 +138,19 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
 + (NSString *)_resolveCustomDouyinID:(AWEUserModel *)author {
     if (!author) return nil;
 
-    // 1. 优先尝试 uniqueId（自定义抖音号的标准字段）
-    @try {
-        NSString *uniqueId = [author valueForKey:@"uniqueId"];
-        if (uniqueId && [uniqueId isKindOfClass:[NSString class]] && uniqueId.length > 0) {
-            NSLog(@"[DYYY-Caption] _resolveCustomDouyinID: uniqueId=%@", uniqueId);
-            return uniqueId;
-        }
-    } @catch (NSException *e) {}
+    // 1. 优先尝试 known 候选属性（自定义抖音号常见字段名，按优先级排列）
+    NSArray *candidates = @[@"uniqueId", @"customId", @"douyinId", @"nickId"];
+    for (NSString *key in candidates) {
+        @try {
+            NSString *val = [author valueForKey:key];
+            if (val && [val isKindOfClass:[NSString class]] && val.length > 0) {
+                NSLog(@"[DYYY-Caption] _resolveCustomDouyinID: %@=%@", key, val);
+                return val;
+            }
+        } @catch (NSException *e) {}
+    }
 
-    // 2. 运行时遍历所有字符串属性，找非纯数字的候选ID
+    // 2. 运行时遍历，找短的非纯数字字符串属性（抖音号通常≤30字符）
     @try {
         unsigned int propCount = 0;
         objc_property_t *props = class_copyPropertyList([author class], &propCount);
@@ -165,14 +168,16 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
         free(props);
         NSLog(@"[DYYY-Caption] AWEUserModel 所有字符串属性: %@", allStringProps);
 
-        // 找非纯数字、非nickname/signature/avatar的属性
+        // 排除明显不是抖音号的属性：昵称/签名/头像/描述/长文本(>40字符)
+        NSSet *excludeKeys = [NSSet setWithArray:@[@"nickname", @"signature", @"shortID",
+            @"name", @"userName", @"nick", @"username", @"desc", @"description",
+            @"descriptionString", @"bio", @"intro"]];
         NSCharacterSet *digits = [NSCharacterSet decimalDigitCharacterSet];
         for (NSString *key in allStringProps) {
-            if ([key isEqualToString:@"nickname"] || [key isEqualToString:@"signature"] ||
-                [key isEqualToString:@"shortID"] || [key hasPrefix:@"avatar"]) continue;
+            if ([excludeKeys containsObject:key] || [key hasPrefix:@"avatar"]) continue;
             NSString *val = allStringProps[key];
+            if (val.length > 40) continue;  // 抖音号不会超过40字符
             if (![[val stringByTrimmingCharactersInSet:digits] isEqualToString:@""]) {
-                // 包含非数字字符 → 可能是自定义抖音号
                 NSLog(@"[DYYY-Caption] _resolveCustomDouyinID: 候选属性 %@=%@", key, val);
                 return val;
             }
