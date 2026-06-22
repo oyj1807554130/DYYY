@@ -206,7 +206,7 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
             if ([allStringProps objectForKey:key] || [allStringProps objectForKey:name]) continue;
             @try {
                 id value = [author valueForKey:key];
-                if ([value isKindOfClass:[NSString class]] && [(NSString *)value length] > 0]) {
+                if ([value isKindOfClass:[NSString class]] && [(NSString *)value length] > 0) {
                     allStringProps[key] = value;
                     if (![excluded containsObject:key] && [self _looksLikeCustomDouyinID:(NSString *)value]) {
                         [douyinIDCandidates addObject:@{@"name": key, @"value": value}];
