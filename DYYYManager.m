@@ -1479,20 +1479,57 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
     // 处理下载的文件
     // 不用URL的lastPathComponent（抖音CDN URL含 ~: 等非法字符且太长）
     // 改用UUID生成干净文件名，根据mediaType决定扩展名
-    NSString *fileName = [NSUUID UUID].UUIDString;
-    switch (mediaType) {
-        case MediaTypeVideo:
-            fileName = [fileName stringByAppendingPathExtension:@"mp4"];
-            break;
-        case MediaTypeImage:
-            fileName = [fileName stringByAppendingPathExtension:@"jpg"];
-            break;
-        case MediaTypeAudio:
-            fileName = [fileName stringByAppendingPathExtension:@"mp3"];
-            break;
-        case MediaTypeHeic:
-            fileName = [fileName stringByAppendingPathExtension:@"heic"];
-            break;
+    NSString *fileName = nil;
+    if (mediaType == MediaTypeAudio) {
+        // 音频文件名：抖音名_抖音号_下载时间.mp3
+        DYYYManager *mgr = [DYYYManager shared];
+        NSString *nickname = mgr.currentAuthorNickname ?: @"";
+        NSString *douyinID = mgr.currentAuthorShortID ?: @"";
+        // 生成下载时间字符串
+        NSDateFormatter *audioFmt = [[NSDateFormatter alloc] init];
+        audioFmt.dateFormat = @"yyyyMMdd-HHmmss";
+        NSString *downloadTime = [audioFmt stringFromDate:[NSDate date]];
+        // 文件名中 @前缀保留
+        NSMutableString *safeName = [NSMutableString string];
+        if (nickname.length > 0) {
+            [safeName appendFormat:@"@%@", nickname];
+        }
+        if (douyinID.length > 0) {
+            if (safeName.length > 0) [safeName appendString:@"_"];
+            [safeName appendString:douyinID];
+        }
+        if (safeName.length > 0) {
+            [safeName appendString:@"_"];
+        }
+        [safeName appendString:downloadTime];
+        // 清理文件名中的非法字符（逐个替换，兼容emoji surrogate pair）
+        NSString *cleanName = [safeName copy];
+        NSArray *invalidChars = @[@"/", @"\\", @":", @"*", @"?", @"\"", @"<", @">", @"|"];
+        for (NSString *ch in invalidChars) {
+            cleanName = [cleanName stringByReplacingOccurrencesOfString:ch withString:@"_"];
+        }
+        fileName = [cleanName stringByAppendingPathExtension:@"mp3"];
+        // 兜底：如果清理后为空，用UUID
+        if (fileName.length < 6) {
+            fileName = [[NSUUID UUID].UUIDString stringByAppendingPathExtension:@"mp3"];
+        }
+        NSLog(@"[DYYY-Audio] 音频文件名: %@", fileName);
+    } else {
+        fileName = [NSUUID UUID].UUIDString;
+        switch (mediaType) {
+            case MediaTypeVideo:
+                fileName = [fileName stringByAppendingPathExtension:@"mp4"];
+                break;
+            case MediaTypeImage:
+                fileName = [fileName stringByAppendingPathExtension:@"jpg"];
+                break;
+            case MediaTypeHeic:
+                fileName = [fileName stringByAppendingPathExtension:@"heic"];
+                break;
+            default:
+                fileName = [fileName stringByAppendingPathExtension:@"mp4"];
+                break;
+        }
     }
 
     NSURL *tempDir = [NSURL fileURLWithPath:NSTemporaryDirectory()];
