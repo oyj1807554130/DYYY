@@ -138,23 +138,18 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
 + (NSString *)_resolveCustomDouyinID:(AWEUserModel *)author {
     if (!author) return nil;
 
-    // 优先尝试已知候选属性
-    NSArray *candidates = @[@"uniqueId", @"customId", @"douyinId", @"nickId"];
-    for (NSString *key in candidates) {
-        @try {
-            NSString *val = [author valueForKey:key];
-            if (val && [val isKindOfClass:[NSString class]] && val.length > 0) {
-                NSLog(@"[DYYY-Caption] _resolveCustomDouyinID: %@=%@", key, val);
-                return val;
-            }
-        } @catch (NSException *e) {}
-    }
-
-    // 运行时遍历所有字符串属性，仅打印日志用于诊断，不再自动选择
+    // 运行时遍历所有字符串属性，用正则自动筛选自定义抖音号
+    // 自定义抖音号特征：含字母+数字，6-20位，排除纯数字/纯字母/昵称/签名等
+    NSString *nickname = author.nickname ?: @"";
+    NSString *signature = author.signature ?: @"";
+    NSCharacterSet *letters = [NSCharacterSet letterCharacterSet];
+    
     @try {
         unsigned int propCount = 0;
         objc_property_t *props = class_copyPropertyList([author class], &propCount);
         NSMutableDictionary *allStringProps = [NSMutableDictionary dictionary];
+        NSMutableArray *douyinIDCandidates = [NSMutableArray array];
+        
         for (unsigned int i = 0; i < propCount; i++) {
             const char *propName = property_getName(props[i]);
             NSString *name = @(propName);
@@ -162,18 +157,52 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                 id value = [author valueForKey:name];
                 if ([value isKindOfClass:[NSString class]] && [(NSString *)value length] > 0) {
                     allStringProps[name] = value;
+                    NSString *val = (NSString *)value;
+                    // 筛选自定义抖音号：含字母、长度2-30、不是昵称/签名/shortID/URL
+                    BOOL hasLetter = NO;
+                    for (NSInteger j = 0; j < val.length; j++) {
+                        if ([letters characterIsMember:[val characterAtIndex:j]]) { hasLetter = YES; break; }
+                    }
+                    if (hasLetter && val.length >= 2 && val.length <= 30
+                        && ![val isEqualToString:nickname]
+                        && ![val isEqualToString:signature]
+                        && ![val isEqualToString:author.shortID]
+                        && ![val containsString:@"http"]
+                        && ![val containsString:@"/"]) {
+                        [douyinIDCandidates addObject:@{@"name": name, @"value": val}];
+                    }
                 }
             } @catch (NSException *e) {}
         }
         free(props);
+        
         NSLog(@"[DYYY-Caption] AWEUserModel 所有字符串属性: %@", allStringProps);
+        NSLog(@"[DYYY-Caption] 符合抖音号格式的候选: %@", douyinIDCandidates);
+        
+        // 优先选属性名含 unique/id/show/custom 的候选
+        if (douyinIDCandidates.count > 0) {
+            NSArray *preferred = @[@"unique", @"id", @"show", @"custom", @"douyin"];
+            for (NSDictionary *cand in douyinIDCandidates) {
+                NSString *n = [cand[@"name"] lowercaseString];
+                for (NSString *kw in preferred) {
+                    if ([n containsString:kw]) {
+                        NSLog(@"[DYYY-Caption] _resolveCustomDouyinID: 优选命中 %@=%@", cand[@"name"], cand[@"value"]);
+                        return cand[@"value"];
+                    }
+                }
+            }
+            // 无关键字匹配，取第一个候选
+            NSDictionary *pick = douyinIDCandidates[0];
+            NSLog(@"[DYYY-Caption] _resolveCustomDouyinID: 取首个候选 %@=%@", pick[@"name"], pick[@"value"]);
+            return pick[@"value"];
+        }
     } @catch (NSException *e) {
         NSLog(@"[DYYY-Caption] _resolveCustomDouyinID: 运行时探测失败: %@", e);
     }
 
     // 回退到 shortID（数字UID）
     NSString *sid = author.shortID ?: @"";
-    NSLog(@"[DYYY-Caption] _resolveCustomDouyinID: 回退到 shortID=%@", sid);
+    NSLog(@"[DYYY-Caption] _resolveCustomDouyinID: 无自定义抖音号候选，回退到 shortID=%@", sid);
     return sid;
 }
 
@@ -2985,17 +3014,19 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
             
             // 选项4：保存原声
             if (musicURL.length > 0) {
-                // 获取作者信息
+                // 获取作者信息（同时存入DYYYManager供音频文件名使用）
                 NSString *authorName = nil;
-                // 尝试从多个字段获取作者
+                NSString *authorDouyinID = nil;
+                // 尝试从多个字段获取作者名
                 NSArray *authorKeys = @[@"author", @"nickname", @"author_name", @"music_author", @"author_nickname", @"music_author_name", @"user", @"user_name"];
+                // 尝试获取抖音号
+                NSArray *douyinIDKeys = @[@"author_id", @"uid", @"user_id", @"short_id", @"unique_id", @"douyin_id", @"sec_uid"];
                 for (NSString *key in authorKeys) {
                     id value = dataDict[key];
                     if (value && [value isKindOfClass:[NSString class]] && [value length] > 0) {
                         authorName = value;
                         break;
                     }
-                    // 如果是字典类型，尝试取里面的 name/nickname
                     if ([value isKindOfClass:[NSDictionary class]]) {
                         NSDictionary *authorDict = (NSDictionary *)value;
                         for (NSString *innerKey in @[@"name", @"nickname", @"nick_name", @"username"]) {
@@ -3006,6 +3037,31 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                         }
                         if (authorName) break;
                     }
+                }
+                // 获取抖音号
+                for (NSString *key in douyinIDKeys) {
+                    id value = dataDict[key];
+                    if (value && [value isKindOfClass:[NSString class]] && [value length] > 0) {
+                        authorDouyinID = value;
+                        break;
+                    }
+                    if ([value isKindOfClass:[NSDictionary class]]) {
+                        NSDictionary *authorDict = (NSDictionary *)value;
+                        for (NSString *innerKey in @[@"id", @"uid", @"short_id", @"unique_id"]) {
+                            if (authorDict[innerKey] && [authorDict[innerKey] isKindOfClass:[NSString class]] && [authorDict[innerKey] length] > 0) {
+                                authorDouyinID = authorDict[innerKey];
+                                break;
+                            }
+                        }
+                        if (authorDouyinID) break;
+                    }
+                }
+                // 存入DYYYManager供音频文件名使用
+                if (authorName.length > 0) {
+                    [DYYYManager shared].currentAuthorNickname = authorName;
+                }
+                if (authorDouyinID.length > 0) {
+                    [DYYYManager shared].currentAuthorShortID = authorDouyinID;
                 }
                 
                 // 构建音频标题
@@ -3096,17 +3152,17 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
 
             // 保存原声选项
             if (musicURL.length > 0) {
-                // 获取作者信息
+                // 获取作者信息（同时存入DYYYManager供音频文件名使用）
                 NSString *authorName = nil;
-                // 尝试从多个字段获取作者
+                NSString *authorDouyinID = nil;
                 NSArray *authorKeys = @[@"author", @"nickname", @"author_name", @"music_author", @"author_nickname", @"music_author_name", @"user", @"user_name"];
+                NSArray *douyinIDKeys = @[@"author_id", @"uid", @"user_id", @"short_id", @"unique_id", @"douyin_id", @"sec_uid"];
                 for (NSString *key in authorKeys) {
                     id value = dataDict[key];
                     if (value && [value isKindOfClass:[NSString class]] && [value length] > 0) {
                         authorName = value;
                         break;
                     }
-                    // 如果是字典类型，尝试取里面的 name/nickname
                     if ([value isKindOfClass:[NSDictionary class]]) {
                         NSDictionary *authorDict = (NSDictionary *)value;
                         for (NSString *innerKey in @[@"name", @"nickname", @"nick_name", @"username"]) {
@@ -3117,6 +3173,31 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                         }
                         if (authorName) break;
                     }
+                }
+                // 获取抖音号
+                for (NSString *key in douyinIDKeys) {
+                    id value = dataDict[key];
+                    if (value && [value isKindOfClass:[NSString class]] && [value length] > 0) {
+                        authorDouyinID = value;
+                        break;
+                    }
+                    if ([value isKindOfClass:[NSDictionary class]]) {
+                        NSDictionary *authorDict = (NSDictionary *)value;
+                        for (NSString *innerKey in @[@"id", @"uid", @"short_id", @"unique_id"]) {
+                            if (authorDict[innerKey] && [authorDict[innerKey] isKindOfClass:[NSString class]] && [authorDict[innerKey] length] > 0) {
+                                authorDouyinID = authorDict[innerKey];
+                                break;
+                            }
+                        }
+                        if (authorDouyinID) break;
+                    }
+                }
+                // 存入DYYYManager供音频文件名使用
+                if (authorName.length > 0) {
+                    [DYYYManager shared].currentAuthorNickname = authorName;
+                }
+                if (authorDouyinID.length > 0) {
+                    [DYYYManager shared].currentAuthorShortID = authorDouyinID;
                 }
                 
                 // 构建音频标题
