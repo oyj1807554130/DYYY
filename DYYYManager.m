@@ -158,12 +158,17 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                 if ([value isKindOfClass:[NSString class]] && [(NSString *)value length] > 0) {
                     allStringProps[name] = value;
                     NSString *val = (NSString *)value;
-                    // 筛选自定义抖音号：含字母、长度2-30、不是昵称/签名/shortID/URL
+                    // 筛选自定义抖音号：必须同时含字母和数字、长度4-30、不是昵称/签名/shortID/URL
                     BOOL hasLetter = NO;
+                    BOOL hasDigit = NO;
+                    NSCharacterSet *digits = [NSCharacterSet decimalDigitCharacterSet];
                     for (NSInteger j = 0; j < val.length; j++) {
-                        if ([letters characterIsMember:[val characterAtIndex:j]]) { hasLetter = YES; break; }
+                        unichar c = [val characterAtIndex:j];
+                        if (!hasLetter && [letters characterIsMember:c]) hasLetter = YES;
+                        if (!hasDigit && [digits characterIsMember:c]) hasDigit = YES;
+                        if (hasLetter && hasDigit) break;
                     }
-                    if (hasLetter && val.length >= 2 && val.length <= 30
+                    if (hasLetter && hasDigit && val.length >= 4 && val.length <= 30
                         && ![val isEqualToString:nickname]
                         && ![val isEqualToString:signature]
                         && ![val isEqualToString:author.shortID]
