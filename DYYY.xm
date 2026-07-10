@@ -7388,10 +7388,11 @@ static Class tabBarButtonClass = nil;
             return;
         }
         CGRect superF = self.superview.frame;
+        CGFloat screenH = [UIScreen mainScreen].bounds.size.height;
         if (CGRectGetHeight(superF) > 0 && CGRectGetHeight(frame) > 0 && CGRectGetHeight(frame) < CGRectGetHeight(superF)) {
             CGFloat diff = CGRectGetHeight(superF) - CGRectGetHeight(frame);
             if (fabs(diff - gCurrentTabBarHeight) < 1.0) {
-                frame.size.height = CGRectGetHeight(superF);
+                frame.size.height = MIN(CGRectGetHeight(superF), screenH);
             }
         }
 
@@ -7590,9 +7591,9 @@ static Class tabBarButtonClass = nil;
     }
 
     if (useFullHeight) {
-        frame.size.height = superviewHeight;
+        frame.size.height = MIN(superviewHeight, [UIScreen mainScreen].bounds.size.height);
     } else {
-        frame.size.height = superviewHeight - gCurrentTabBarHeight;
+        frame.size.height = MIN(superviewHeight - gCurrentTabBarHeight, [UIScreen mainScreen].bounds.size.height);
     }
 
     if (fabs(frame.size.height - self.view.frame.size.height) > 0.5) {
@@ -7772,12 +7773,13 @@ static Class tabBarButtonClass = nil;
         if (contentView && contentView.superview) {
             CGRect frame = contentView.frame;
             CGFloat parentHeight = contentView.superview.frame.size.height;
+            CGFloat screenH = [UIScreen mainScreen].bounds.size.height;
 
             if (frame.size.height == parentHeight - gCurrentTabBarHeight) {
-                frame.size.height = parentHeight;
+                frame.size.height = MIN(parentHeight, screenH);
                 contentView.frame = frame;
             } else if (frame.size.height == parentHeight - (gCurrentTabBarHeight * 2)) {
-                frame.size.height = parentHeight - gCurrentTabBarHeight;
+                frame.size.height = MIN(parentHeight - gCurrentTabBarHeight, screenH);
                 contentView.frame = frame;
             }
         }
@@ -7839,12 +7841,13 @@ static Class tabBarButtonClass = nil;
         if (contentView && contentView.superview) {
             CGRect frame = contentView.frame;
             CGFloat parentHeight = contentView.superview.frame.size.height;
+            CGFloat screenH = [UIScreen mainScreen].bounds.size.height;
 
             if (frame.size.height == parentHeight - gCurrentTabBarHeight) {
-                frame.size.height = parentHeight;
+                frame.size.height = MIN(parentHeight, screenH);
                 contentView.frame = frame;
             } else if (frame.size.height == parentHeight - (gCurrentTabBarHeight * 2)) {
-                frame.size.height = parentHeight - gCurrentTabBarHeight;
+                frame.size.height = MIN(parentHeight - gCurrentTabBarHeight, screenH);
                 contentView.frame = frame;
             }
         }
@@ -7903,7 +7906,8 @@ static Class tabBarButtonClass = nil;
 
     if (DYYYGetBool(@"DYYYEnableFullScreen")) {
         CGRect frame = self.frame;
-        frame.size.height = self.superview.frame.size.height;
+        CGFloat screenH = [UIScreen mainScreen].bounds.size.height;
+        frame.size.height = MIN(self.superview.frame.size.height, screenH);
         self.frame = frame;
     } else if (gCurrentTabBarHeight > 0) {
         UIWindow *keyWindow = [DYYYUtils getActiveWindow];
@@ -8775,10 +8779,9 @@ static Class TagViewClass = nil;
 - (void)setFrame:(CGRect)frame {
     if (DYYYGetBool(@"DYYYEnableFullScreen")) {
         CGFloat screenHeight = [UIScreen mainScreen].bounds.size.height;
-
-        CGFloat remainder = fmod(frame.size.height, screenHeight);
-        if (remainder != 0) {
-            frame.size.height += (screenHeight - remainder);
+        // 不超过屏幕高度，避免视频溢出
+        if (frame.size.height > screenHeight) {
+            frame.size.height = screenHeight;
         }
     }
     %orig(frame);
