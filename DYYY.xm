@@ -2839,10 +2839,8 @@ static BOOL dyyyShouldUseLastStickerURL = NO;
                 free(props);
                 NSLog(@"[DYYY-Caption] comment.author class=%@ properties=[%@]", NSStringFromClass(authorClass), propList);
                 
+                // 昵称：performSelector优先，valueForKey兜底
                 NSString *nickname = nil;
-                NSString *shortID = nil;
-                
-                // 尝试多种可能的属性名（performSelector优先，valueForKey兜底）
                 NSArray *nicknameKeys = @[@"nickname", @"nickName", @"name", @"userName", @"nick", @"username", @"display_name", @"displayName"];
                 for (NSString *key in nicknameKeys) {
                     id value = nil;
@@ -2858,20 +2856,8 @@ static BOOL dyyyShouldUseLastStickerURL = NO;
                     }
                 }
                 
-                NSArray *idKeys = @[@"shortID", @"short_id", @"uid", @"userId", @"user_id", @"uniqueId", @"unique_id", @"id"];
-                for (NSString *key in idKeys) {
-                    id value = nil;
-                    if ([comment.author respondsToSelector:NSSelectorFromString(key)]) {
-                        value = [comment.author performSelector:NSSelectorFromString(key)];
-                    } else {
-                        @try { value = [comment.author valueForKey:key]; } @catch (NSException *e) {}
-                    }
-                    if (value && ([value isKindOfClass:[NSString class]] || [value isKindOfClass:[NSNumber class]])) {
-                        shortID = [value stringValue];
-                        NSLog(@"[DYYY-Caption] 找到评论作者ID: %@ -> %@", key, value);
-                        break;
-                    }
-                }
+                // 抖音号：用_resolveCustomDouyinID取自定义抖音号，不是数字UID
+                NSString *shortID = [DYYYManager _resolveCustomDouyinID:comment.author];
                 
                 mgr.currentAuthorNickname = nickname ?: @"";
                 mgr.currentAuthorShortID = shortID ?: @"";
@@ -2955,10 +2941,8 @@ static BOOL dyyyShouldUseLastStickerURL = NO;
                 free(props);
                 NSLog(@"[DYYY-Caption] comment.author class=%@ properties=[%@]", NSStringFromClass(authorClass), propList);
                 
+                // 昵称：performSelector优先，valueForKey兜底
                 NSString *nickname = nil;
-                NSString *shortID = nil;
-                
-                // 尝试多种可能的属性名（performSelector优先，valueForKey兜底）
                 NSArray *nicknameKeys = @[@"nickname", @"nickName", @"name", @"userName", @"nick", @"username", @"display_name", @"displayName"];
                 for (NSString *key in nicknameKeys) {
                     id value = nil;
@@ -2974,20 +2958,8 @@ static BOOL dyyyShouldUseLastStickerURL = NO;
                     }
                 }
                 
-                NSArray *idKeys = @[@"shortID", @"short_id", @"uid", @"userId", @"user_id", @"uniqueId", @"unique_id", @"id"];
-                for (NSString *key in idKeys) {
-                    id value = nil;
-                    if ([comment.author respondsToSelector:NSSelectorFromString(key)]) {
-                        value = [comment.author performSelector:NSSelectorFromString(key)];
-                    } else {
-                        @try { value = [comment.author valueForKey:key]; } @catch (NSException *e) {}
-                    }
-                    if (value && ([value isKindOfClass:[NSString class]] || [value isKindOfClass:[NSNumber class]])) {
-                        shortID = [value stringValue];
-                        NSLog(@"[DYYY-Caption] 找到评论作者ID: %@ -> %@", key, value);
-                        break;
-                    }
-                }
+                // 抖音号：用_resolveCustomDouyinID取自定义抖音号，不是数字UID
+                NSString *shortID = [DYYYManager _resolveCustomDouyinID:comment.author];
                 
                 mgr.currentAuthorNickname = nickname ?: @"";
                 mgr.currentAuthorShortID = shortID ?: @"";

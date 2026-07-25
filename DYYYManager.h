@@ -174,6 +174,7 @@
 // 作者元数据 caption 方法
 + (void)storeMetadataFromAwemeModel:(AWEAwemeModel *)awemeModel;
 + (NSString *)generateCaption;
++ (NSString *)_resolveCustomDouyinID:(AWEUserModel *)author;
 + (void)writeCaptionToLatestAsset;
 + (NSURL *)embedCaptionInImageFile:(NSURL *)sourceURL;
 + (NSString *)sanitizeCaptionForFilename;
