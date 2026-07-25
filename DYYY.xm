@@ -2827,47 +2827,76 @@ static BOOL dyyyShouldUseLastStickerURL = NO;
         DYYYManager *mgr = [DYYYManager shared];
         if (comment.author) {
             @try {
+                // 运行时探测：记录author类名和所有属性
+                Class authorClass = [comment.author class];
+                unsigned int propCount = 0;
+                objc_property_t *props = class_copyPropertyList(authorClass, &propCount);
+                NSMutableString *propList = [NSMutableString string];
+                for (unsigned int i = 0; i < propCount; i++) {
+                    if (i > 0) [propList appendString:@", "];
+                    [propList appendString:[NSString stringWithUTF8String:property_getName(props[i])]];
+                }
+                free(props);
+                NSLog(@"[DYYY-Caption] comment.author class=%@ properties=[%@]", NSStringFromClass(authorClass), propList);
+                
                 NSString *nickname = nil;
                 NSString *shortID = nil;
                 
-                // 尝试多种可能的属性名
-                NSArray *nicknameKeys = @[@"nickname", @"name", @"userName", @"nick", @"username"];
+                // 尝试多种可能的属性名（performSelector优先，valueForKey兜底）
+                NSArray *nicknameKeys = @[@"nickname", @"nickName", @"name", @"userName", @"nick", @"username", @"display_name", @"displayName"];
                 for (NSString *key in nicknameKeys) {
+                    id value = nil;
                     if ([comment.author respondsToSelector:NSSelectorFromString(key)]) {
-                        id value = [comment.author performSelector:NSSelectorFromString(key)];
-                        if (value && [value isKindOfClass:[NSString class]] && [(NSString *)value length] > 0) {
-                            nickname = value;
-                            NSLog(@"[DYYY-Caption] 找到评论作者昵称: %@ -> %@", key, value);
-                            break;
-                        }
+                        value = [comment.author performSelector:NSSelectorFromString(key)];
+                    } else {
+                        @try { value = [comment.author valueForKey:key]; } @catch (NSException *e) {}
+                    }
+                    if (value && [value isKindOfClass:[NSString class]] && [(NSString *)value length] > 0) {
+                        nickname = value;
+                        NSLog(@"[DYYY-Caption] 找到评论作者昵称: %@ -> %@", key, value);
+                        break;
                     }
                 }
                 
-                NSArray *idKeys = @[@"shortID", @"uid", @"userId", @"user_id", @"id"];
+                NSArray *idKeys = @[@"shortID", @"short_id", @"uid", @"userId", @"user_id", @"uniqueId", @"unique_id", @"id"];
                 for (NSString *key in idKeys) {
+                    id value = nil;
                     if ([comment.author respondsToSelector:NSSelectorFromString(key)]) {
-                        id value = [comment.author performSelector:NSSelectorFromString(key)];
-                        if (value && ([value isKindOfClass:[NSString class]] || [value isKindOfClass:[NSNumber class]])) {
-                            shortID = [value stringValue];
-                            NSLog(@"[DYYY-Caption] 找到评论作者ID: %@ -> %@", key, value);
-                            break;
-                        }
+                        value = [comment.author performSelector:NSSelectorFromString(key)];
+                    } else {
+                        @try { value = [comment.author valueForKey:key]; } @catch (NSException *e) {}
+                    }
+                    if (value && ([value isKindOfClass:[NSString class]] || [value isKindOfClass:[NSNumber class]])) {
+                        shortID = [value stringValue];
+                        NSLog(@"[DYYY-Caption] 找到评论作者ID: %@ -> %@", key, value);
+                        break;
                     }
                 }
                 
                 mgr.currentAuthorNickname = nickname ?: @"";
                 mgr.currentAuthorShortID = shortID ?: @"";
+                NSLog(@"[DYYY-Caption] 评论作者信息: nickname=%@ shortID=%@", mgr.currentAuthorNickname, mgr.currentAuthorShortID);
             } @catch (NSException *e) {
                 NSLog(@"[DYYY] 获取评论作者信息失败: %@", e);
             }
-        }
-        if (comment.createTime) {
-            NSDate *date = [NSDate dateWithTimeIntervalSince1970:comment.createTime.doubleValue];
-            NSDateFormatter *fmt = [[NSDateFormatter alloc] init];
-            fmt.dateFormat = @"yyyy-MM-dd HH:mm";
-            mgr.currentCreateTime = [fmt stringFromDate:date] ?: @"";
         } else {
-            mgr.currentCreateTime = @"";
+            NSLog(@"[DYYY-Caption] comment.author is nil!");
+        }
+        // createTime也用valueForKey兜底
+        {
+            NSNumber *ct = comment.createTime;
+            if (!ct) {
+                @try { ct = [comment valueForKey:@"createTime"]; } @catch (NSException *e) {}
+            }
+            if (ct) {
+                NSDate *date = [NSDate dateWithTimeIntervalSince1970:ct.doubleValue];
+                NSDateFormatter *fmt = [[NSDateFormatter alloc] init];
+                fmt.dateFormat = @"yyyy-MM-dd HH:mm";
+                mgr.currentCreateTime = [fmt stringFromDate:date] ?: @"";
+            } else {
+                NSLog(@"[DYYY-Caption] comment.createTime is nil!");
+                mgr.currentCreateTime = @"";
+            }
         }
         
         NSString *urlString = dyyyShouldUseLastStickerURL ? stickerURLList.lastObject : stickerURLList.firstObject;
@@ -2914,47 +2943,76 @@ static BOOL dyyyShouldUseLastStickerURL = NO;
         DYYYManager *mgr = [DYYYManager shared];
         if (comment.author) {
             @try {
+                // 运行时探测：记录author类名和所有属性
+                Class authorClass = [comment.author class];
+                unsigned int propCount = 0;
+                objc_property_t *props = class_copyPropertyList(authorClass, &propCount);
+                NSMutableString *propList = [NSMutableString string];
+                for (unsigned int i = 0; i < propCount; i++) {
+                    if (i > 0) [propList appendString:@", "];
+                    [propList appendString:[NSString stringWithUTF8String:property_getName(props[i])]];
+                }
+                free(props);
+                NSLog(@"[DYYY-Caption] comment.author class=%@ properties=[%@]", NSStringFromClass(authorClass), propList);
+                
                 NSString *nickname = nil;
                 NSString *shortID = nil;
                 
-                // 尝试多种可能的属性名
-                NSArray *nicknameKeys = @[@"nickname", @"name", @"userName", @"nick", @"username"];
+                // 尝试多种可能的属性名（performSelector优先，valueForKey兜底）
+                NSArray *nicknameKeys = @[@"nickname", @"nickName", @"name", @"userName", @"nick", @"username", @"display_name", @"displayName"];
                 for (NSString *key in nicknameKeys) {
+                    id value = nil;
                     if ([comment.author respondsToSelector:NSSelectorFromString(key)]) {
-                        id value = [comment.author performSelector:NSSelectorFromString(key)];
-                        if (value && [value isKindOfClass:[NSString class]] && [(NSString *)value length] > 0) {
-                            nickname = value;
-                            NSLog(@"[DYYY-Caption] 找到评论作者昵称: %@ -> %@", key, value);
-                            break;
-                        }
+                        value = [comment.author performSelector:NSSelectorFromString(key)];
+                    } else {
+                        @try { value = [comment.author valueForKey:key]; } @catch (NSException *e) {}
+                    }
+                    if (value && [value isKindOfClass:[NSString class]] && [(NSString *)value length] > 0) {
+                        nickname = value;
+                        NSLog(@"[DYYY-Caption] 找到评论作者昵称: %@ -> %@", key, value);
+                        break;
                     }
                 }
                 
-                NSArray *idKeys = @[@"shortID", @"uid", @"userId", @"user_id", @"id"];
+                NSArray *idKeys = @[@"shortID", @"short_id", @"uid", @"userId", @"user_id", @"uniqueId", @"unique_id", @"id"];
                 for (NSString *key in idKeys) {
+                    id value = nil;
                     if ([comment.author respondsToSelector:NSSelectorFromString(key)]) {
-                        id value = [comment.author performSelector:NSSelectorFromString(key)];
-                        if (value && ([value isKindOfClass:[NSString class]] || [value isKindOfClass:[NSNumber class]])) {
-                            shortID = [value stringValue];
-                            NSLog(@"[DYYY-Caption] 找到评论作者ID: %@ -> %@", key, value);
-                            break;
-                        }
+                        value = [comment.author performSelector:NSSelectorFromString(key)];
+                    } else {
+                        @try { value = [comment.author valueForKey:key]; } @catch (NSException *e) {}
+                    }
+                    if (value && ([value isKindOfClass:[NSString class]] || [value isKindOfClass:[NSNumber class]])) {
+                        shortID = [value stringValue];
+                        NSLog(@"[DYYY-Caption] 找到评论作者ID: %@ -> %@", key, value);
+                        break;
                     }
                 }
                 
                 mgr.currentAuthorNickname = nickname ?: @"";
                 mgr.currentAuthorShortID = shortID ?: @"";
+                NSLog(@"[DYYY-Caption] 评论作者信息: nickname=%@ shortID=%@", mgr.currentAuthorNickname, mgr.currentAuthorShortID);
             } @catch (NSException *e) {
                 NSLog(@"[DYYY] 获取评论作者信息失败: %@", e);
             }
-        }
-        if (comment.createTime) {
-            NSDate *date = [NSDate dateWithTimeIntervalSince1970:comment.createTime.doubleValue];
-            NSDateFormatter *fmt = [[NSDateFormatter alloc] init];
-            fmt.dateFormat = @"yyyy-MM-dd HH:mm";
-            mgr.currentCreateTime = [fmt stringFromDate:date] ?: @"";
         } else {
-            mgr.currentCreateTime = @"";
+            NSLog(@"[DYYY-Caption] comment.author is nil!");
+        }
+        // createTime也用valueForKey兜底
+        {
+            NSNumber *ct = comment.createTime;
+            if (!ct) {
+                @try { ct = [comment valueForKey:@"createTime"]; } @catch (NSException *e) {}
+            }
+            if (ct) {
+                NSDate *date = [NSDate dateWithTimeIntervalSince1970:ct.doubleValue];
+                NSDateFormatter *fmt = [[NSDateFormatter alloc] init];
+                fmt.dateFormat = @"yyyy-MM-dd HH:mm";
+                mgr.currentCreateTime = [fmt stringFromDate:date] ?: @"";
+            } else {
+                NSLog(@"[DYYY-Caption] comment.createTime is nil!");
+                mgr.currentCreateTime = @"";
+            }
         }
         
         // 检查 is_pic_inflow 判断是保存全部还是单张
