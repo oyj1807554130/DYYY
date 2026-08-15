@@ -3019,11 +3019,26 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                             qualityLabel = [qualityLabel stringByAppendingFormat:@"-[%@]", sizeStr];
                         }
 
+                        // 非lite标准分辨率用play接口URL（不过期），lite和非标准分辨率用CDN直链
+                        NSString *downloadURL = urlStr;
+                        if (!sameAsOriginal && videoURI.length > 0) {
+                            NSString *ratioForPlay = nil;
+                            if ([gearName containsString:@"1080"]) ratioForPlay = @"1080p";
+                            else if ([gearName containsString:@"720"]) ratioForPlay = @"720p";
+                            else if ([gearName containsString:@"540"]) ratioForPlay = @"540p";
+                            else if ([gearName containsString:@"480"]) ratioForPlay = @"480p";
+                            if (ratioForPlay) {
+                                downloadURL = [NSString stringWithFormat:@"https://www.douyin.com/aweme/v1/play/?video_id=%@&ratio=%@&line=1&device_platform=webapp&aid=6383&channel=channel_pc_web", videoURI, ratioForPlay];
+                            }
+                        }
                         [existingURLs addObject:urlStr];
+                        if (![downloadURL isEqualToString:urlStr]) {
+                            [existingURLs addObject:downloadURL];
+                        }
                         if (sameAsOriginal && videoList.count > 0) {
-                            [videoList insertObject:@{@"level": qualityLabel, @"url": urlStr} atIndex:1];
+                            [videoList insertObject:@{@"level": qualityLabel, @"url": downloadURL} atIndex:1];
                         } else {
-                            [videoList addObject:@{@"level": qualityLabel, @"url": urlStr}];
+                            [videoList addObject:@{@"level": qualityLabel, @"url": downloadURL}];
                         }
                     } @catch (NSException *e) {}
                 }
@@ -4209,8 +4224,9 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
         if (completion) completion(NO);
         return;
     }
-    // 如果是play接口URL，用dataTask跟随302重定向获取CDN直链
-    if ([url.absoluteString containsString:@"douyin.com/aweme/v1/play/"]) {
+    NSString *urlStr = url.absoluteString;
+    // play接口URL：HEAD+GET解析CDN直链
+    if ([urlStr containsString:@"douyin.com/aweme/v1/play/"]) {
         NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:url];
         req.HTTPMethod = @"HEAD";
         [req setValue:@"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36" forHTTPHeaderField:@"User-Agent"];
@@ -4249,9 +4265,40 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
         }] resume];
         return;
     }
-    // 非play接口URL，直接下载
+    // CDN直链URL：先HEAD解析获取新鲜CDN URL，降级直连
+    BOOL isCDNURL = ([urlStr containsString:@"douyinvod.com"] ||
+                     [urlStr containsString:@"365yg.com"] ||
+                     [urlStr containsString:@"ixigua.com"] ||
+                     [urlStr containsString:@"pstatp.com"] ||
+                     [urlStr containsString:@"snssdk.com"]);
+    if (isCDNURL) {
+        NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:url];
+        req.HTTPMethod = @"HEAD";
+        [req setValue:@"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36" forHTTPHeaderField:@"User-Agent"];
+        [req setValue:@"https://www.douyin.com/" forHTTPHeaderField:@"Referer"];
+        NSURLSessionConfiguration *config = [NSURLSessionConfiguration defaultSessionConfiguration];
+        config.timeoutIntervalForRequest = 5.0;
+        config.requestCachePolicy = NSURLRequestReloadIgnoringLocalCacheData;
+        NSURLSession *session = [NSURLSession sessionWithConfiguration:config];
+        [[session dataTaskWithRequest:req completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
+            NSURL *resolvedURL = url;
+            if (response && [response isKindOfClass:[NSHTTPURLResponse class]]) {
+                NSHTTPURLResponse *httpResp = (NSHTTPURLResponse *)response;
+                if (httpResp.statusCode >= 200 && httpResp.statusCode < 400) {
+                    NSURL *finalURL = httpResp.URL;
+                    if (finalURL) resolvedURL = finalURL;
+                }
+            }
+            NSLog(@"[DYYY] CDN HEAD解析: %@ -> %@", url.absoluteString, resolvedURL.absoluteString);
+            [self downloadMedia:resolvedURL mediaType:MediaTypeVideo audio:audioURL completion:completion];
+        }] resume];
+        return;
+    }
+    // 其他URL，直接下载
     [self downloadMedia:url mediaType:MediaTypeVideo audio:audioURL completion:completion];
 }
+
+
 
 #define DYYYLogVideo(format, ...) NSLog((@"[DYYY视频合成] " format), ##__VA_ARGS__)
 // 创建视频合成器从多种媒体源
