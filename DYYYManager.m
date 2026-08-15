@@ -2751,62 +2751,6 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
             }
         }
 
-        // 2.3 bitrateModels补充（去重，带gearName和码率信息）
-        {
-            NSArray *bitrateModels = nil;
-            @try { bitrateModels = [videoModel valueForKey:@"bitrateModels"]; } @catch (NSException *e) {}
-            if (bitrateModels && [bitrateModels isKindOfClass:[NSArray class]] && bitrateModels.count > 0) {
-                NSMutableArray *sortedModels = [NSMutableArray arrayWithArray:bitrateModels];
-                [sortedModels sortUsingComparator:^NSComparisonResult(id a, id b) {
-                    NSInteger ba = 0, bb = 0;
-                    @try { ba = [[a valueForKey:@"bitrate"] integerValue]; } @catch (NSException *e) {}
-                    @try { bb = [[b valueForKey:@"bitrate"] integerValue]; } @catch (NSException *e) {}
-                    return bb - ba;
-                }];
-                NSMutableSet *existingURLs = [NSMutableSet set];
-                for (NSDictionary *item in videoList) {
-                    NSString *u = item[@"url"];
-                    if (u) [existingURLs addObject:u];
-                }
-                for (id model in sortedModels) {
-                    @try {
-                        id modelPlayAddr = [model valueForKey:@"playAddr"];
-                        NSString *urlStr = nil;
-                        if (modelPlayAddr && [modelPlayAddr isKindOfClass:NSClassFromString(@"AWEURLModel")]) {
-                            id originList = [modelPlayAddr valueForKey:@"originURLList"];
-                            if ([originList isKindOfClass:[NSArray class]] && [(NSArray *)originList count] > 0) {
-                                urlStr = [(NSArray *)originList firstObject];
-                            }
-                        }
-                        if (urlStr.length == 0 || [existingURLs containsObject:urlStr]) continue;
-
-                        // 取码率
-                        NSInteger bitrate = 0;
-                        @try { bitrate = [[model valueForKey:@"bitrate"] integerValue]; } @catch (NSException *e) {}
-                        if (bitrate <= 0) continue;
-
-                        // 取gearName
-                        NSString *gearName = nil;
-                        @try { gearName = [model valueForKey:@"gearName"]; } @catch (NSException *e) {}
-
-                        // 构建label
-                        NSString *qualityLabel;
-                        if (gearName.length > 0) {
-                            qualityLabel = [NSString stringWithFormat:@"[%@]", gearName];
-                        } else if (bitrate >= 3000000) {
-                            qualityLabel = [NSString stringWithFormat:@"[高清%ldkbps]", (long)(bitrate/1000)];
-                        } else if (bitrate >= 1500000) {
-                            qualityLabel = [NSString stringWithFormat:@"[标清%ldkbps]", (long)(bitrate/1000)];
-                        } else {
-                            qualityLabel = [NSString stringWithFormat:@"[流畅%ldkbps]", (long)(bitrate/1000)];
-                        }
-
-                        [existingURLs addObject:urlStr];
-                        [videoList addObject:@{@"level": qualityLabel, @"url": urlStr}];
-                    } @catch (NSException *e) {}
-                }
-            }
-        }
         id coverURL = [videoModel valueForKey:@"coverURL"];
         if (coverURL && [coverURL valueForKey:@"originURLList"]) {
             NSArray *list = [coverURL valueForKey:@"originURLList"];
