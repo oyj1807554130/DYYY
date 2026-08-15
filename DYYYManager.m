@@ -2514,6 +2514,145 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
     id musicModel = [awemeModel valueForKey:@"music"];
     id authorModel = [awemeModel valueForKey:@"author"];
 
+    // === 运行时属性探测：dump videoModel和AWEURLModel的属性 ===
+    @try {
+        NSMutableString *diag = [NSMutableString stringWithString:@"[DYYY诊断]\n"];
+
+        // 1. videoModel所有属性和ivar
+        if (videoModel) {
+            [diag appendFormat:@"videoModel class: %@\n", NSStringFromClass([videoModel class])];
+            unsigned int propCount = 0;
+            objc_property_t *props = class_copyPropertyList([videoModel class], &propCount);
+            for (unsigned int i = 0; i < propCount; i++) {
+                const char *name = property_getName(props[i]);
+                NSString *propName = [NSString stringWithUTF8String:name];
+                @try {
+                    id val = [videoModel valueForKey:propName];
+                    NSString *valStr = @"nil";
+                    if (val) {
+                        valStr = [NSString stringWithFormat:@"%@", val];
+                        if ([valStr length] > 80) valStr = [[valStr substringToIndex:80] stringByAppendingString:@"..."];
+                    }
+                    [diag appendFormat:@"  prop %@ = %@\n", propName, valStr];
+                } @catch (NSException *e) {
+                    [diag appendFormat:@"  prop %@ = ERR:%@\n", propName, e.reason];
+                }
+            }
+            free(props);
+
+            // ivars
+            unsigned int ivarCount = 0;
+            Ivar *ivars = class_copyIvarList([videoModel class], &ivarCount);
+            for (unsigned int i = 0; i < ivarCount; i++) {
+                const char *name = ivar_getName(ivars[i]);
+                NSString *ivarName = [NSString stringWithUTF8String:name];
+                @try {
+                    id val = [videoModel valueForKey:ivarName];
+                    NSString *valStr = @"nil";
+                    if (val) {
+                        valStr = [NSString stringWithFormat:@"%@", val];
+                        if ([valStr length] > 80) valStr = [[valStr substringToIndex:80] stringByAppendingString:@"..."];
+                    }
+                    [diag appendFormat:@"  ivar %@ = %@\n", ivarName, valStr];
+                } @catch (NSException *e) {
+                    [diag appendFormat:@"  ivar %@ = ERR\n", ivarName];
+                }
+            }
+            free(ivars);
+        }
+
+        // 2. playURL (AWEURLModel) 的属性
+        id playURL = [videoModel valueForKey:@"playURL"];
+        if (playURL) {
+            [diag appendFormat:@"\nplayURL class: %@\n", NSStringFromClass([playURL class])];
+            unsigned int propCount2 = 0;
+            objc_property_t *props2 = class_copyPropertyList([playURL class], &propCount2);
+            for (unsigned int i = 0; i < propCount2; i++) {
+                const char *name = property_getName(props2[i]);
+                NSString *propName = [NSString stringWithUTF8String:name];
+                @try {
+                    id val = [playURL valueForKey:propName];
+                    NSString *valStr = @"nil";
+                    if (val) {
+                        valStr = [NSString stringWithFormat:@"%@", val];
+                        if ([valStr length] > 80) valStr = [[valStr substringToIndex:80] stringByAppendingString:@"..."];
+                    }
+                    [diag appendFormat:@"  prop %@ = %@\n", propName, valStr];
+                } @catch (NSException *e) {}
+            }
+            free(props2);
+            unsigned int ivarCount2 = 0;
+            Ivar *ivars2 = class_copyIvarList([playURL class], &ivarCount2);
+            for (unsigned int i = 0; i < ivarCount2; i++) {
+                const char *name = ivar_getName(ivars2[i]);
+                NSString *ivarName = [NSString stringWithUTF8String:name];
+                @try {
+                    id val = [playURL valueForKey:ivarName];
+                    NSString *valStr = @"nil";
+                    if (val) {
+                        valStr = [NSString stringWithFormat:@"%@", val];
+                        if ([valStr length] > 80) valStr = [[valStr substringToIndex:80] stringByAppendingString:@"..."];
+                    }
+                    [diag appendFormat:@"  ivar %@ = %@\n", ivarName, valStr];
+                } @catch (NSException *e) {}
+            }
+            free(ivars2);
+        }
+
+        // 3. bitrateModels[0]的playAddr属性
+        NSArray *bm = [videoModel valueForKey:@"bitrateModels"];
+        if (bm && [bm count] > 0) {
+            id firstModel = bm[0];
+            [diag appendFormat:@"\nbitrateModel[0] class: %@\n", NSStringFromClass([firstModel class])];
+            id bmPlayAddr = [firstModel valueForKey:@"playAddr"];
+            if (bmPlayAddr) {
+                [diag appendFormat:@"  bmPlayAddr class: %@\n", NSStringFromClass([bmPlayAddr class])];
+                unsigned int propCount3 = 0;
+                objc_property_t *props3 = class_copyPropertyList([bmPlayAddr class], &propCount3);
+                for (unsigned int i = 0; i < propCount3; i++) {
+                    const char *name = property_getName(props3[i]);
+                    NSString *propName = [NSString stringWithUTF8String:name];
+                    @try {
+                        id val = [bmPlayAddr valueForKey:propName];
+                        NSString *valStr = @"nil";
+                        if (val) {
+                            valStr = [NSString stringWithFormat:@"%@", val];
+                            if ([valStr length] > 80) valStr = [[valStr substringToIndex:80] stringByAppendingString:@"..."];
+                        }
+                        [diag appendFormat:@"  bmPlayAddr.prop %@ = %@\n", propName, valStr];
+                    } @catch (NSException *e) {}
+                }
+                free(props3);
+                unsigned int ivarCount3 = 0;
+                Ivar *ivars3 = class_copyIvarList([bmPlayAddr class], &ivarCount3);
+                for (unsigned int i = 0; i < ivarCount3; i++) {
+                    const char *name = ivar_getName(ivars3[i]);
+                    NSString *ivarName = [NSString stringWithUTF8String:name];
+                    @try {
+                        id val = [bmPlayAddr valueForKey:ivarName];
+                        NSString *valStr = @"nil";
+                        if (val) {
+                            valStr = [NSString stringWithFormat:@"%@", val];
+                            if ([valStr length] > 80) valStr = [[valStr substringToIndex:80] stringByAppendingString:@"..."];
+                        }
+                        [diag appendFormat:@"  bmPlayAddr.ivar %@ = %@\n", ivarName, valStr];
+                    } @catch (NSException *e) {}
+                }
+                free(ivars3);
+            }
+        }
+
+        // 截断到合理长度
+        if ([diag length] > 2000) {
+            diag = [[[diag substringToIndex:2000] stringByAppendingString:@"\n...截断"] mutableCopy];
+        }
+        NSLog(@"%@", diag);
+        [DYYYUtils showToast:diag];
+    } @catch (NSException *e) {
+        NSLog(@"[DYYY] diag exception: %@", e);
+    }
+    // === 运行时属性探测结束 ===
+
         // --- 视频码率列表 ---
     if (videoModel) {
         // 1. h264URL/playURL 始终作为原画选项
