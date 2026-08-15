@@ -388,19 +388,16 @@
         NSString *capturedShareLink = [self.awemeModel valueForKey:@"shareURL"];
         apiDownload1.action = ^{
           @try {
-          if (apiKey1.length == 0) {
-              [DYYYUtils showToast:@"请先在设置页面填写接口1地址"];
-              return;
-          }
           [DYYYManager storeMetadataFromAwemeModel:capturedAwemeModel];
           // 存储当前浏览的图片索引，用于接口保存实况照片时定位
           [DYYYManager shared].currentImageIndex = capturedImageIndex;
-          if (capturedShareLink.length == 0) {
-              [DYYYUtils showToast:@"无法获取分享链接"];
-              return;
+          // 本地解析（不依赖外部API）
+          NSDictionary *localData = [DYYYManager localParseFromAwemeModel:capturedAwemeModel];
+          if (localData) {
+              [DYYYManager handleVideoData:localData];
+          } else {
+              [DYYYUtils showToast:@"本地解析失败，视频数据为空"];
           }
-          // 使用封装的方法进行解析下载
-          [DYYYManager parseAndDownloadVideoWithShareLink:capturedShareLink apiKey:apiKey1];
           AWELongPressPanelManager *panelManager = [%c(AWELongPressPanelManager) shareInstance];
           [panelManager dismissWithAnimation:YES completion:nil];
           } @catch (NSException *e) {
@@ -425,19 +422,16 @@
         NSString *capturedShareLink2 = [self.awemeModel valueForKey:@"shareURL"];
         apiDownload2.action = ^{
           @try {
-          if (apiKey2.length == 0) {
-              [DYYYUtils showToast:@"请先在设置页面填写接口2地址"];
-              return;
-          }
           [DYYYManager storeMetadataFromAwemeModel:capturedAwemeModel2];
           // 存储当前浏览的图片索引，用于接口保存实况照片时定位
           [DYYYManager shared].currentImageIndex = capturedImageIndex2;
-          if (capturedShareLink2.length == 0) {
-              [DYYYUtils showToast:@"无法获取分享链接"];
-              return;
+          // 本地解析（不依赖外部API）
+          NSDictionary *localData = [DYYYManager localParseFromAwemeModel:capturedAwemeModel2];
+          if (localData) {
+              [DYYYManager handleVideoData:localData];
+          } else {
+              [DYYYUtils showToast:@"本地解析失败，视频数据为空"];
           }
-          // 使用封装的方法进行解析下载
-          [DYYYManager parseAndDownloadVideoWithShareLink:capturedShareLink2 apiKey:apiKey2];
           AWELongPressPanelManager *panelManager = [%c(AWELongPressPanelManager) shareInstance];
           [panelManager dismissWithAnimation:YES completion:nil];
           } @catch (NSException *e) {
@@ -1268,19 +1262,16 @@
         NSString *capturedShareLink = [self.awemeModel valueForKey:@"shareURL"];
         apiDownload1.action = ^{
           @try {
-          if (apiKey1.length == 0) {
-              [DYYYUtils showToast:@"请先在设置页面填写接口1地址"];
-              return;
-          }
           [DYYYManager storeMetadataFromAwemeModel:capturedAwemeModel];
           // 存储当前浏览的图片索引，用于接口保存实况照片时定位
           [DYYYManager shared].currentImageIndex = capturedImageIndex;
-          if (capturedShareLink.length == 0) {
-              [DYYYUtils showToast:@"无法获取分享链接"];
-              return;
+          // 本地解析（不依赖外部API）
+          NSDictionary *localData = [DYYYManager localParseFromAwemeModel:capturedAwemeModel];
+          if (localData) {
+              [DYYYManager handleVideoData:localData];
+          } else {
+              [DYYYUtils showToast:@"本地解析失败，视频数据为空"];
           }
-          // 使用封装的方法进行解析下载
-          [DYYYManager parseAndDownloadVideoWithShareLink:capturedShareLink apiKey:apiKey1];
           AWELongPressPanelManager *panelManager = [%c(AWELongPressPanelManager) shareInstance];
           [panelManager dismissWithAnimation:YES completion:nil];
           } @catch (NSException *e) {
@@ -1305,19 +1296,16 @@
         NSString *capturedShareLink2 = [self.awemeModel valueForKey:@"shareURL"];
         apiDownload2.action = ^{
           @try {
-          if (apiKey2.length == 0) {
-              [DYYYUtils showToast:@"请先在设置页面填写接口2地址"];
-              return;
-          }
           [DYYYManager storeMetadataFromAwemeModel:capturedAwemeModel2];
           // 存储当前浏览的图片索引，用于接口保存实况照片时定位
           [DYYYManager shared].currentImageIndex = capturedImageIndex2;
-          if (capturedShareLink2.length == 0) {
-              [DYYYUtils showToast:@"无法获取分享链接"];
-              return;
+          // 本地解析（不依赖外部API）
+          NSDictionary *localData = [DYYYManager localParseFromAwemeModel:capturedAwemeModel2];
+          if (localData) {
+              [DYYYManager handleVideoData:localData];
+          } else {
+              [DYYYUtils showToast:@"本地解析失败，视频数据为空"];
           }
-          // 使用封装的方法进行解析下载
-          [DYYYManager parseAndDownloadVideoWithShareLink:capturedShareLink2 apiKey:apiKey2];
           AWELongPressPanelManager *panelManager = [%c(AWELongPressPanelManager) shareInstance];
           [panelManager dismissWithAnimation:YES completion:nil];
           } @catch (NSException *e) {

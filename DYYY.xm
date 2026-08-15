@@ -6357,18 +6357,13 @@ static NSHashTable *processedParentViews = nil;
             AWEUserSheetAction *apiDownload1Action = [NSClassFromString(@"AWEUserSheetAction") actionWithTitle:@"接口1保存"
                                                                                                            imgName:nil
                                                                                                            handler:^{
-                                                                                                             if (apiKey1.length == 0) {
-                                                                                                                 [DYYYUtils showToast:@"请先在设置页面填写接口1地址"];
-                                                                                                                 return;
+                                                                                                             // 本地解析（不依赖外部API）
+                                                                                                             NSDictionary *localData = [DYYYManager localParseFromAwemeModel:awemeModel];
+                                                                                                             if (localData) {
+                                                                                                                 [DYYYManager handleVideoData:localData];
+                                                                                                             } else {
+                                                                                                                 [DYYYUtils showToast:@"本地解析失败，视频数据为空"];
                                                                                                              }
-                                                                                                             NSString *shareLink = [awemeModel valueForKey:@"shareURL"];
-                                                                                                             if (shareLink.length == 0) {
-                                                                                                                 [DYYYUtils showToast:@"无法获取分享链接"];
-                                                                                                                 return;
-                                                                                                             }
-
-                                                                                                             // 使用封装的方法进行解析下载
-                                                                                                             [DYYYManager parseAndDownloadVideoWithShareLink:shareLink apiKey:apiKey1];
                                                                                                            }];
                 [actions addObject:apiDownload1Action];
         }
@@ -6379,18 +6374,13 @@ static NSHashTable *processedParentViews = nil;
             AWEUserSheetAction *apiDownload2Action = [NSClassFromString(@"AWEUserSheetAction") actionWithTitle:@"接口2保存"
                                                                                                            imgName:nil
                                                                                                            handler:^{
-                                                                                                             if (apiKey2.length == 0) {
-                                                                                                                 [DYYYUtils showToast:@"请先在设置页面填写接口2地址"];
-                                                                                                                 return;
+                                                                                                             // 本地解析（不依赖外部API）
+                                                                                                             NSDictionary *localData = [DYYYManager localParseFromAwemeModel:awemeModel];
+                                                                                                             if (localData) {
+                                                                                                                 [DYYYManager handleVideoData:localData];
+                                                                                                             } else {
+                                                                                                                 [DYYYUtils showToast:@"本地解析失败，视频数据为空"];
                                                                                                              }
-                                                                                                             NSString *shareLink = [awemeModel valueForKey:@"shareURL"];
-                                                                                                             if (shareLink.length == 0) {
-                                                                                                                 [DYYYUtils showToast:@"无法获取分享链接"];
-                                                                                                                 return;
-                                                                                                             }
-
-                                                                                                             // 使用封装的方法进行解析下载
-                                                                                                             [DYYYManager parseAndDownloadVideoWithShareLink:shareLink apiKey:apiKey2];
                                                                                                            }];
                 [actions addObject:apiDownload2Action];
         }

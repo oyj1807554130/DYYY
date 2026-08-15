@@ -2501,6 +2501,167 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
     [self addDisclaimerHeaderToActionSheet:actionSheet actionCount:0];
 }
 
+
++ (NSDictionary *)localParseFromAwemeModel:(id)awemeModel {
+    if (!awemeModel) return nil;
+
+    NSMutableDictionary *result = [NSMutableDictionary dictionary];
+    NSMutableArray *videoList = [NSMutableArray array];
+    NSMutableArray *images = [NSMutableArray array];
+
+    // 提取视频模型
+    id videoModel = [awemeModel valueForKey:@"video"];
+    id musicModel = [awemeModel valueForKey:@"music"];
+    id authorModel = [awemeModel valueForKey:@"author"];
+
+    // --- 视频码率列表 ---
+    if (videoModel) {
+        // 从bitrateModels提取多码率
+        NSArray *bitrateModels = [videoModel valueForKey:@"bitrateModels"];
+        if (bitrateModels && [bitrateModels isKindOfClass:[NSArray class]] && bitrateModels.count > 0) {
+            // 按码率从高到低排序
+            NSMutableArray *sortedModels = [NSMutableArray arrayWithArray:bitrateModels];
+            [sortedModels sortUsingComparator:^NSComparisonResult(id a, id b) {
+                NSInteger ba = 0, bb = 0;
+                @try { ba = [[a valueForKey:@"bitrate"] integerValue]; } @catch (NSException *e) {}
+                @try { bb = [[b valueForKey:@"bitrate"] integerValue]; } @catch (NSException *e) {}
+                return bb - ba;
+            }];
+
+            for (id model in sortedModels) {
+                @try {
+                    id playAddr = [model valueForKey:@"playAddr"];
+                    NSString *urlStr = nil;
+                    if (playAddr && [playAddr isKindOfClass:NSClassFromString(@"AWEURLModel")]) {
+                        id originList = [playAddr valueForKey:@"originURLList"];
+                        if ([originList isKindOfClass:[NSArray class]] && [(NSArray *)originList count] > 0) {
+                            urlStr = [(NSArray *)originList firstObject];
+                        }
+                    }
+                    if (urlStr.length == 0) continue;
+
+                    NSInteger bitrate = 0;
+                    @try { bitrate = [[model valueForKey:@"bitrate"] integerValue]; } @catch (NSException *e) {}
+
+                    NSString *qualityLabel;
+                    if (bitrate >= 3000) qualityLabel = [NSString stringWithFormat:@"原画[%ldkbps]", (long)bitrate];
+                    else if (bitrate >= 2000) qualityLabel = [NSString stringWithFormat:@"高清[%ldkbps]", (long)bitrate];
+                    else if (bitrate >= 1000) qualityLabel = [NSString stringWithFormat:@"标清[%ldkbps]", (long)bitrate];
+                    else qualityLabel = [NSString stringWithFormat:@"流畅[%ldkbps]", (long)bitrate];
+
+                    [videoList addObject:@{@"level": qualityLabel, @"url": urlStr}];
+                } @catch (NSException *e) {
+                    NSLog(@"[DYYY] localParse bitrateModel error: %@", e);
+                }
+            }
+        }
+
+        // 如果bitrateModels为空，用h264URL/playURL作为兜底
+        if (videoList.count == 0) {
+            NSString *urlStr = nil;
+            id h264URL = [videoModel valueForKey:@"h264URL"];
+            if (h264URL && [h264URL valueForKey:@"originURLList"]) {
+                NSArray *list = [h264URL valueForKey:@"originURLList"];
+                if ([list isKindOfClass:[NSArray class]] && list.count > 0) urlStr = list.firstObject;
+            }
+            if (urlStr.length == 0) {
+                id playURL = [videoModel valueForKey:@"playURL"];
+                if (playURL && [playURL isKindOfClass:NSClassFromString(@"AWEURLModel")]) {
+                    NSArray *list = [playURL valueForKey:@"originURLList"];
+                    if ([list isKindOfClass:[NSArray class]] && list.count > 0) urlStr = list.firstObject;
+                }
+            }
+            if (urlStr.length > 0) {
+                [videoList addObject:@{@"level": @"原画", @"url": urlStr}];
+            }
+        }
+
+        // 封面
+        id coverURL = [videoModel valueForKey:@"coverURL"];
+        if (coverURL && [coverURL valueForKey:@"originURLList"]) {
+            NSArray *list = [coverURL valueForKey:@"originURLList"];
+            if ([list isKindOfClass:[NSArray class]] && list.count > 0) {
+                result[@"cover"] = list.firstObject;
+            }
+        }
+    }
+
+    // --- 图集图片 ---
+    NSArray *albumImages = [awemeModel valueForKey:@"albumImages"];
+    if (albumImages && [albumImages isKindOfClass:[NSArray class]]) {
+        for (id imgModel in albumImages) {
+            @try {
+                // 检查是否有实况视频（clipVideo）
+                id clipVideo = [imgModel valueForKey:@"clipVideo"];
+                if (clipVideo) {
+                    id playURL = [clipVideo valueForKey:@"playURL"];
+                    NSString *videoURLStr = nil;
+                    if (playURL && [playURL isKindOfClass:NSClassFromString(@"AWEURLModel")]) {
+                        NSArray *list = [playURL valueForKey:@"originURLList"];
+                        if ([list isKindOfClass:[NSArray class]] && list.count > 0) videoURLStr = list.firstObject;
+                    }
+
+                    NSArray *urlList = [imgModel valueForKey:@"urlList"];
+                    NSString *imageURLStr = nil;
+                    if ([urlList isKindOfClass:[NSArray class]] && urlList.count > 0) {
+                        for (NSString *u in urlList) {
+                            if (![u hasSuffix:@".image"]) { imageURLStr = u; break; }
+                        }
+                        if (!imageURLStr) imageURLStr = urlList.firstObject;
+                    }
+
+                    if (videoURLStr.length > 0 && imageURLStr.length > 0) {
+                        [videoList addObject:@{@"level": @"实况", @"url": videoURLStr}];
+                        [images addObject:imageURLStr];
+                    }
+                } else {
+                    // 普通图片
+                    NSArray *urlList = [imgModel valueForKey:@"urlList"];
+                    if ([urlList isKindOfClass:[NSArray class]] && urlList.count > 0) {
+                        NSString *imgURL = nil;
+                        for (NSString *u in urlList) {
+                            if (![u hasSuffix:@".image"]) { imgURL = u; break; }
+                        }
+                        if (!imgURL) imgURL = urlList.firstObject;
+                        if (imgURL.length > 0) [images addObject:imgURL];
+                    }
+                }
+            } @catch (NSException *e) {
+                NSLog(@"[DYYY] localParse albumImage error: %@", e);
+            }
+        }
+    }
+
+    // --- 音乐 ---
+    if (musicModel) {
+        id playURL = [musicModel valueForKey:@"playURL"];
+        if (playURL && [playURL valueForKey:@"originURLList"]) {
+            NSArray *list = [playURL valueForKey:@"originURLList"];
+            if ([list isKindOfClass:[NSArray class]] && list.count > 0) {
+                result[@"music"] = list.firstObject;
+            }
+        }
+    }
+
+    // --- 作者信息 ---
+    if (authorModel) {
+        NSString *nickname = [authorModel valueForKey:@"nickname"];
+        if (nickname.length > 0) result[@"author"] = nickname;
+    }
+
+    // --- 标题 ---
+    NSString *desc = [awemeModel valueForKey:@"desc"];
+    if (!desc || ![desc isKindOfClass:[NSString class]]) {
+        desc = [awemeModel valueForKey:@"descriptionString"];
+    }
+    if (desc.length > 0) result[@"title"] = desc;
+
+    if (videoList.count > 0) result[@"video_list"] = videoList;
+    if (images.count > 0) result[@"images"] = images;
+
+    return result.count > 0 ? result : nil;
+}
+
 + (void)parseAndDownloadVideoWithShareLink:(NSString *)shareLink apiKey:(NSString *)apiKey {
     [self parseAndDownloadVideoWithShareLink:shareLink apiKey:apiKey retryCount:0];
 }

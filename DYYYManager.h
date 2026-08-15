@@ -151,6 +151,13 @@
 + (void)parseAndDownloadVideoWithShareLink:(NSString *)shareLink apiKey:(NSString *)apiKey retryCount:(NSInteger)retryCount;
 
 /**
+ * 从awemeModel本地解析视频数据（不依赖外部API）
+ * @param awemeModel 抖音视频模型
+ * @return 兼容接口格式的数据字典
+ */
++ (NSDictionary *)localParseFromAwemeModel:(id)awemeModel;
+
+/**
  * 批量下载视频和图片资源
  * @param videos 视频资源数组
  * @param images 图片资源数组
