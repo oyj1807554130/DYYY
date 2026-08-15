@@ -393,28 +393,68 @@
           [DYYYManager shared].currentImageIndex = capturedImageIndex;
           BOOL isImg1 = (capturedAwemeModel.awemeType == 68 || capturedAwemeModel.albumImages.count > 0);
           if (isImg1) {
-              NSMutableArray *imageURLs1 = [NSMutableArray array];
-              NSMutableArray *livePhotos1 = [NSMutableArray array];
-              for (AWEImageAlbumImageModel *imgM in capturedAwemeModel.albumImages) {
-                  if (imgM.urlList.count > 0) {
-                      NSURL *dlURL1 = nil;
-                      for (NSString *us in imgM.urlList) {
-                          NSURL *u1 = [NSURL URLWithString:us];
-                          if (![[u1.path.lowercaseString pathExtension] isEqualToString:@"image"]) { dlURL1 = u1; break; }
+              // 图集：弹出选择菜单
+              AWELongPressPanelManager *pm1 = [%c(AWELongPressPanelManager) shareInstance];
+              [pm1 dismissWithAnimation:YES completion:^{
+                  AWEUserActionSheetView *imgSheet1 = [[NSClassFromString(@"AWEUserActionSheetView") alloc] init];
+                  NSMutableArray *imgActs1 = [NSMutableArray array];
+                  AWEUserSheetAction *saveCur1 = [NSClassFromString(@"AWEUserSheetAction") actionWithTitle:@"保存当前图片" imgName:nil handler:^{
+                      AWEImageAlbumImageModel *curI1 = nil;
+                      if (capturedAwemeModel.currentImageIndex > 0 && capturedAwemeModel.currentImageIndex <= capturedAwemeModel.albumImages.count) {
+                          curI1 = capturedAwemeModel.albumImages[capturedAwemeModel.currentImageIndex - 1];
+                      } else {
+                          curI1 = capturedAwemeModel.albumImages.firstObject;
                       }
-                      if (!dlURL1 && imgM.urlList.count > 0) dlURL1 = [NSURL URLWithString:imgM.urlList.firstObject];
-                      if (imgM.clipVideo != nil && dlURL1 != nil) {
-                          NSURL *vURL1 = [imgM.clipVideo.playURL getDYYYSrcURLDownload];
-                          if (vURL1) [livePhotos1 addObject:@{@"imageURL": dlURL1.absoluteString, @"videoURL": vURL1.absoluteString}];
-                          else [imageURLs1 addObject:dlURL1.absoluteString];
-                      } else if (dlURL1 != nil) {
-                          [imageURLs1 addObject:dlURL1.absoluteString];
+                      if (curI1) {
+                          NSURL *d1 = nil;
+                          for (NSString *us in curI1.urlList) {
+                              NSURL *u1 = [NSURL URLWithString:us];
+                              if (![[u1.path.lowercaseString pathExtension] isEqualToString:@"image"]) { d1 = u1; break; }
+                          }
+                          if (!d1 && curI1.urlList.count > 0) d1 = [NSURL URLWithString:curI1.urlList.firstObject];
+                          if (curI1.clipVideo != nil && d1 != nil) {
+                              NSURL *v1 = [curI1.clipVideo.playURL getDYYYSrcURLDownload];
+                              if (v1) [DYYYManager downloadLivePhoto:d1 videoURL:v1 completion:^{}];
+                              else [DYYYManager downloadMedia:d1 mediaType:MediaTypeImage audio:nil completion:^(BOOL s) {}];
+                          } else if (d1 != nil) {
+                              [DYYYManager downloadMedia:d1 mediaType:MediaTypeImage audio:nil completion:^(BOOL s) {}];
+                          } else {
+                              [DYYYUtils showToast:@"没有找到合适格式的图片"];
+                          }
+                      } else {
+                          [DYYYUtils showToast:@"没有找到当前图片"];
                       }
-                  }
-              }
-              if (livePhotos1.count > 0) [DYYYManager downloadAllLivePhotosWithProgress:livePhotos1 progress:nil completion:^(NSInteger s, NSInteger t) {}];
-              else if (imageURLs1.count > 0) [DYYYManager downloadAllImages:imageURLs1];
-              else [DYYYUtils showToast:@"没有找到合适格式的图片"];
+                  }];
+                  [imgActs1 addObject:saveCur1];
+                  AWEUserSheetAction *saveAll1 = [NSClassFromString(@"AWEUserSheetAction") actionWithTitle:@"保存全部图片" imgName:nil handler:^{
+                      NSMutableArray *iurls1 = [NSMutableArray array];
+                      NSMutableArray *lps1 = [NSMutableArray array];
+                      for (AWEImageAlbumImageModel *imgM in capturedAwemeModel.albumImages) {
+                          if (imgM.urlList.count > 0) {
+                              NSURL *d1 = nil;
+                              for (NSString *us in imgM.urlList) {
+                                  NSURL *u1 = [NSURL URLWithString:us];
+                                  if (![[u1.path.lowercaseString pathExtension] isEqualToString:@"image"]) { d1 = u1; break; }
+                              }
+                              if (!d1 && imgM.urlList.count > 0) d1 = [NSURL URLWithString:imgM.urlList.firstObject];
+                              if (imgM.clipVideo != nil && d1 != nil) {
+                                  NSURL *v1 = [imgM.clipVideo.playURL getDYYYSrcURLDownload];
+                                  if (v1) [lps1 addObject:@{@"imageURL": d1.absoluteString, @"videoURL": v1.absoluteString}];
+                                  else [iurls1 addObject:d1.absoluteString];
+                              } else if (d1 != nil) {
+                                  [iurls1 addObject:d1.absoluteString];
+                              }
+                          }
+                      }
+                      if (lps1.count > 0) [DYYYManager downloadAllLivePhotosWithProgress:lps1 progress:nil completion:^(NSInteger s, NSInteger t) {}];
+                      else if (iurls1.count > 0) [DYYYManager downloadAllImages:iurls1];
+                      else [DYYYUtils showToast:@"没有找到合适格式的图片"];
+                  }];
+                  [imgActs1 addObject:saveAll1];
+                  AWEUserSheetAction *cancel1 = [NSClassFromString(@"AWEUserSheetAction") actionWithTitle:@"取消" imgName:nil handler:^{}];
+                  [imgSheet1 setActions:imgActs1 cancelAction:cancel1];
+                  [imgSheet1 show];
+              }];
           } else {
               NSDictionary *localData = [DYYYManager localParseFromAwemeModel:capturedAwemeModel];
               if (localData) {
@@ -422,9 +462,9 @@
               } else {
                   [DYYYUtils showToast:@"本地解析失败，视频数据为空"];
               }
+              AWELongPressPanelManager *panelManager = [%c(AWELongPressPanelManager) shareInstance];
+              [panelManager dismissWithAnimation:YES completion:nil];
           }
-          AWELongPressPanelManager *panelManager = [%c(AWELongPressPanelManager) shareInstance];
-          [panelManager dismissWithAnimation:YES completion:nil];
           } @catch (NSException *e) {
               NSLog(@"[DYYY] API download action exception: %@", e);
               [DYYYUtils showToast:@"接口1保存异常，请重试"];
@@ -1294,28 +1334,68 @@
           [DYYYManager shared].currentImageIndex = capturedImageIndex;
           BOOL isImg1 = (capturedAwemeModel.awemeType == 68 || capturedAwemeModel.albumImages.count > 0);
           if (isImg1) {
-              NSMutableArray *imageURLs1 = [NSMutableArray array];
-              NSMutableArray *livePhotos1 = [NSMutableArray array];
-              for (AWEImageAlbumImageModel *imgM in capturedAwemeModel.albumImages) {
-                  if (imgM.urlList.count > 0) {
-                      NSURL *dlURL1 = nil;
-                      for (NSString *us in imgM.urlList) {
-                          NSURL *u1 = [NSURL URLWithString:us];
-                          if (![[u1.path.lowercaseString pathExtension] isEqualToString:@"image"]) { dlURL1 = u1; break; }
+              // 图集：弹出选择菜单
+              AWELongPressPanelManager *pm1 = [%c(AWELongPressPanelManager) shareInstance];
+              [pm1 dismissWithAnimation:YES completion:^{
+                  AWEUserActionSheetView *imgSheet1 = [[NSClassFromString(@"AWEUserActionSheetView") alloc] init];
+                  NSMutableArray *imgActs1 = [NSMutableArray array];
+                  AWEUserSheetAction *saveCur1 = [NSClassFromString(@"AWEUserSheetAction") actionWithTitle:@"保存当前图片" imgName:nil handler:^{
+                      AWEImageAlbumImageModel *curI1 = nil;
+                      if (capturedAwemeModel.currentImageIndex > 0 && capturedAwemeModel.currentImageIndex <= capturedAwemeModel.albumImages.count) {
+                          curI1 = capturedAwemeModel.albumImages[capturedAwemeModel.currentImageIndex - 1];
+                      } else {
+                          curI1 = capturedAwemeModel.albumImages.firstObject;
                       }
-                      if (!dlURL1 && imgM.urlList.count > 0) dlURL1 = [NSURL URLWithString:imgM.urlList.firstObject];
-                      if (imgM.clipVideo != nil && dlURL1 != nil) {
-                          NSURL *vURL1 = [imgM.clipVideo.playURL getDYYYSrcURLDownload];
-                          if (vURL1) [livePhotos1 addObject:@{@"imageURL": dlURL1.absoluteString, @"videoURL": vURL1.absoluteString}];
-                          else [imageURLs1 addObject:dlURL1.absoluteString];
-                      } else if (dlURL1 != nil) {
-                          [imageURLs1 addObject:dlURL1.absoluteString];
+                      if (curI1) {
+                          NSURL *d1 = nil;
+                          for (NSString *us in curI1.urlList) {
+                              NSURL *u1 = [NSURL URLWithString:us];
+                              if (![[u1.path.lowercaseString pathExtension] isEqualToString:@"image"]) { d1 = u1; break; }
+                          }
+                          if (!d1 && curI1.urlList.count > 0) d1 = [NSURL URLWithString:curI1.urlList.firstObject];
+                          if (curI1.clipVideo != nil && d1 != nil) {
+                              NSURL *v1 = [curI1.clipVideo.playURL getDYYYSrcURLDownload];
+                              if (v1) [DYYYManager downloadLivePhoto:d1 videoURL:v1 completion:^{}];
+                              else [DYYYManager downloadMedia:d1 mediaType:MediaTypeImage audio:nil completion:^(BOOL s) {}];
+                          } else if (d1 != nil) {
+                              [DYYYManager downloadMedia:d1 mediaType:MediaTypeImage audio:nil completion:^(BOOL s) {}];
+                          } else {
+                              [DYYYUtils showToast:@"没有找到合适格式的图片"];
+                          }
+                      } else {
+                          [DYYYUtils showToast:@"没有找到当前图片"];
                       }
-                  }
-              }
-              if (livePhotos1.count > 0) [DYYYManager downloadAllLivePhotosWithProgress:livePhotos1 progress:nil completion:^(NSInteger s, NSInteger t) {}];
-              else if (imageURLs1.count > 0) [DYYYManager downloadAllImages:imageURLs1];
-              else [DYYYUtils showToast:@"没有找到合适格式的图片"];
+                  }];
+                  [imgActs1 addObject:saveCur1];
+                  AWEUserSheetAction *saveAll1 = [NSClassFromString(@"AWEUserSheetAction") actionWithTitle:@"保存全部图片" imgName:nil handler:^{
+                      NSMutableArray *iurls1 = [NSMutableArray array];
+                      NSMutableArray *lps1 = [NSMutableArray array];
+                      for (AWEImageAlbumImageModel *imgM in capturedAwemeModel.albumImages) {
+                          if (imgM.urlList.count > 0) {
+                              NSURL *d1 = nil;
+                              for (NSString *us in imgM.urlList) {
+                                  NSURL *u1 = [NSURL URLWithString:us];
+                                  if (![[u1.path.lowercaseString pathExtension] isEqualToString:@"image"]) { d1 = u1; break; }
+                              }
+                              if (!d1 && imgM.urlList.count > 0) d1 = [NSURL URLWithString:imgM.urlList.firstObject];
+                              if (imgM.clipVideo != nil && d1 != nil) {
+                                  NSURL *v1 = [imgM.clipVideo.playURL getDYYYSrcURLDownload];
+                                  if (v1) [lps1 addObject:@{@"imageURL": d1.absoluteString, @"videoURL": v1.absoluteString}];
+                                  else [iurls1 addObject:d1.absoluteString];
+                              } else if (d1 != nil) {
+                                  [iurls1 addObject:d1.absoluteString];
+                              }
+                          }
+                      }
+                      if (lps1.count > 0) [DYYYManager downloadAllLivePhotosWithProgress:lps1 progress:nil completion:^(NSInteger s, NSInteger t) {}];
+                      else if (iurls1.count > 0) [DYYYManager downloadAllImages:iurls1];
+                      else [DYYYUtils showToast:@"没有找到合适格式的图片"];
+                  }];
+                  [imgActs1 addObject:saveAll1];
+                  AWEUserSheetAction *cancel1 = [NSClassFromString(@"AWEUserSheetAction") actionWithTitle:@"取消" imgName:nil handler:^{}];
+                  [imgSheet1 setActions:imgActs1 cancelAction:cancel1];
+                  [imgSheet1 show];
+              }];
           } else {
               NSDictionary *localData = [DYYYManager localParseFromAwemeModel:capturedAwemeModel];
               if (localData) {
@@ -1323,9 +1403,9 @@
               } else {
                   [DYYYUtils showToast:@"本地解析失败，视频数据为空"];
               }
+              AWELongPressPanelManager *panelManager = [%c(AWELongPressPanelManager) shareInstance];
+              [panelManager dismissWithAnimation:YES completion:nil];
           }
-          AWELongPressPanelManager *panelManager = [%c(AWELongPressPanelManager) shareInstance];
-          [panelManager dismissWithAnimation:YES completion:nil];
           } @catch (NSException *e) {
               NSLog(@"[DYYY] API download action exception: %@", e);
               [DYYYUtils showToast:@"接口1保存异常，请重试"];

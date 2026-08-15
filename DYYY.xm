@@ -6358,42 +6358,71 @@ static NSHashTable *processedParentViews = nil;
                                                                                                            imgName:nil
                                                                                                            handler:^{
                                                                                                              if (isImageContent) {
-                                                                                                                 // 图集：走图片保存逻辑
-                                                                                                                 NSMutableArray *imageURLs = [NSMutableArray array];
-                                                                                                                 NSMutableArray *livePhotos = [NSMutableArray array];
-                                                                                                                 for (AWEImageAlbumImageModel *imageModel in awemeModel.albumImages) {
-                                                                                                                     if (imageModel.urlList.count > 0) {
-                                                                                                                         NSURL *downloadURL = nil;
-                                                                                                                         for (NSString *urlString in imageModel.urlList) {
-                                                                                                                             NSURL *url = [NSURL URLWithString:urlString];
-                                                                                                                             NSString *ext = [url.path.lowercaseString pathExtension];
-                                                                                                                             if (![ext isEqualToString:@"image"]) {
-                                                                                                                                 downloadURL = url;
-                                                                                                                                 break;
-                                                                                                                             }
+                                                                                                                 // 图集：弹出选择菜单
+                                                                                                                 AWEUserActionSheetView *imgSheet = [[NSClassFromString(@"AWEUserActionSheetView") alloc] init];
+                                                                                                                 NSMutableArray *imgActions = [NSMutableArray array];
+                                                                                                                 // 保存当前图片
+                                                                                                                 AWEUserSheetAction *saveCurrentAction = [NSClassFromString(@"AWEUserSheetAction") actionWithTitle:@"保存当前图片" imgName:nil handler:^{
+                                                                                                                     AWEImageAlbumImageModel *curImg = nil;
+                                                                                                                     if (awemeModel.currentImageIndex > 0 && awemeModel.currentImageIndex <= awemeModel.albumImages.count) {
+                                                                                                                         curImg = awemeModel.albumImages[awemeModel.currentImageIndex - 1];
+                                                                                                                     } else {
+                                                                                                                         curImg = awemeModel.albumImages.firstObject;
+                                                                                                                     }
+                                                                                                                     if (curImg) {
+                                                                                                                         NSURL *dlURL = nil;
+                                                                                                                         for (NSString *us in curImg.urlList) {
+                                                                                                                             NSURL *u = [NSURL URLWithString:us];
+                                                                                                                             if (![[u.path.lowercaseString pathExtension] isEqualToString:@"image"]) { dlURL = u; break; }
                                                                                                                          }
-                                                                                                                         if (!downloadURL && imageModel.urlList.count > 0) {
-                                                                                                                             downloadURL = [NSURL URLWithString:imageModel.urlList.firstObject];
+                                                                                                                         if (!dlURL && curImg.urlList.count > 0) dlURL = [NSURL URLWithString:curImg.urlList.firstObject];
+                                                                                                                         if (curImg.clipVideo != nil && dlURL != nil) {
+                                                                                                                             NSURL *vURL = [curImg.clipVideo.playURL getDYYYSrcURLDownload];
+                                                                                                                             if (vURL) { [DYYYManager downloadLivePhoto:dlURL videoURL:vURL completion:^{}]; }
+                                                                                                                             else { [DYYYManager downloadMedia:dlURL mediaType:MediaTypeImage audio:nil completion:^(BOOL s) {}]; }
+                                                                                                                         } else if (dlURL != nil) {
+                                                                                                                             [DYYYManager downloadMedia:dlURL mediaType:MediaTypeImage audio:nil completion:^(BOOL s) {}];
+                                                                                                                         } else {
+                                                                                                                             [DYYYUtils showToast:@"没有找到合适格式的图片"];
                                                                                                                          }
-                                                                                                                         if (imageModel.clipVideo != nil && downloadURL != nil) {
-                                                                                                                             NSURL *videoURL = [imageModel.clipVideo.playURL getDYYYSrcURLDownload];
-                                                                                                                             if (videoURL) {
-                                                                                                                                 [livePhotos addObject:@{@"imageURL": downloadURL.absoluteString, @"videoURL": videoURL.absoluteString}];
-                                                                                                                             } else {
-                                                                                                                                 [imageURLs addObject:downloadURL.absoluteString];
+                                                                                                                     } else {
+                                                                                                                         [DYYYUtils showToast:@"没有找到当前图片"];
+                                                                                                                     }
+                                                                                                                 }];
+                                                                                                                 [imgActions addObject:saveCurrentAction];
+                                                                                                                 // 保存全部图片
+                                                                                                                 AWEUserSheetAction *saveAllAction = [NSClassFromString(@"AWEUserSheetAction") actionWithTitle:@"保存全部图片" imgName:nil handler:^{
+                                                                                                                     NSMutableArray *imageURLs = [NSMutableArray array];
+                                                                                                                     NSMutableArray *livePhotos = [NSMutableArray array];
+                                                                                                                     for (AWEImageAlbumImageModel *imgM in awemeModel.albumImages) {
+                                                                                                                         if (imgM.urlList.count > 0) {
+                                                                                                                             NSURL *dlURL = nil;
+                                                                                                                             for (NSString *us in imgM.urlList) {
+                                                                                                                                 NSURL *u = [NSURL URLWithString:us];
+                                                                                                                                 if (![[u.path.lowercaseString pathExtension] isEqualToString:@"image"]) { dlURL = u; break; }
                                                                                                                              }
-                                                                                                                         } else if (downloadURL != nil) {
-                                                                                                                             [imageURLs addObject:downloadURL.absoluteString];
+                                                                                                                             if (!dlURL && imgM.urlList.count > 0) dlURL = [NSURL URLWithString:imgM.urlList.firstObject];
+                                                                                                                             if (imgM.clipVideo != nil && dlURL != nil) {
+                                                                                                                                 NSURL *vURL = [imgM.clipVideo.playURL getDYYYSrcURLDownload];
+                                                                                                                                 if (vURL) [livePhotos addObject:@{@"imageURL": dlURL.absoluteString, @"videoURL": vURL.absoluteString}];
+                                                                                                                                 else [imageURLs addObject:dlURL.absoluteString];
+                                                                                                                             } else if (dlURL != nil) {
+                                                                                                                                 [imageURLs addObject:dlURL.absoluteString];
+                                                                                                                             }
                                                                                                                          }
                                                                                                                      }
-                                                                                                                 }
-                                                                                                                 if (livePhotos.count > 0) {
-                                                                                                                     [DYYYManager downloadAllLivePhotosWithProgress:livePhotos progress:nil completion:^(NSInteger s, NSInteger t) {}];
-                                                                                                                 } else if (imageURLs.count > 0) {
-                                                                                                                     [DYYYManager downloadAllImages:imageURLs];
-                                                                                                                 } else {
-                                                                                                                     [DYYYUtils showToast:@"没有找到合适格式的图片"];
-                                                                                                                 }
+                                                                                                                     if (livePhotos.count > 0) {
+                                                                                                                         [DYYYManager downloadAllLivePhotosWithProgress:livePhotos progress:nil completion:^(NSInteger s, NSInteger t) {}];
+                                                                                                                     } else if (imageURLs.count > 0) {
+                                                                                                                         [DYYYManager downloadAllImages:imageURLs];
+                                                                                                                     } else {
+                                                                                                                         [DYYYUtils showToast:@"没有找到合适格式的图片"];
+                                                                                                                     }
+                                                                                                                 }];
+                                                                                                                 [imgActions addObject:saveAllAction];
+                                                                                                                 AWEUserSheetAction *cancelAction = [NSClassFromString(@"AWEUserSheetAction") actionWithTitle:@"取消" imgName:nil handler:^{}];
+                                                                                                                 [imgSheet setActions:imgActions cancelAction:cancelAction];
+                                                                                                                 [imgSheet show];
                                                                                                              } else {
                                                                                                                  // 视频：本地解析
                                                                                                                  NSDictionary *localData = [DYYYManager localParseFromAwemeModel:awemeModel];
