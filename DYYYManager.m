@@ -3693,7 +3693,7 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
 
 }
 
-- (void)resolveAndDownloadVideo:(NSURL *)url audio:(NSURL *)audioURL completion:(void (^)(BOOL success))completion {
++ (void)resolveAndDownloadVideo:(NSURL *)url audio:(NSURL *)audioURL completion:(void (^)(BOOL success))completion {
     if (!url) {
         if (completion) completion(NO);
         return;
