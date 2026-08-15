@@ -425,13 +425,16 @@
           [DYYYManager storeMetadataFromAwemeModel:capturedAwemeModel2];
           // 存储当前浏览的图片索引，用于接口保存实况照片时定位
           [DYYYManager shared].currentImageIndex = capturedImageIndex2;
-          // 本地解析（不依赖外部API）
-          NSDictionary *localData = [DYYYManager localParseFromAwemeModel:capturedAwemeModel2];
-          if (localData) {
-              [DYYYManager handleVideoData:localData];
-          } else {
-              [DYYYUtils showToast:@"本地解析失败，视频数据为空"];
+          if (apiKey2.length == 0) {
+              [DYYYUtils showToast:@"请先在设置页面填写接口2地址"];
+              return;
           }
+          if (capturedShareLink2.length == 0) {
+              [DYYYUtils showToast:@"无法获取分享链接"];
+              return;
+          }
+          // 使用外部API解析下载
+          [DYYYManager parseAndDownloadVideoWithShareLink:capturedShareLink2 apiKey:apiKey2];
           AWELongPressPanelManager *panelManager = [%c(AWELongPressPanelManager) shareInstance];
           [panelManager dismissWithAnimation:YES completion:nil];
           } @catch (NSException *e) {
@@ -1299,13 +1302,16 @@
           [DYYYManager storeMetadataFromAwemeModel:capturedAwemeModel2];
           // 存储当前浏览的图片索引，用于接口保存实况照片时定位
           [DYYYManager shared].currentImageIndex = capturedImageIndex2;
-          // 本地解析（不依赖外部API）
-          NSDictionary *localData = [DYYYManager localParseFromAwemeModel:capturedAwemeModel2];
-          if (localData) {
-              [DYYYManager handleVideoData:localData];
-          } else {
-              [DYYYUtils showToast:@"本地解析失败，视频数据为空"];
+          if (apiKey2.length == 0) {
+              [DYYYUtils showToast:@"请先在设置页面填写接口2地址"];
+              return;
           }
+          if (capturedShareLink2.length == 0) {
+              [DYYYUtils showToast:@"无法获取分享链接"];
+              return;
+          }
+          // 使用外部API解析下载
+          [DYYYManager parseAndDownloadVideoWithShareLink:capturedShareLink2 apiKey:apiKey2];
           AWELongPressPanelManager *panelManager = [%c(AWELongPressPanelManager) shareInstance];
           [panelManager dismissWithAnimation:YES completion:nil];
           } @catch (NSException *e) {
