@@ -6357,12 +6357,51 @@ static NSHashTable *processedParentViews = nil;
             AWEUserSheetAction *apiDownload1Action = [NSClassFromString(@"AWEUserSheetAction") actionWithTitle:@"接口1保存"
                                                                                                            imgName:nil
                                                                                                            handler:^{
-                                                                                                             // 本地解析（不依赖外部API）
-                                                                                                             NSDictionary *localData = [DYYYManager localParseFromAwemeModel:awemeModel];
-                                                                                                             if (localData) {
-                                                                                                                 [DYYYManager handleVideoData:localData];
+                                                                                                             if (isImageContent) {
+                                                                                                                 // 图集：走图片保存逻辑
+                                                                                                                 NSMutableArray *imageURLs = [NSMutableArray array];
+                                                                                                                 NSMutableArray *livePhotos = [NSMutableArray array];
+                                                                                                                 for (AWEImageAlbumImageModel *imageModel in awemeModel.albumImages) {
+                                                                                                                     if (imageModel.urlList.count > 0) {
+                                                                                                                         NSURL *downloadURL = nil;
+                                                                                                                         for (NSString *urlString in imageModel.urlList) {
+                                                                                                                             NSURL *url = [NSURL URLWithString:urlString];
+                                                                                                                             NSString *ext = [url.path.lowercaseString pathExtension];
+                                                                                                                             if (![ext isEqualToString:@"image"]) {
+                                                                                                                                 downloadURL = url;
+                                                                                                                                 break;
+                                                                                                                             }
+                                                                                                                         }
+                                                                                                                         if (!downloadURL && imageModel.urlList.count > 0) {
+                                                                                                                             downloadURL = [NSURL URLWithString:imageModel.urlList.firstObject];
+                                                                                                                         }
+                                                                                                                         if (imageModel.clipVideo != nil && downloadURL != nil) {
+                                                                                                                             NSURL *videoURL = [imageModel.clipVideo.playURL getDYYYSrcURLDownload];
+                                                                                                                             if (videoURL) {
+                                                                                                                                 [livePhotos addObject:@{@"imageURL": downloadURL.absoluteString, @"videoURL": videoURL.absoluteString}];
+                                                                                                                             } else {
+                                                                                                                                 [imageURLs addObject:downloadURL.absoluteString];
+                                                                                                                             }
+                                                                                                                         } else if (downloadURL != nil) {
+                                                                                                                             [imageURLs addObject:downloadURL.absoluteString];
+                                                                                                                         }
+                                                                                                                     }
+                                                                                                                 }
+                                                                                                                 if (livePhotos.count > 0) {
+                                                                                                                     [DYYYManager downloadAllLivePhotosWithProgress:livePhotos progress:nil completion:^(NSInteger s, NSInteger t) {}];
+                                                                                                                 } else if (imageURLs.count > 0) {
+                                                                                                                     [DYYYManager downloadAllImages:imageURLs];
+                                                                                                                 } else {
+                                                                                                                     [DYYYUtils showToast:@"没有找到合适格式的图片"];
+                                                                                                                 }
                                                                                                              } else {
-                                                                                                                 [DYYYUtils showToast:@"本地解析失败，视频数据为空"];
+                                                                                                                 // 视频：本地解析
+                                                                                                                 NSDictionary *localData = [DYYYManager localParseFromAwemeModel:awemeModel];
+                                                                                                                 if (localData) {
+                                                                                                                     [DYYYManager handleVideoData:localData];
+                                                                                                                 } else {
+                                                                                                                     [DYYYUtils showToast:@"本地解析失败，视频数据为空"];
+                                                                                                                 }
                                                                                                              }
                                                                                                            }];
                 [actions addObject:apiDownload1Action];
@@ -6374,17 +6413,55 @@ static NSHashTable *processedParentViews = nil;
             AWEUserSheetAction *apiDownload2Action = [NSClassFromString(@"AWEUserSheetAction") actionWithTitle:@"接口2保存"
                                                                                                            imgName:nil
                                                                                                            handler:^{
-                                                                                                             if (apiKey2.length == 0) {
-                                                                                                                 [DYYYUtils showToast:@"请先在设置页面填写接口2地址"];
-                                                                                                                 return;
+                                                                                                             if (isImageContent) {
+                                                                                                                 // 图集：走图片保存逻辑
+                                                                                                                 NSMutableArray *imageURLs = [NSMutableArray array];
+                                                                                                                 NSMutableArray *livePhotos = [NSMutableArray array];
+                                                                                                                 for (AWEImageAlbumImageModel *imageModel in awemeModel.albumImages) {
+                                                                                                                     if (imageModel.urlList.count > 0) {
+                                                                                                                         NSURL *downloadURL = nil;
+                                                                                                                         for (NSString *urlString in imageModel.urlList) {
+                                                                                                                             NSURL *url = [NSURL URLWithString:urlString];
+                                                                                                                             NSString *ext = [url.path.lowercaseString pathExtension];
+                                                                                                                             if (![ext isEqualToString:@"image"]) {
+                                                                                                                                 downloadURL = url;
+                                                                                                                                 break;
+                                                                                                                             }
+                                                                                                                         }
+                                                                                                                         if (!downloadURL && imageModel.urlList.count > 0) {
+                                                                                                                             downloadURL = [NSURL URLWithString:imageModel.urlList.firstObject];
+                                                                                                                         }
+                                                                                                                         if (imageModel.clipVideo != nil && downloadURL != nil) {
+                                                                                                                             NSURL *videoURL = [imageModel.clipVideo.playURL getDYYYSrcURLDownload];
+                                                                                                                             if (videoURL) {
+                                                                                                                                 [livePhotos addObject:@{@"imageURL": downloadURL.absoluteString, @"videoURL": videoURL.absoluteString}];
+                                                                                                                             } else {
+                                                                                                                                 [imageURLs addObject:downloadURL.absoluteString];
+                                                                                                                             }
+                                                                                                                         } else if (downloadURL != nil) {
+                                                                                                                             [imageURLs addObject:downloadURL.absoluteString];
+                                                                                                                         }
+                                                                                                                     }
+                                                                                                                 }
+                                                                                                                 if (livePhotos.count > 0) {
+                                                                                                                     [DYYYManager downloadAllLivePhotosWithProgress:livePhotos progress:nil completion:^(NSInteger s, NSInteger t) {}];
+                                                                                                                 } else if (imageURLs.count > 0) {
+                                                                                                                     [DYYYManager downloadAllImages:imageURLs];
+                                                                                                                 } else {
+                                                                                                                     [DYYYUtils showToast:@"没有找到合适格式的图片"];
+                                                                                                                 }
+                                                                                                             } else {
+                                                                                                                 if (apiKey2.length == 0) {
+                                                                                                                     [DYYYUtils showToast:@"请先在设置页面填写接口2地址"];
+                                                                                                                     return;
+                                                                                                                 }
+                                                                                                                 NSString *shareLink = [awemeModel valueForKey:@"shareURL"];
+                                                                                                                 if (shareLink.length == 0) {
+                                                                                                                     [DYYYUtils showToast:@"无法获取分享链接"];
+                                                                                                                     return;
+                                                                                                                 }
+                                                                                                                 [DYYYManager parseAndDownloadVideoWithShareLink:shareLink apiKey:apiKey2];
                                                                                                              }
-                                                                                                             NSString *shareLink = [awemeModel valueForKey:@"shareURL"];
-                                                                                                             if (shareLink.length == 0) {
-                                                                                                                 [DYYYUtils showToast:@"无法获取分享链接"];
-                                                                                                                 return;
-                                                                                                             }
-                                                                                                             // 使用外部API解析下载
-                                                                                                             [DYYYManager parseAndDownloadVideoWithShareLink:shareLink apiKey:apiKey2];
                                                                                                            }];
                 [actions addObject:apiDownload2Action];
         }

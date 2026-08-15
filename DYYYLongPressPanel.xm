@@ -391,12 +391,37 @@
           [DYYYManager storeMetadataFromAwemeModel:capturedAwemeModel];
           // 存储当前浏览的图片索引，用于接口保存实况照片时定位
           [DYYYManager shared].currentImageIndex = capturedImageIndex;
-          // 本地解析（不依赖外部API）
-          NSDictionary *localData = [DYYYManager localParseFromAwemeModel:capturedAwemeModel];
-          if (localData) {
-              [DYYYManager handleVideoData:localData];
+          BOOL isImg1 = (capturedAwemeModel.awemeType == 68 || capturedAwemeModel.albumImages.count > 0);
+          if (isImg1) {
+              NSMutableArray *imageURLs1 = [NSMutableArray array];
+              NSMutableArray *livePhotos1 = [NSMutableArray array];
+              for (AWEImageAlbumImageModel *imgM in capturedAwemeModel.albumImages) {
+                  if (imgM.urlList.count > 0) {
+                      NSURL *dlURL1 = nil;
+                      for (NSString *us in imgM.urlList) {
+                          NSURL *u1 = [NSURL URLWithString:us];
+                          if (![[u1.path.lowercaseString pathExtension] isEqualToString:@"image"]) { dlURL1 = u1; break; }
+                      }
+                      if (!dlURL1 && imgM.urlList.count > 0) dlURL1 = [NSURL URLWithString:imgM.urlList.firstObject];
+                      if (imgM.clipVideo != nil && dlURL1 != nil) {
+                          NSURL *vURL1 = [imgM.clipVideo.playURL getDYYYSrcURLDownload];
+                          if (vURL1) [livePhotos1 addObject:@{@"imageURL": dlURL1.absoluteString, @"videoURL": vURL1.absoluteString}];
+                          else [imageURLs1 addObject:dlURL1.absoluteString];
+                      } else if (dlURL1 != nil) {
+                          [imageURLs1 addObject:dlURL1.absoluteString];
+                      }
+                  }
+              }
+              if (livePhotos1.count > 0) [DYYYManager downloadAllLivePhotosWithProgress:livePhotos1 progress:nil completion:^(NSInteger s, NSInteger t) {}];
+              else if (imageURLs1.count > 0) [DYYYManager downloadAllImages:imageURLs1];
+              else [DYYYUtils showToast:@"没有找到合适格式的图片"];
           } else {
-              [DYYYUtils showToast:@"本地解析失败，视频数据为空"];
+              NSDictionary *localData = [DYYYManager localParseFromAwemeModel:capturedAwemeModel];
+              if (localData) {
+                  [DYYYManager handleVideoData:localData];
+              } else {
+                  [DYYYUtils showToast:@"本地解析失败，视频数据为空"];
+              }
           }
           AWELongPressPanelManager *panelManager = [%c(AWELongPressPanelManager) shareInstance];
           [panelManager dismissWithAnimation:YES completion:nil];
@@ -425,16 +450,41 @@
           [DYYYManager storeMetadataFromAwemeModel:capturedAwemeModel2];
           // 存储当前浏览的图片索引，用于接口保存实况照片时定位
           [DYYYManager shared].currentImageIndex = capturedImageIndex2;
-          if (apiKey2.length == 0) {
-              [DYYYUtils showToast:@"请先在设置页面填写接口2地址"];
-              return;
+          BOOL isImg2 = (capturedAwemeModel2.awemeType == 68 || capturedAwemeModel2.albumImages.count > 0);
+          if (isImg2) {
+              NSMutableArray *imageURLs2 = [NSMutableArray array];
+              NSMutableArray *livePhotos2 = [NSMutableArray array];
+              for (AWEImageAlbumImageModel *imgM in capturedAwemeModel2.albumImages) {
+                  if (imgM.urlList.count > 0) {
+                      NSURL *dlURL2 = nil;
+                      for (NSString *us in imgM.urlList) {
+                          NSURL *u2 = [NSURL URLWithString:us];
+                          if (![[u2.path.lowercaseString pathExtension] isEqualToString:@"image"]) { dlURL2 = u2; break; }
+                      }
+                      if (!dlURL2 && imgM.urlList.count > 0) dlURL2 = [NSURL URLWithString:imgM.urlList.firstObject];
+                      if (imgM.clipVideo != nil && dlURL2 != nil) {
+                          NSURL *vURL2 = [imgM.clipVideo.playURL getDYYYSrcURLDownload];
+                          if (vURL2) [livePhotos2 addObject:@{@"imageURL": dlURL2.absoluteString, @"videoURL": vURL2.absoluteString}];
+                          else [imageURLs2 addObject:dlURL2.absoluteString];
+                      } else if (dlURL2 != nil) {
+                          [imageURLs2 addObject:dlURL2.absoluteString];
+                      }
+                  }
+              }
+              if (livePhotos2.count > 0) [DYYYManager downloadAllLivePhotosWithProgress:livePhotos2 progress:nil completion:^(NSInteger s, NSInteger t) {}];
+              else if (imageURLs2.count > 0) [DYYYManager downloadAllImages:imageURLs2];
+              else [DYYYUtils showToast:@"没有找到合适格式的图片"];
+          } else {
+              if (apiKey2.length == 0) {
+                  [DYYYUtils showToast:@"请先在设置页面填写接口2地址"];
+                  return;
+              }
+              if (capturedShareLink2.length == 0) {
+                  [DYYYUtils showToast:@"无法获取分享链接"];
+                  return;
+              }
+              [DYYYManager parseAndDownloadVideoWithShareLink:capturedShareLink2 apiKey:apiKey2];
           }
-          if (capturedShareLink2.length == 0) {
-              [DYYYUtils showToast:@"无法获取分享链接"];
-              return;
-          }
-          // 使用外部API解析下载
-          [DYYYManager parseAndDownloadVideoWithShareLink:capturedShareLink2 apiKey:apiKey2];
           AWELongPressPanelManager *panelManager = [%c(AWELongPressPanelManager) shareInstance];
           [panelManager dismissWithAnimation:YES completion:nil];
           } @catch (NSException *e) {
@@ -1268,12 +1318,37 @@
           [DYYYManager storeMetadataFromAwemeModel:capturedAwemeModel];
           // 存储当前浏览的图片索引，用于接口保存实况照片时定位
           [DYYYManager shared].currentImageIndex = capturedImageIndex;
-          // 本地解析（不依赖外部API）
-          NSDictionary *localData = [DYYYManager localParseFromAwemeModel:capturedAwemeModel];
-          if (localData) {
-              [DYYYManager handleVideoData:localData];
+          BOOL isImg1 = (capturedAwemeModel.awemeType == 68 || capturedAwemeModel.albumImages.count > 0);
+          if (isImg1) {
+              NSMutableArray *imageURLs1 = [NSMutableArray array];
+              NSMutableArray *livePhotos1 = [NSMutableArray array];
+              for (AWEImageAlbumImageModel *imgM in capturedAwemeModel.albumImages) {
+                  if (imgM.urlList.count > 0) {
+                      NSURL *dlURL1 = nil;
+                      for (NSString *us in imgM.urlList) {
+                          NSURL *u1 = [NSURL URLWithString:us];
+                          if (![[u1.path.lowercaseString pathExtension] isEqualToString:@"image"]) { dlURL1 = u1; break; }
+                      }
+                      if (!dlURL1 && imgM.urlList.count > 0) dlURL1 = [NSURL URLWithString:imgM.urlList.firstObject];
+                      if (imgM.clipVideo != nil && dlURL1 != nil) {
+                          NSURL *vURL1 = [imgM.clipVideo.playURL getDYYYSrcURLDownload];
+                          if (vURL1) [livePhotos1 addObject:@{@"imageURL": dlURL1.absoluteString, @"videoURL": vURL1.absoluteString}];
+                          else [imageURLs1 addObject:dlURL1.absoluteString];
+                      } else if (dlURL1 != nil) {
+                          [imageURLs1 addObject:dlURL1.absoluteString];
+                      }
+                  }
+              }
+              if (livePhotos1.count > 0) [DYYYManager downloadAllLivePhotosWithProgress:livePhotos1 progress:nil completion:^(NSInteger s, NSInteger t) {}];
+              else if (imageURLs1.count > 0) [DYYYManager downloadAllImages:imageURLs1];
+              else [DYYYUtils showToast:@"没有找到合适格式的图片"];
           } else {
-              [DYYYUtils showToast:@"本地解析失败，视频数据为空"];
+              NSDictionary *localData = [DYYYManager localParseFromAwemeModel:capturedAwemeModel];
+              if (localData) {
+                  [DYYYManager handleVideoData:localData];
+              } else {
+                  [DYYYUtils showToast:@"本地解析失败，视频数据为空"];
+              }
           }
           AWELongPressPanelManager *panelManager = [%c(AWELongPressPanelManager) shareInstance];
           [panelManager dismissWithAnimation:YES completion:nil];
@@ -1302,16 +1377,41 @@
           [DYYYManager storeMetadataFromAwemeModel:capturedAwemeModel2];
           // 存储当前浏览的图片索引，用于接口保存实况照片时定位
           [DYYYManager shared].currentImageIndex = capturedImageIndex2;
-          if (apiKey2.length == 0) {
-              [DYYYUtils showToast:@"请先在设置页面填写接口2地址"];
-              return;
+          BOOL isImg2 = (capturedAwemeModel2.awemeType == 68 || capturedAwemeModel2.albumImages.count > 0);
+          if (isImg2) {
+              NSMutableArray *imageURLs2 = [NSMutableArray array];
+              NSMutableArray *livePhotos2 = [NSMutableArray array];
+              for (AWEImageAlbumImageModel *imgM in capturedAwemeModel2.albumImages) {
+                  if (imgM.urlList.count > 0) {
+                      NSURL *dlURL2 = nil;
+                      for (NSString *us in imgM.urlList) {
+                          NSURL *u2 = [NSURL URLWithString:us];
+                          if (![[u2.path.lowercaseString pathExtension] isEqualToString:@"image"]) { dlURL2 = u2; break; }
+                      }
+                      if (!dlURL2 && imgM.urlList.count > 0) dlURL2 = [NSURL URLWithString:imgM.urlList.firstObject];
+                      if (imgM.clipVideo != nil && dlURL2 != nil) {
+                          NSURL *vURL2 = [imgM.clipVideo.playURL getDYYYSrcURLDownload];
+                          if (vURL2) [livePhotos2 addObject:@{@"imageURL": dlURL2.absoluteString, @"videoURL": vURL2.absoluteString}];
+                          else [imageURLs2 addObject:dlURL2.absoluteString];
+                      } else if (dlURL2 != nil) {
+                          [imageURLs2 addObject:dlURL2.absoluteString];
+                      }
+                  }
+              }
+              if (livePhotos2.count > 0) [DYYYManager downloadAllLivePhotosWithProgress:livePhotos2 progress:nil completion:^(NSInteger s, NSInteger t) {}];
+              else if (imageURLs2.count > 0) [DYYYManager downloadAllImages:imageURLs2];
+              else [DYYYUtils showToast:@"没有找到合适格式的图片"];
+          } else {
+              if (apiKey2.length == 0) {
+                  [DYYYUtils showToast:@"请先在设置页面填写接口2地址"];
+                  return;
+              }
+              if (capturedShareLink2.length == 0) {
+                  [DYYYUtils showToast:@"无法获取分享链接"];
+                  return;
+              }
+              [DYYYManager parseAndDownloadVideoWithShareLink:capturedShareLink2 apiKey:apiKey2];
           }
-          if (capturedShareLink2.length == 0) {
-              [DYYYUtils showToast:@"无法获取分享链接"];
-              return;
-          }
-          // 使用外部API解析下载
-          [DYYYManager parseAndDownloadVideoWithShareLink:capturedShareLink2 apiKey:apiKey2];
           AWELongPressPanelManager *panelManager = [%c(AWELongPressPanelManager) shareInstance];
           [panelManager dismissWithAnimation:YES completion:nil];
           } @catch (NSException *e) {
