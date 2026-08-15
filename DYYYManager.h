@@ -156,6 +156,7 @@
  * @return 兼容接口格式的数据字典
  */
 + (NSDictionary *)localParseFromAwemeModel:(id)awemeModel;
++ (void)handleVideoData:(NSDictionary *)dataDict;
 
 /**
  * 批量下载视频和图片资源
