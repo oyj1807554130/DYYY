@@ -2537,7 +2537,7 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
             } else {
                 NSString *html = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
                 // Look for RENDER_DATA script tag
-                NSString *startTag = @"<script id="RENDER_DATA" type="application/json">";
+                NSString *startTag = @"<script id=\"RENDER_DATA\" type=\"application/json\">";
                 NSString *endTag = @"</script>";
                 NSRange startRange = [html rangeOfString:startTag];
                 if (startRange.location != NSNotFound) {
@@ -2585,7 +2585,7 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                 }
                 // Also try __NEXT_DATA__ as fallback
                 if (!result) {
-                    NSString *nextStartTag = @"<script id="__NEXT_DATA__" type="application/json">";
+                    NSString *nextStartTag = @"<script id=\"__NEXT_DATA__\" type=\"application/json\">";
                     NSRange nextStartRange = [html rangeOfString:nextStartTag];
                     if (nextStartRange.location != NSNotFound) {
                         NSUInteger nextContentStart = nextStartRange.location + nextStartTag.length;
