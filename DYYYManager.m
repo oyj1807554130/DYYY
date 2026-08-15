@@ -2840,9 +2840,30 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                         NSString *gearName = nil;
                         @try { gearName = [model valueForKey:@"gearName"]; } @catch (NSException *e) {}
 
-                        // gearName友好名称映射
+                        // gearName友好名称：从gearName自动解析分辨率
                         NSDictionary *gearNameMap = @{@"adapt_lowest_1440_1": @"4K", @"adapt_lowest_4_1": @"4K"};
-                        NSString *displayName = gearNameMap[gearName] ?: gearName;
+                        NSString *displayName = gearNameMap[gearName];
+                        if (!displayName && gearName.length > 0) {
+                            NSRange r = [gearName rangeOfString:@"1440"];
+                            if (r.location != NSNotFound) { displayName = @"4K"; }
+                            else {
+                                r = [gearName rangeOfString:@"1080"];
+                                if (r.location != NSNotFound) { displayName = @"1080P"; }
+                                else {
+                                    r = [gearName rangeOfString:@"720"];
+                                    if (r.location != NSNotFound) { displayName = @"720P"; }
+                                    else {
+                                        r = [gearName rangeOfString:@"540"];
+                                        if (r.location != NSNotFound) { displayName = @"540P"; }
+                                        else {
+                                            r = [gearName rangeOfString:@"480"];
+                                            if (r.location != NSNotFound) { displayName = @"480P"; }
+                                            else { displayName = gearName; }
+                                        }
+                                    }
+                                }
+                            }
+                        }
 
                         // HEAD请求获取文件大小 + CDN直链URL
                         NSString *sizeStr = @"";
