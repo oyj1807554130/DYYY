@@ -2514,70 +2514,10 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
     id musicModel = [awemeModel valueForKey:@"music"];
     id authorModel = [awemeModel valueForKey:@"author"];
 
-    // --- 视频码率列表 ---
+        // --- 视频码率列表 ---
     if (videoModel) {
-        // 先尝试从bitrateModels取已有URL
-        NSArray *bitrateModels = [videoModel valueForKey:@"bitrateModels"];
-        if (bitrateModels && [bitrateModels isKindOfClass:[NSArray class]] && bitrateModels.count > 0) {
-            NSMutableArray *sortedModels = [NSMutableArray arrayWithArray:bitrateModels];
-            [sortedModels sortUsingComparator:^NSComparisonResult(id a, id b) {
-                NSInteger ba = 0, bb = 0;
-                @try { ba = [[a valueForKey:@"bitrate"] integerValue]; } @catch (NSException *e) {}
-                @try { bb = [[b valueForKey:@"bitrate"] integerValue]; } @catch (NSException *e) {}
-                return bb - ba;
-            }];
-            for (id model in sortedModels) {
-                @try {
-                    id playAddr = [model valueForKey:@"playAddr"];
-                    NSString *urlStr = nil;
-                    if (playAddr && [playAddr isKindOfClass:NSClassFromString(@"AWEURLModel")]) {
-                        id originList = [playAddr valueForKey:@"originURLList"];
-                        if ([originList isKindOfClass:[NSArray class]] && [(NSArray *)originList count] > 0) {
-                            urlStr = [(NSArray *)originList firstObject];
-                        }
-                    }
-                    if (urlStr.length == 0) continue;
-                    NSInteger bitrate = 0;
-                    @try { bitrate = [[model valueForKey:@"bitrate"] integerValue]; } @catch (NSException *e) {}
-                    NSString *qualityLabel;
-                    if (bitrate >= 3000000) qualityLabel = [NSString stringWithFormat:@"原画[%ldkbps]", (long)(bitrate/1000)];
-                    else if (bitrate >= 2000000) qualityLabel = [NSString stringWithFormat:@"高清[%ldkbps]", (long)(bitrate/1000)];
-                    else if (bitrate >= 1000000) qualityLabel = [NSString stringWithFormat:@"标清[%ldkbps]", (long)(bitrate/1000)];
-                    else if (bitrate > 0) qualityLabel = [NSString stringWithFormat:@"流畅[%ldkbps]", (long)(bitrate/1000)];
-                    else qualityLabel = @"原画";
-                    [videoList addObject:@{@"level": qualityLabel, @"url": urlStr}];
-                } @catch (NSException *e) {}
-            }
-        }
-        // 用play接口补充多画质
-        NSString *videoURI = nil;
-        @try {
-            id playURL = [videoModel valueForKey:@"playURL"];
-            if (playURL) {
-                videoURI = [playURL valueForKey:@"uri"];
-                if (!videoURI || ![videoURI isKindOfClass:[NSString class]] || videoURI.length == 0) {
-                    videoURI = nil;
-                }
-            }
-        } @catch (NSException *e) {}
-        if (videoURI) {
-            NSArray *ratios = @[
-                @[@"default", @"原画"],
-                @[@"1080p", @"4K/1080P"],
-                @[@"720p", @"720P"],
-                @[@"540p", @"540P"]
-            ];
-            for (NSArray *ratioItem in ratios) {
-                NSString *ratio = ratioItem[0];
-                NSString *label = ratioItem[1];
-                NSString *playAPIURL = [NSString stringWithFormat:
-                    @"https://www.douyin.com/aweme/v1/play/?video_id=%@&ratio=%@&line=1&device_platform=webapp&aid=6383&channel=channel_pc_web",
-                    videoURI, ratio];
-                [videoList addObject:@{@"level": label, @"url": playAPIURL}];
-            }
-        }
-        // 兜底：h264URL/playURL
-        if (videoList.count == 0) {
+        // 1. h264URL/playURL 始终作为原画选项
+        {
             NSString *urlStr = nil;
             id h264URL = [videoModel valueForKey:@"h264URL"];
             if (h264URL && [h264URL valueForKey:@"originURLList"]) {
@@ -2595,7 +2535,112 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                 [videoList addObject:@{@"level": @"原画", @"url": urlStr}];
             }
         }
-        // 封面
+
+        // 2. play接口补充多画质
+        NSString *videoURI = nil;
+        @try {
+            // 方法1: 从playAddr取uri
+            id playAddr = [videoModel valueForKey:@"playAddr"];
+            if (playAddr) {
+                videoURI = [playAddr valueForKey:@"uri"];
+            }
+            // 方法2: 从playURL取uri
+            if (!videoURI || ![videoURI isKindOfClass:[NSString class]] || videoURI.length == 0) {
+                id playURL = [videoModel valueForKey:@"playURL"];
+                if (playURL) {
+                    videoURI = [playURL valueForKey:@"uri"];
+                }
+            }
+            // 方法3: 从URL中提取video_id
+            if (!videoURI || ![videoURI isKindOfClass:[NSString class]] || videoURI.length == 0) {
+                id pa = [videoModel valueForKey:@"playAddr"];
+                if (!pa) pa = [videoModel valueForKey:@"playURL"];
+                if (pa) {
+                    NSArray *urlList = [pa valueForKey:@"urlList"];
+                    if (!urlList || ![urlList isKindOfClass:[NSArray class]] || urlList.count == 0) {
+                        urlList = [pa valueForKey:@"originURLList"];
+                    }
+                    if (urlList && [urlList isKindOfClass:[NSArray class]] && urlList.count > 0) {
+                        NSString *urlStr = urlList.firstObject;
+                        NSRange vidRange = [urlStr rangeOfString:@"/video_id/" options:NSBackwardsSearch];
+                        if (vidRange.location != NSNotFound) {
+                            NSString *afterVid = [urlStr substringFromIndex:vidRange.location + vidRange.length];
+                            NSRange slashRange = [afterVid rangeOfString:@"/"];
+                            if (slashRange.location != NSNotFound) {
+                                videoURI = [afterVid substringToIndex:slashRange.location];
+                            } else {
+                                NSRange paramRange = [afterVid rangeOfString:@"?"];
+                                if (paramRange.location != NSNotFound) {
+                                    videoURI = [afterVid substringToIndex:paramRange.location];
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            if (!videoURI || ![videoURI isKindOfClass:[NSString class]] || videoURI.length == 0) {
+                videoURI = nil;
+            }
+        } @catch (NSException *e) {}
+        if (videoURI) {
+            NSArray *ratios = @[
+                @[@"default", @"原画-Play"],
+                @[@"1080p", @"1080P"],
+                @[@"720p", @"720P"],
+                @[@"540p", @"540P"]
+            ];
+            for (NSArray *ratioItem in ratios) {
+                NSString *ratio = ratioItem[0];
+                NSString *label = ratioItem[1];
+                NSString *playAPIURL = [NSString stringWithFormat:
+                    @"https://www.douyin.com/aweme/v1/play/?video_id=%@&ratio=%@&line=1&device_platform=webapp&aid=6383&channel=channel_pc_web",
+                    videoURI, ratio];
+                [videoList addObject:@{@"level": label, @"url": playAPIURL}];
+            }
+        }
+
+        // 3. bitrateModels作为补充选项
+        {
+            NSArray *bitrateModels = [videoModel valueForKey:@"bitrateModels"];
+            if (bitrateModels && [bitrateModels isKindOfClass:[NSArray class]] && bitrateModels.count > 0) {
+                NSMutableArray *sortedModels = [NSMutableArray arrayWithArray:bitrateModels];
+                [sortedModels sortUsingComparator:^NSComparisonResult(id a, id b) {
+                    NSInteger ba = 0, bb = 0;
+                    @try { ba = [[a valueForKey:@"bitrate"] integerValue]; } @catch (NSException *e) {}
+                    @try { bb = [[b valueForKey:@"bitrate"] integerValue]; } @catch (NSException *e) {}
+                    return bb - ba;
+                }];
+                NSMutableSet *existingURLs = [NSMutableSet set];
+                for (NSDictionary *item in videoList) {
+                    NSString *u = item[@"url"];
+                    if (u) [existingURLs addObject:u];
+                }
+                for (id model in sortedModels) {
+                    @try {
+                        id modelPlayAddr = [model valueForKey:@"playAddr"];
+                        NSString *urlStr = nil;
+                        if (modelPlayAddr && [modelPlayAddr isKindOfClass:NSClassFromString(@"AWEURLModel")]) {
+                            id originList = [modelPlayAddr valueForKey:@"originURLList"];
+                            if ([originList isKindOfClass:[NSArray class]] && [(NSArray *)originList count] > 0) {
+                                urlStr = [(NSArray *)originList firstObject];
+                            }
+                        }
+                        if (urlStr.length == 0 || [existingURLs containsObject:urlStr]) continue;
+                        NSInteger bitrate = 0;
+                        @try { bitrate = [[model valueForKey:@"bitrate"] integerValue]; } @catch (NSException *e) {}
+                        NSString *qualityLabel;
+                        if (bitrate >= 3000000) qualityLabel = [NSString stringWithFormat:@"高清[%ldkbps]", (long)(bitrate/1000)];
+                        else if (bitrate >= 2000000) qualityLabel = [NSString stringWithFormat:@"标清[%ldkbps]", (long)(bitrate/1000)];
+                        else if (bitrate >= 1000000) qualityLabel = [NSString stringWithFormat:@"标清[%ldkbps]", (long)(bitrate/1000)];
+                        else if (bitrate > 0) qualityLabel = [NSString stringWithFormat:@"流畅[%ldkbps]", (long)(bitrate/1000)];
+                        else continue;
+                        [existingURLs addObject:urlStr];
+                        [videoList addObject:@{@"level": qualityLabel, @"url": urlStr}];
+                    } @catch (NSException *e) {}
+                }
+            }
+        }
+        // 封面        // 封面
         // 封面
         id coverURL = [videoModel valueForKey:@"coverURL"];
         if (coverURL && [coverURL valueForKey:@"originURLList"]) {
@@ -3698,26 +3743,23 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
         if (completion) completion(NO);
         return;
     }
-    // 如果是play接口URL，先HEAD请求获取302后的CDN直链
+    // 如果是play接口URL，用GET请求只读1字节来跟随302重定向获取CDN直链
     if ([url.absoluteString containsString:@"douyin.com/aweme/v1/play/"]) {
         NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:url];
-        req.HTTPMethod = @"HEAD";
+        req.HTTPMethod = @"GET";
+        [req setValue:@"bytes=0-0" forHTTPHeaderField:@"Range"];
         req.allowsCellularAccess = YES;
         [req setValue:@"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36" forHTTPHeaderField:@"User-Agent"];
         [req setValue:@"https://www.douyin.com/" forHTTPHeaderField:@"Referer"];
         [[NSURLSession.sharedSession dataTaskWithRequest:req completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
-            NSURL *resolvedURL = nil;
-            if ([response isKindOfClass:[NSHTTPURLResponse class]]) {
-                NSHTTPURLResponse *httpResp = (NSHTTPURLResponse *)response;
-                if (httpResp.statusCode >= 300 && httpResp.statusCode < 400) {
-                    NSString *location = httpResp.allHeaderFields[@"Location"];
-                    if (location.length > 0) resolvedURL = [NSURL URLWithString:location];
-                } else if (httpResp.statusCode == 200) {
-                    resolvedURL = httpResp.URL;
-                }
+            if (error || !response) {
+                if (completion) completion(NO);
+                return;
             }
-            NSURL *finalURL = resolvedURL ?: url;
-            [self downloadMedia:finalURL mediaType:MediaTypeVideo audio:audioURL completion:completion];
+            // 跟随302重定向后的最终URL就是CDN直链
+            NSURL *resolvedURL = response.URL;
+            if (!resolvedURL) resolvedURL = url;
+            [self downloadMedia:resolvedURL mediaType:MediaTypeVideo audio:audioURL completion:completion];
         }] resume];
         return;
     }
