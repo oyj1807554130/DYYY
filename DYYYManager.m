@@ -2543,7 +2543,7 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
             id playURL = [videoModel valueForKey:@"playURL"];
             if (playURL && [playURL isKindOfClass:NSClassFromString(@"AWEURLModel")]) {
                 // 先尝试直接取uri属性（对应竞品的play_addr.uri）
-                id uriVal = [playURL valueForKey:@"uri"];
+                id uriVal = [playURL valueForKey:@"URI"];
                 if (uriVal && [uriVal isKindOfClass:[NSString class]] && [(NSString *)uriVal length] > 0) {
                     videoURI = (NSString *)uriVal;
                 }
@@ -2565,7 +2565,7 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
             if (playAddr) {
                 // 先尝试取uri
                 if (!videoURI || videoURI.length == 0) {
-                    id uriVal = [playAddr valueForKey:@"uri"];
+                    id uriVal = [playAddr valueForKey:@"URI"];
                     if (uriVal && [uriVal isKindOfClass:[NSString class]] && [(NSString *)uriVal length] > 0) {
                         videoURI = (NSString *)uriVal;
                     }
@@ -2594,7 +2594,7 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                     if (modelPlayAddr) {
                         // 从bitrateModel的playAddr取uri
                         if (!videoURI || videoURI.length == 0) {
-                            id uriVal = [modelPlayAddr valueForKey:@"uri"];
+                            id uriVal = [modelPlayAddr valueForKey:@"URI"];
                             if (uriVal && [uriVal isKindOfClass:[NSString class]] && [(NSString *)uriVal length] > 0) {
                                 videoURI = (NSString *)uriVal;
                             }
@@ -2616,7 +2616,7 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                     id modelPlayURL = [model valueForKey:@"playURL"];
                     if (modelPlayURL && modelPlayURL != [videoModel valueForKey:@"playURL"]) {
                         if (!videoURI || videoURI.length == 0) {
-                            id uriVal = [modelPlayURL valueForKey:@"uri"];
+                            id uriVal = [modelPlayURL valueForKey:@"URI"];
                             if (uriVal && [uriVal isKindOfClass:[NSString class]] && [(NSString *)uriVal length] > 0) {
                                 videoURI = (NSString *)uriVal;
                             }
@@ -2662,13 +2662,13 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
         }
 
         // 第二步：构建画质列表
-        // 2.1 如果有videoURI，用play接口获取真正原画 + 多画质（和竞品方案一致）
+        // 2.1 如果有videoURI，用play接口获取真正原画 + 多画质
         if (videoURI) {
             NSArray *ratios = @[
-                @[@"default", @"原画"],
-                @[@"1080p", @"1080P"],
-                @[@"720p", @"720P"],
-                @[@"540p", @"540P"]
+                @[@"default", @"[原画]"],
+                @[@"1080p", @"[1080P]"],
+                @[@"720p", @"[720P]"],
+                @[@"540p", @"[540P]"]
             ];
             for (NSArray *ratioItem in ratios) {
                 NSString *ratio = ratioItem[0];
@@ -2680,8 +2680,8 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
             }
         }
 
-        // 2.2 h264URL/playURL作为直链备用（无videoURI时的主要选项，有videoURI时标记为直链）
-        {
+        // 2.2 h264URL/playURL作为直链备用（无videoURI时的唯一选项，有videoURI时跳过）
+        if (!videoURI) {
             NSString *urlStr = nil;
             id h264URL = [videoModel valueForKey:@"h264URL"];
             if (h264URL && [h264URL valueForKey:@"originURLList"]) {
@@ -2696,20 +2696,11 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                 }
             }
             if (urlStr.length > 0) {
-                NSMutableSet *existingURLs = [NSMutableSet set];
-                for (NSDictionary *item in videoList) {
-                    NSString *u = item[@"url"];
-                    if (u) [existingURLs addObject:u];
-                }
-                if (![existingURLs containsObject:urlStr]) {
-                    // 有play接口时标记为"直链(当前画质)"，没有时标记为"原画(直链)"
-                    NSString *label = videoURI ? @"直链(当前画质)" : @"原画(直链)";
-                    [videoList addObject:@{@"level": label, @"url": urlStr}];
-                }
+                [videoList addObject:@{@"level": @"[原画(直链)]", @"url": urlStr}];
             }
         }
 
-        // 2.3 bitrateModels作为补充（去重）
+        // 2.3 bitrateModels补充（去重，带码率和大小信息）
         {
             NSArray *bitrateModels = [videoModel valueForKey:@"bitrateModels"];
             if (bitrateModels && [bitrateModels isKindOfClass:[NSArray class]] && bitrateModels.count > 0) {
@@ -2736,14 +2727,46 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                             }
                         }
                         if (urlStr.length == 0 || [existingURLs containsObject:urlStr]) continue;
+
+                        // 取码率
                         NSInteger bitrate = 0;
                         @try { bitrate = [[model valueForKey:@"bitrate"] integerValue]; } @catch (NSException *e) {}
+                        if (bitrate <= 0) continue;
+
+                        // 取gearName（如"原画"/"高清 1080P"等）
+                        NSString *gearName = nil;
+                        @try { gearName = [model valueForKey:@"gearName"]; } @catch (NSException *e) {}
+
+                        // 取data_size（文件大小字节）
+                        long long dataSize = 0;
+                        @try { dataSize = [[model valueForKey:@"dataSize"] longLongValue]; } @catch (NSException *e) {}
+                        @try { if (dataSize <= 0) dataSize = [[modelPlayAddr valueForKey:@"dataSize"] longLongValue]; } @catch (NSException *e) {}
+
+                        // 构建label
                         NSString *qualityLabel;
-                        if (bitrate >= 3000000) qualityLabel = [NSString stringWithFormat:@"高清[%ldkbps]", (long)(bitrate/1000)];
-                        else if (bitrate >= 2000000) qualityLabel = [NSString stringWithFormat:@"标清[%ldkbps]", (long)(bitrate/1000)];
-                        else if (bitrate >= 1000000) qualityLabel = [NSString stringWithFormat:@"标清[%ldkbps]", (long)(bitrate/1000)];
-                        else if (bitrate > 0) qualityLabel = [NSString stringWithFormat:@"流畅[%ldkbps]", (long)(bitrate/1000)];
-                        else continue;
+                        if (gearName.length > 0) {
+                            qualityLabel = [NSString stringWithFormat:@"[%@]", gearName];
+                        } else if (bitrate >= 3000000) {
+                            qualityLabel = [NSString stringWithFormat:@"[高清%ldkbps]", (long)(bitrate/1000)];
+                        } else if (bitrate >= 1500000) {
+                            qualityLabel = [NSString stringWithFormat:@"[标清%ldkbps]", (long)(bitrate/1000)];
+                        } else {
+                            qualityLabel = [NSString stringWithFormat:@"[流畅%ldkbps]", (long)(bitrate/1000)];
+                        }
+
+                        // 附加文件大小
+                        if (dataSize > 0) {
+                            NSString *sizeStr;
+                            if (dataSize >= 1024 * 1024) {
+                                sizeStr = [NSString stringWithFormat:@"%.1fMB", (double)dataSize / (1024.0 * 1024.0)];
+                            } else if (dataSize >= 1024) {
+                                sizeStr = [NSString stringWithFormat:@"%.0fKB", (double)dataSize / 1024.0];
+                            } else {
+                                sizeStr = [NSString stringWithFormat:@"%lldB", dataSize];
+                            }
+                            qualityLabel = [qualityLabel stringByAppendingFormat:@"-[%@]", sizeStr];
+                        }
+
                         [existingURLs addObject:urlStr];
                         [videoList addObject:@{@"level": qualityLabel, @"url": urlStr}];
                     } @catch (NSException *e) {}
@@ -3851,22 +3874,23 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
         if (completion) completion(NO);
         return;
     }
-    // 如果是play接口URL，用GET请求只读1字节来跟随302重定向获取CDN直链
+    // 如果是play接口URL，用dataTask跟随302重定向获取CDN直链
     if ([url.absoluteString containsString:@"douyin.com/aweme/v1/play/"]) {
         NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:url];
-        req.HTTPMethod = @"GET";
-        [req setValue:@"bytes=0-0" forHTTPHeaderField:@"Range"];
-        req.allowsCellularAccess = YES;
+        req.HTTPMethod = @"HEAD";
         [req setValue:@"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36" forHTTPHeaderField:@"User-Agent"];
         [req setValue:@"https://www.douyin.com/" forHTTPHeaderField:@"Referer"];
-        [[NSURLSession.sharedSession dataTaskWithRequest:req completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
-            if (error || !response) {
-                if (completion) completion(NO);
-                return;
+        NSURLSessionConfiguration *config = [NSURLSessionConfiguration defaultSessionConfiguration];
+        config.timeoutIntervalForRequest = 15.0;
+        config.requestCachePolicy = NSURLRequestReloadIgnoringLocalCacheData;
+        NSURLSession *session = [NSURLSession sessionWithConfiguration:config];
+        [[session dataTaskWithRequest:req completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
+            NSURL *resolvedURL = nil;
+            if (response) {
+                resolvedURL = response.URL;
             }
-            // 跟随302重定向后的最终URL就是CDN直链
-            NSURL *resolvedURL = response.URL;
             if (!resolvedURL) resolvedURL = url;
+            NSLog(@"[DYYY] play接口解析: %@ -> %@", url.absoluteString, resolvedURL.absoluteString);
             [self downloadMedia:resolvedURL mediaType:MediaTypeVideo audio:audioURL completion:completion];
         }] resume];
         return;
