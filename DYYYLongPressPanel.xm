@@ -451,8 +451,7 @@
                       else [DYYYUtils showToast:@"没有找到合适格式的图片"];
                   }];
                   [imgActs1 addObject:saveAll1];
-                  AWEUserSheetAction *cancel1 = [NSClassFromString(@"AWEUserSheetAction") actionWithTitle:@"取消" imgName:nil handler:^{}];
-                  [imgSheet1 setActions:imgActs1 cancelAction:cancel1];
+                  [imgSheet1 setActions:imgActs1];
                   [imgSheet1 show];
               }];
           } else {
@@ -1392,8 +1391,7 @@
                       else [DYYYUtils showToast:@"没有找到合适格式的图片"];
                   }];
                   [imgActs1 addObject:saveAll1];
-                  AWEUserSheetAction *cancel1 = [NSClassFromString(@"AWEUserSheetAction") actionWithTitle:@"取消" imgName:nil handler:^{}];
-                  [imgSheet1 setActions:imgActs1 cancelAction:cancel1];
+                  [imgSheet1 setActions:imgActs1];
                   [imgSheet1 show];
               }];
           } else {

@@ -6420,8 +6420,7 @@ static NSHashTable *processedParentViews = nil;
                                                                                                                      }
                                                                                                                  }];
                                                                                                                  [imgActions addObject:saveAllAction];
-                                                                                                                 AWEUserSheetAction *cancelAction = [NSClassFromString(@"AWEUserSheetAction") actionWithTitle:@"取消" imgName:nil handler:^{}];
-                                                                                                                 [imgSheet setActions:imgActions cancelAction:cancelAction];
+                                                                                                                 [imgSheet setActions:imgActions];
                                                                                                                  [imgSheet show];
                                                                                                              } else {
                                                                                                                  // 视频：本地解析
