@@ -2662,87 +2662,72 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
         }
 
         // 第二步：构建画质列表
-        // 先从bitrateModels提取元数据（FPS、dataSize等），用于play接口画质label
-        NSMutableDictionary *bitrateMeta = [NSMutableDictionary dictionary]; // key=gearName or qualityType, value=dict
-        NSArray *bitrateModels = nil;
-        @try { bitrateModels = [videoModel valueForKey:@"bitrateModels"]; } @catch (NSException *e) {}
-        if (bitrateModels && [bitrateModels isKindOfClass:[NSArray class]]) {
-            for (id model in bitrateModels) {
-                @try {
-                    NSString *gearName = nil;
-                    @try { gearName = [model valueForKey:@"gearName"]; } @catch (NSException *e) {}
-                    NSInteger qualityType = 0;
-                    @try { qualityType = [[model valueForKey:@"qualityType"] integerValue]; } @catch (NSException *e) {}
-                    NSInteger bitrate = 0;
-                    @try { bitrate = [[model valueForKey:@"bitrate"] integerValue]; } @catch (NSException *e) {}
-                    NSInteger fps = 0;
-                    @try { fps = [[model valueForKey:@"FPS"] integerValue]; } @catch (NSException *e) {}
-                    @try { if (fps <= 0) fps = [[model valueForKey:@"fps"] integerValue]; } @catch (NSException *e) {}
-
-                    id modelPlayAddr = [model valueForKey:@"playAddr"];
-                    long long dataSize = 0;
-                    @try { dataSize = [[model valueForKey:@"dataSize"] longLongValue]; } @catch (NSException *e) {}
-                    @try { if (dataSize <= 0 && modelPlayAddr) dataSize = [[modelPlayAddr valueForKey:@"dataSize"] longLongValue]; } @catch (NSException *e) {}
-
-                    NSInteger width = 0, height = 0;
-                    @try { if (modelPlayAddr) width = [[modelPlayAddr valueForKey:@"imageWidth"] integerValue]; } @catch (NSException *e) {}
-                    @try { if (modelPlayAddr) height = [[modelPlayAddr valueForKey:@"imageHeight"] integerValue]; } @catch (NSException *e) {}
-
-                    NSMutableDictionary *meta = [NSMutableDictionary dictionary];
-                    if (gearName.length > 0) meta[@"gearName"] = gearName;
-                    if (qualityType > 0) meta[@"qualityType"] = @(qualityType);
-                    if (bitrate > 0) meta[@"bitrate"] = @(bitrate);
-                    if (fps > 0) meta[@"fps"] = @(fps);
-                    if (dataSize > 0) meta[@"dataSize"] = @(dataSize);
-                    if (width > 0) meta[@"width"] = @(width);
-                    if (height > 0) meta[@"height"] = @(height);
-
-                    // 用gearName和qualityType作为key都存一份
-                    if (gearName.length > 0) bitrateMeta[gearName] = meta;
-                    if (qualityType > 0) bitrateMeta[[NSString stringWithFormat:@"%ld", (long)qualityType]] = meta;
-                    // 也按bitrate高低存，方便匹配
-                    bitrateMeta[[NSString stringWithFormat:@"br_%ld", (long)bitrate]] = meta;
-                } @catch (NSException *e) {}
-            }
-        }
-
-        // 辅助block：根据ratio找对应的FPS和dataSize
-        NSString *(^metaForRatio)(NSString *) = ^NSString *(NSString *ratio) {
-            // 尝试匹配gearName: "原画"->default, "高清 1080P"->1080p, etc.
-            NSDictionary *nameMap = @{@"default": @[@"原画", @"origin"], @"1080p": @[@"高清 1080P", @"1080p", @"1080P"], @"720p": @[@"高清 720P", @"720p", @"720P"], @"540p": @[@"标清 540P", @"540p", @"540P"]};
-            NSArray *candidates = nameMap[ratio];
-            // 先从gearName匹配
-            for (NSString *cand in candidates) {
-                NSDictionary *meta = bitrateMeta[cand];
-                if (meta) {
-                    NSInteger fps = [meta[@"fps"] integerValue];
-                    long long dataSize = [meta[@"dataSize"] longLongValue];
-                    NSString *fpsStr = fps > 0 ? [NSString stringWithFormat:@"%ldFPS", (long)fps] : @"";
-                    NSString *sizeStr = @"";
-                    if (dataSize > 0) {
-                        if (dataSize >= 1024 * 1024) sizeStr = [NSString stringWithFormat:@"%.1fMB", (double)dataSize / (1024.0 * 1024.0)];
-                        else if (dataSize >= 1024) sizeStr = [NSString stringWithFormat:@"%.0fKB", (double)dataSize / 1024.0];
-                        else sizeStr = [NSString stringWithFormat:@"%lldB", dataSize];
-                    }
-                    NSString *label = [NSString stringWithFormat:@"[%@]", ([ratio isEqualToString:@"default"] ? @"原画" : [ratio uppercaseString])];
-                    if (fpsStr.length > 0) label = [label stringByAppendingFormat:@"-[%@]", fpsStr];
-                    if (sizeStr.length > 0) label = [label stringByAppendingFormat:@"-[%@]", sizeStr];
-                    return label;
-                }
-            }
-            // 没匹配到gearName，返回简单label
-            return [NSString stringWithFormat:@"[%@]", ([ratio isEqualToString:@"default"] ? @"原画" : [ratio uppercaseString])];
-        };
-
         // 2.1 如果有videoURI，用play接口获取真正原画 + 多画质
+        // 对每个play URL发HEAD请求获取Content-Length(文件大小)
         if (videoURI) {
-            NSArray *ratios = @[@"default", @"1080p", @"720p", @"540p"];
-            for (NSString *ratio in ratios) {
-                NSString *label = metaForRatio(ratio);
+            NSArray *ratios = @[
+                @[@"default", @"原画"],
+                @[@"1080p", @"1080P"],
+                @[@"720p", @"720P"],
+                @[@"540p", @"540P"]
+            ];
+            // 先构建所有play URL
+            NSMutableArray *playURLs = [NSMutableArray array];
+            NSMutableArray *playLabels = [NSMutableArray array];
+            for (NSArray *ratioItem in ratios) {
+                NSString *ratio = ratioItem[0];
+                NSString *name = ratioItem[1];
                 NSString *playAPIURL = [NSString stringWithFormat:
                     @"https://www.douyin.com/aweme/v1/play/?video_id=%@&ratio=%@&line=1&device_platform=webapp&aid=6383&channel=channel_pc_web",
                     videoURI, ratio];
-                [videoList addObject:@{@"level": label, @"url": playAPIURL}];
+                [playURLs addObject:playAPIURL];
+                [playLabels addObject:name];
+            }
+
+            // 并行HEAD请求获取每个画质的文件大小
+            NSMutableArray *fileSizes = [NSMutableArray arrayWithArray:@[@0, @0, @0, @0]];
+            dispatch_group_t headGroup = dispatch_group_create();
+            for (NSInteger i = 0; i < playURLs.count; i++) {
+                NSString *urlStr = playURLs[i];
+                dispatch_group_enter(headGroup);
+                NSMutableURLRequest *headReq = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:urlStr]];
+                headReq.HTTPMethod = @"HEAD";
+                [headReq setValue:@"Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1" forHTTPHeaderField:@"User-Agent"];
+                [headReq setValue:@"https://www.douyin.com/" forHTTPHeaderField:@"Referer"];
+                NSURLSessionDataTask *headTask = [[NSURLSession sharedSession] dataTaskWithRequest:headReq completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
+                    if (response && [response isKindOfClass:[NSHTTPURLResponse class]]) {
+                        NSHTTPURLResponse *httpResp = (NSHTTPURLResponse *)response;
+                        long long contentLength = [httpResp expectedContentLength];
+                        if (contentLength > 0) {
+                            @synchronized(fileSizes) {
+                                fileSizes[i] = @(contentLength);
+                            }
+                        }
+                    }
+                    dispatch_group_leave(headGroup);
+                }];
+                [headTask resume];
+            }
+            // 等待所有HEAD请求完成（最多5秒）
+            dispatch_time_t timeout = dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC);
+            dispatch_group_wait(headGroup, timeout);
+
+            // 构建画质列表
+            for (NSInteger i = 0; i < playURLs.count; i++) {
+                NSString *label = [NSString stringWithFormat:@"[%@]", playLabels[i]];
+                long long size = [fileSizes[i] longLongValue];
+                if (size > 0) {
+                    NSString *sizeStr;
+                    if (size >= 1024 * 1024) {
+                        sizeStr = [NSString stringWithFormat:@"%.1fMB", (double)size / (1024.0 * 1024.0)];
+                    } else if (size >= 1024) {
+                        sizeStr = [NSString stringWithFormat:@"%.0fKB", (double)size / 1024.0];
+                    } else {
+                        sizeStr = [NSString stringWithFormat:@"%lldB", size];
+                    }
+                    label = [label stringByAppendingFormat:@"-[%@]", sizeStr];
+                }
+                [videoList addObject:@{@"level": label, @"url": playURLs[i]}];
             }
         }
 
@@ -2766,8 +2751,10 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
             }
         }
 
-        // 2.3 bitrateModels补充（去重，带码率和大小信息）
+        // 2.3 bitrateModels补充（去重，带gearName和码率信息）
         {
+            NSArray *bitrateModels = nil;
+            @try { bitrateModels = [videoModel valueForKey:@"bitrateModels"]; } @catch (NSException *e) {}
             if (bitrateModels && [bitrateModels isKindOfClass:[NSArray class]] && bitrateModels.count > 0) {
                 NSMutableArray *sortedModels = [NSMutableArray arrayWithArray:bitrateModels];
                 [sortedModels sortUsingComparator:^NSComparisonResult(id a, id b) {
@@ -2802,16 +2789,6 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                         NSString *gearName = nil;
                         @try { gearName = [model valueForKey:@"gearName"]; } @catch (NSException *e) {}
 
-                        // 取FPS
-                        NSInteger fps = 0;
-                        @try { fps = [[model valueForKey:@"FPS"] integerValue]; } @catch (NSException *e) {}
-                        @try { if (fps <= 0) fps = [[model valueForKey:@"fps"] integerValue]; } @catch (NSException *e) {}
-
-                        // 取data_size
-                        long long dataSize = 0;
-                        @try { dataSize = [[model valueForKey:@"dataSize"] longLongValue]; } @catch (NSException *e) {}
-                        @try { if (dataSize <= 0) dataSize = [[modelPlayAddr valueForKey:@"dataSize"] longLongValue]; } @catch (NSException *e) {}
-
                         // 构建label
                         NSString *qualityLabel;
                         if (gearName.length > 0) {
@@ -2822,24 +2799,6 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                             qualityLabel = [NSString stringWithFormat:@"[标清%ldkbps]", (long)(bitrate/1000)];
                         } else {
                             qualityLabel = [NSString stringWithFormat:@"[流畅%ldkbps]", (long)(bitrate/1000)];
-                        }
-
-                        // 附加FPS
-                        if (fps > 0) {
-                            qualityLabel = [qualityLabel stringByAppendingFormat:@"-[%ldFPS]", (long)fps];
-                        }
-
-                        // 附加文件大小
-                        if (dataSize > 0) {
-                            NSString *sizeStr;
-                            if (dataSize >= 1024 * 1024) {
-                                sizeStr = [NSString stringWithFormat:@"%.1fMB", (double)dataSize / (1024.0 * 1024.0)];
-                            } else if (dataSize >= 1024) {
-                                sizeStr = [NSString stringWithFormat:@"%.0fKB", (double)dataSize / 1024.0];
-                            } else {
-                                sizeStr = [NSString stringWithFormat:@"%lldB", dataSize];
-                            }
-                            qualityLabel = [qualityLabel stringByAppendingFormat:@"-[%@]", sizeStr];
                         }
 
                         [existingURLs addObject:urlStr];
