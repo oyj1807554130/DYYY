@@ -2778,12 +2778,60 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                     }];
                 }
             }
-            dispatch_time_t fpsTimeout = dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC);
+            dispatch_time_t fpsTimeout = dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC);
             dispatch_group_wait(fpsGroup, fpsTimeout);
 
             // 保存原画FPS，供后bitrateModels比较用
             originalFPS = [fpsValues[0] floatValue];
             @try { originalBitrate = [[videoModel valueForKey:@"bitrate"] integerValue]; } @catch (NSException *e) {}
+
+            // 构建分辨率→FPS映射（供bitrateModels复用）
+            NSMutableDictionary *resolutionFPSMap = [NSMutableDictionary dictionary];
+            NSArray *resolutionKeys = @[@"1440", @"1080", @"720", @"540", @"480"];
+            for (NSInteger i = 0; i < playLabels.count; i++) {
+                Float64 f = [fpsValues[i] floatValue];
+                if (f > 0) {
+                    NSString *label = playLabels[i];
+                    for (NSString *rKey in resolutionKeys) {
+                        if ([label containsString:rKey] || (i == 0 && [rKey isEqualToString:@"1440"])) {
+                            resolutionFPSMap[rKey] = @(f);
+                            break;
+                        }
+                    }
+                }
+            }
+            // 原画(default)的FPS也映射到所有分辨率key（作为fallback）
+            if (originalFPS > 0) {
+                for (NSString *rKey in resolutionKeys) {
+                    if (!resolutionFPSMap[rKey]) {
+                        resolutionFPSMap[rKey] = @(originalFPS);
+                    }
+                }
+            }
+
+            // 获取视频原始分辨率（用于原画lite判断）
+            NSInteger videoWidth = 0;
+            @try {
+                id playAddrModel = [videoModel valueForKey:@"playAddr"];
+                if (playAddrModel) {
+                    NSNumber *w = [playAddrModel valueForKey:@"imageWidth"];
+                    if (w && [w isKindOfClass:[NSNumber class]]) videoWidth = [w integerValue];
+                }
+                if (videoWidth <= 0) {
+                    id h264URLModel = [videoModel valueForKey:@"h264URL"];
+                    if (h264URLModel) {
+                        NSNumber *w = [h264URLModel valueForKey:@"imageWidth"];
+                        if (w && [w isKindOfClass:[NSNumber class]]) videoWidth = [w integerValue];
+                    }
+                }
+            } @catch (NSException *e) {}
+            // 原画分辨率key
+            NSString *originalResKey = nil;
+            if (videoWidth >= 2160) originalResKey = @"1440";
+            else if (videoWidth >= 1080) originalResKey = @"1080";
+            else if (videoWidth >= 720) originalResKey = @"720";
+            else if (videoWidth >= 540) originalResKey = @"540";
+            else if (videoWidth >= 480) originalResKey = @"480";
 
             // 构建画质列表
             for (NSInteger i = 0; i < playURLs.count; i++) {
@@ -2915,28 +2963,30 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                         [headTask resume];
                         dispatch_semaphore_wait(sema, dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC));
 
-                        // AVAsset获取FPS
-                        __block Float64 fps = 0;
-                        if (cdnURL) {
-                            dispatch_semaphore_t fpsSema = dispatch_semaphore_create(0);
-                            AVURLAsset *asset = [AVURLAsset assetWithURL:cdnURL];
-                            [asset loadValuesAsynchronouslyForKeys:@[@"tracks"] completionHandler:^{
-                                if ([asset statusOfValueForKey:@"tracks" error:nil] == AVKeyValueStatusLoaded) {
-                                    NSArray *tracks = [asset tracksWithMediaType:AVMediaTypeVideo];
-                                    if (tracks.count > 0) {
-                                        fps = ((AVAssetTrack *)tracks[0]).nominalFrameRate;
-                                    }
+                        // 从分辨率→FPS映射获取FPS（复用play URL的FPS，不再单独AVAsset加载）
+                        Float64 fps = 0;
+                        if (gearName.length > 0) {
+                            for (NSString *rKey in @[@"1440", @"1080", @"720", @"540", @"480"]) {
+                                if ([gearName containsString:rKey]) {
+                                    NSNumber *mappedFPS = resolutionFPSMap[rKey];
+                                    if (mappedFPS) fps = [mappedFPS floatValue];
+                                    break;
                                 }
-                                dispatch_semaphore_signal(fpsSema);
-                            }];
-                            dispatch_semaphore_wait(fpsSema, dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC));
+                            }
                         }
 
-                        // 构建label：与原画同FPS用"原画lite"（码率比较辅助）
+                        // 构建label：原画lite判断（分辨率匹配原画 + 码率/FPS辅助）
                         BOOL sameAsOriginal = NO;
-                        if (originalBitrate > 0 && bitrate > 0 && bitrate == originalBitrate) {
+                        // 方法1：分辨率与原画分辨率一致
+                        if (originalResKey.length > 0 && gearName.length > 0 && [gearName containsString:originalResKey]) {
                             sameAsOriginal = YES;
-                        } else {
+                        }
+                        // 方法2：码率相同
+                        if (!sameAsOriginal && originalBitrate > 0 && bitrate > 0 && bitrate == originalBitrate) {
+                            sameAsOriginal = YES;
+                        }
+                        // 方法3：FPS与原画相同且都>0
+                        if (!sameAsOriginal) {
                             NSInteger fpsInt = (NSInteger)(fps + 0.5);
                             NSInteger origFpsInt = (NSInteger)(originalFPS + 0.5);
                             if (origFpsInt > 0 && fpsInt > 0 && fpsInt == origFpsInt) {
