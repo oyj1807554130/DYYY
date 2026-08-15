@@ -1090,8 +1090,11 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
       configuration.timeoutIntervalForResource = 600.0; // 整个资源下载允许600s，大视频可能超过100MB
       NSURLSession *session = [NSURLSession sessionWithConfiguration:configuration delegate:[DYYYManager shared] delegateQueue:[NSOperationQueue mainQueue]];
 
-      // 创建下载任务 - 不加自定义header，避免CDN反爬断连
-      NSURLSessionDownloadTask *downloadTask = [session downloadTaskWithURL:url];
+      // 创建下载任务 - 加User-Agent/Referer防止CDN拒绝连接
+      NSMutableURLRequest *downloadReq = [NSMutableURLRequest requestWithURL:url];
+      [downloadReq setValue:@"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36" forHTTPHeaderField:@"User-Agent"];
+      [downloadReq setValue:@"https://www.douyin.com/" forHTTPHeaderField:@"Referer"];
+      NSURLSessionDownloadTask *downloadTask = [session downloadTaskWithRequest:downloadReq];
       downloadTask.taskDescription = downloadID;
 
       // 存储下载任务
@@ -4222,6 +4225,25 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                 resolvedURL = response.URL;
             }
             if (!resolvedURL) resolvedURL = url;
+            // 如果HEAD没跟随302到CDN，用GET重试
+            if ([resolvedURL.absoluteString containsString:@"douyin.com/aweme/v1/play/"]) {
+                NSLog(@"[DYYY] play接口HEAD未302到CDN，GET重试: %@", resolvedURL.absoluteString);
+                NSMutableURLRequest *getReq = [NSMutableURLRequest requestWithURL:url];
+                getReq.HTTPMethod = @"GET";
+                [getReq setValue:@"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36" forHTTPHeaderField:@"User-Agent"];
+                [getReq setValue:@"https://www.douyin.com/" forHTTPHeaderField:@"Referer"];
+                NSURLSessionConfiguration *getConfig = [NSURLSessionConfiguration defaultSessionConfiguration];
+                getConfig.timeoutIntervalForRequest = 15.0;
+                getConfig.requestCachePolicy = NSURLRequestReloadIgnoringLocalCacheData;
+                NSURLSession *getSession = [NSURLSession sessionWithConfiguration:getConfig];
+                [[getSession dataTaskWithRequest:getReq completionHandler:^(NSData *getData, NSURLResponse *getResponse, NSError *getError) {
+                    NSURL *getCdnURL = getResponse.URL;
+                    if (!getCdnURL || [getCdnURL.absoluteString containsString:@"douyin.com/aweme/v1/play/"]) getCdnURL = url;
+                    NSLog(@"[DYYY] play接口GET解析: %@ -> %@", url.absoluteString, getCdnURL.absoluteString);
+                    [self downloadMedia:getCdnURL mediaType:MediaTypeVideo audio:audioURL completion:completion];
+                }] resume];
+                return;
+            }
             NSLog(@"[DYYY] play接口解析: %@ -> %@", url.absoluteString, resolvedURL.absoluteString);
             [self downloadMedia:resolvedURL mediaType:MediaTypeVideo audio:audioURL completion:completion];
         }] resume];
