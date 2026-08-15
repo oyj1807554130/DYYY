@@ -2899,7 +2899,27 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                         }
 
                         [existingURLs addObject:urlStr];
-                        [videoList addObject:@{@"level": qualityLabel, @"url": urlStr}];
+                        // 如果FPS和原画相同(60FPS)，插到原画后面(index 1)
+                        BOOL sameAsOriginal = NO;
+                        if (videoList.count > 0 && fps > 0) {
+                            NSString *firstLevel = videoList[0][@"level"] ?: @"";
+                            // 原画条目含"原画"
+                            if ([firstLevel containsString:@"原画"]) {
+                                // 从原画label提取FPS
+                                NSRange fpsRange = [firstLevel rangeOfString:@"-\[(\d+)FPS\]" options:NSRegularExpressionSearch];
+                                if (fpsRange.location != NSNotFound) {
+                                    NSString *fpsPart = [firstLevel substringWithRange:fpsRange];
+                                    if ([fpsPart containsString:[NSString stringWithFormat:@"%ldFPS", (long)(NSInteger)(fps + 0.5)]]) {
+                                        sameAsOriginal = YES;
+                                    }
+                                }
+                            }
+                        }
+                        if (sameAsOriginal && videoList.count > 1) {
+                            [videoList insertObject:@{@"level": qualityLabel, @"url": urlStr} atIndex:1];
+                        } else {
+                            [videoList addObject:@{@"level": qualityLabel, @"url": urlStr}];
+                        }
                     } @catch (NSException *e) {}
                 }
             }
