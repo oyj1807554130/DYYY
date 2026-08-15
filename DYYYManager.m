@@ -2662,6 +2662,7 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
         }
 
         // 第二步：构建画质列表
+        Float64 originalFPS = 0;
         // 2.1 如果有videoURI，用play接口获取真正原画 + 多画质
         // 对每个play URL发HEAD请求获取Content-Length(文件大小)
         if (videoURI) {
@@ -2749,6 +2750,9 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
             dispatch_time_t fpsTimeout = dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC);
             dispatch_group_wait(fpsGroup, fpsTimeout);
 
+            // 保存原画FPS，供后bitrateModels比较用
+            originalFPS = [fpsValues[0] floatValue];
+
             // 构建画质列表
             for (NSInteger i = 0; i < playURLs.count; i++) {
                 NSString *label = [NSString stringWithFormat:@"[%@]", playLabels[i]];
@@ -2835,7 +2839,7 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                         @try { gearName = [model valueForKey:@"gearName"]; } @catch (NSException *e) {}
 
                         // gearName友好名称映射
-                        NSDictionary *gearNameMap = @{@"adapt_lowest_1440_1": @"4K"};
+                        NSDictionary *gearNameMap = @{@"adapt_lowest_1440_1": @"4K", @"adapt_lowest_4_1": @"4K"};
                         NSString *displayName = gearNameMap[gearName] ?: gearName;
 
                         // 构建label
@@ -2899,26 +2903,20 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                         }
 
                         [existingURLs addObject:urlStr];
-                        // 如果FPS和原画相同(60FPS)，插到原画后面(index 1)
+                        // 如果FPS和原画相同，插到原画后面(index 1)
                         BOOL sameAsOriginal = NO;
-                        if (videoList.count > 0 && fps > 0) {
-                            NSString *firstLevel = videoList[0][@"level"] ?: @"";
-                            // 原画条目含"原画"
-                            if ([firstLevel containsString:@"原画"]) {
-                                // 从原画label提取FPS
-                                NSRange fpsRange = [firstLevel rangeOfString:@"-\[(\d+)FPS\]" options:NSRegularExpressionSearch];
-                                if (fpsRange.location != NSNotFound) {
-                                    NSString *fpsPart = [firstLevel substringWithRange:fpsRange];
-                                    if ([fpsPart containsString:[NSString stringWithFormat:@"%ldFPS", (long)(NSInteger)(fps + 0.5)]]) {
-                                        sameAsOriginal = YES;
-                                    }
-                                }
+                        if (fps > 0 && originalFPS > 0) {
+                            NSInteger thisFpsInt = (NSInteger)(fps + 0.5);
+                            NSInteger origFpsInt = (NSInteger)(originalFPS + 0.5);
+                            if (thisFpsInt == origFpsInt) {
+                                sameAsOriginal = YES;
                             }
                         }
-                        if (sameAsOriginal && videoList.count > 1) {
+                        if (sameAsOriginal && videoList.count > 0) {
                             [videoList insertObject:@{@"level": qualityLabel, @"url": urlStr} atIndex:1];
                         } else {
                             [videoList addObject:@{@"level": qualityLabel, @"url": urlStr}];
+                        }
                         }
                     } @catch (NSException *e) {}
                 }
