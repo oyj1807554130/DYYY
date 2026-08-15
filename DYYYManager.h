@@ -198,6 +198,7 @@
 + (void)addDisclaimerHeaderToActionSheet:(id)actionSheet;
 + (id)disclaimerActionWithCount:(NSInteger)actionCount;
 + (id)disclaimerDetailAction;
++ (id)playCountActionWithCount:(NSNumber *)playCount;
 
 
 @end

@@ -2477,6 +2477,36 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
     }
 }
 
++ (id)playCountActionWithCount:(NSNumber *)playCount {
+    @try {
+        if (!playCount || ![playCount isKindOfClass:[NSNumber class]] || [playCount integerValue] <= 0) return nil;
+        NSInteger count = [playCount integerValue];
+        NSString *countStr = nil;
+        if (count >= 100000000) {
+            double yi = count / 100000000.0;
+            if (yi == (NSInteger)yi) {
+                countStr = [NSString stringWithFormat:@"%ld亿", (long)yi];
+            } else {
+                countStr = [NSString stringWithFormat:@"%.1f亿", yi];
+            }
+        } else if (count >= 10000) {
+            double wan = count / 10000.0;
+            if (wan == (NSInteger)wan) {
+                countStr = [NSString stringWithFormat:@"%ld万", (long)wan];
+            } else {
+                countStr = [NSString stringWithFormat:@"%.1f万", wan];
+            }
+        } else {
+            countStr = [NSString stringWithFormat:@"%ld", (long)count];
+        }
+        NSString *title = [NSString stringWithFormat:@"当前作品播放量：%@播放", countStr];
+        return [NSClassFromString(@"AWEUserSheetAction") actionWithTitle:title imgName:nil handler:^{}];
+    } @catch (NSException *e) {
+        NSLog(@"[DYYY] playCount action exception: %@", e);
+        return nil;
+    }
+}
+
 + (void)addDisclaimerHeaderToActionSheet:(id)actionSheet actionCount:(NSInteger)actionCount {
     if (!actionSheet) return;
     @try {
@@ -3025,6 +3055,19 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
     }
     if (desc.length > 0) result[@"title"] = desc;
 
+    // --- 播放量 ---
+    @try {
+        id statisticsModel = [awemeModel valueForKey:@"statistics"];
+        if (statisticsModel) {
+            NSNumber *playCount = [statisticsModel valueForKey:@"playCount"];
+            if (playCount && [playCount isKindOfClass:[NSNumber class]] && [playCount integerValue] > 0) {
+                result[@"play_count"] = playCount;
+            }
+        }
+    } @catch (NSException *e) {
+        NSLog(@"[DYYY] localParse playCount error: %@", e);
+    }
+
     if (videoList.count > 0) result[@"video_list"] = videoList;
     if (images.count > 0) result[@"images"] = images;
 
@@ -3509,6 +3552,10 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                                                                                                     if (subDisclaimerDetail) {
                                                                                                         [qualityActions addObject:subDisclaimerDetail];
                                                                                                     }
+                                                                                                    AWEUserSheetAction *subPlayCountAction = [self playCountActionWithCount:dataDict[@"play_count"]];
+                                                                                                    if (subPlayCountAction) {
+                                                                                                        [qualityActions addObject:subPlayCountAction];
+                                                                                                    }
                                                                                                     
                                                                                                     subQualityCount = 0;
                                                                                                     for (id videoItem in videoList) {
@@ -3765,11 +3812,21 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
             }
 
             if (actions.count > 0) {
+                // 播放量行
+                AWEUserSheetAction *playCountAction = [self playCountActionWithCount:dataDict[@"play_count"]];
+
                 if (disclaimerDetail) {
                     [actions insertObject:disclaimerDetail atIndex:0];
                 }
                 if (disclaimerAction) {
                     [actions insertObject:disclaimerAction atIndex:0];
+                }
+                if (playCountAction) {
+                    // 播放量插在免责声明详情行之后、画质选项之前
+                    NSInteger insertIdx = 0;
+                    if (disclaimerAction) insertIdx++;
+                    if (disclaimerDetail) insertIdx++;
+                    [actions insertObject:playCountAction atIndex:insertIdx];
                 }
                 [DYYYManager addDisclaimerHeaderToActionSheet:actionSheet actionCount:qualityCount];
                 [actionSheet setActions:actions];
