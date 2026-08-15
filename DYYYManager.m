@@ -2694,6 +2694,8 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
         // 第二步：构建画质列表
         Float64 originalFPS = 0;
         NSInteger originalBitrate = 0;
+        NSMutableDictionary *resolutionFPSMap = [NSMutableDictionary dictionary];
+        NSString *originalResKey = nil;
         // 2.1 如果有videoURI，用play接口获取真正原画 + 多画质
         // 对每个play URL发HEAD请求获取Content-Length(文件大小)
         if (videoURI) {
@@ -2786,7 +2788,6 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
             @try { originalBitrate = [[videoModel valueForKey:@"bitrate"] integerValue]; } @catch (NSException *e) {}
 
             // 构建分辨率→FPS映射（供bitrateModels复用）
-            NSMutableDictionary *resolutionFPSMap = [NSMutableDictionary dictionary];
             NSArray *resolutionKeys = @[@"1440", @"1080", @"720", @"540", @"480"];
             for (NSInteger i = 0; i < playLabels.count; i++) {
                 Float64 f = [fpsValues[i] floatValue];
@@ -2826,7 +2827,6 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                 }
             } @catch (NSException *e) {}
             // 原画分辨率key
-            NSString *originalResKey = nil;
             if (videoWidth >= 2160) originalResKey = @"1440";
             else if (videoWidth >= 1080) originalResKey = @"1080";
             else if (videoWidth >= 720) originalResKey = @"720";
