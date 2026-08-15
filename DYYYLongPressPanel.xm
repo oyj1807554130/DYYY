@@ -520,6 +520,42 @@
         [viewModels addObject:apiDownload2];
     }
 
+    // 接口3保存功能
+    NSString *apiKey3 = [[NSUserDefaults standardUserDefaults] objectForKey:@"DYYYInterfaceDownload3"];
+    if (enableApiDownload) {
+        AWELongPressPanelBaseViewModel *apiDownload3 = [[%c(AWELongPressPanelBaseViewModel) alloc] init];
+        apiDownload3.awemeModel = self.awemeModel;
+        apiDownload3.actionType = 680;
+        apiDownload3.duxIconName = @"ic_cloudarrowdown_outlined_20";
+        apiDownload3.describeString = @"接口3保存";
+        // 提前捕获值，避免block执行时self/awemeModel已被释放导致闪退
+        AWEAwemeModel *capturedAwemeModel3 = self.awemeModel;
+        NSInteger capturedImageIndex3 = self.awemeModel.currentImageIndex;
+        NSString *capturedShareLink3 = [self.awemeModel valueForKey:@"shareURL"];
+        apiDownload3.action = ^{
+          @try {
+          [DYYYManager storeMetadataFromAwemeModel:capturedAwemeModel3];
+          // 存储当前浏览的图片索引，用于接口保存实况照片时定位
+          [DYYYManager shared].currentImageIndex = capturedImageIndex3;
+          if (apiKey3.length == 0) {
+              [DYYYUtils showToast:@"请先在设置页面填写接口3地址"];
+              return;
+          }
+          if (capturedShareLink3.length == 0) {
+              [DYYYUtils showToast:@"无法获取分享链接"];
+              return;
+          }
+          [DYYYManager parseAndDownloadVideoWithShareLink:capturedShareLink3 apiKey:apiKey3];
+          AWELongPressPanelManager *panelManager = [%c(AWELongPressPanelManager) shareInstance];
+          [panelManager dismissWithAnimation:YES completion:nil];
+          } @catch (NSException *e) {
+              NSLog(@"[DYYY] API download action exception: %@", e);
+              [DYYYUtils showToast:@"接口3保存异常，请重试"];
+          }
+        };
+        [viewModels addObject:apiDownload3];
+    }
+
     // 封面下载功能
     if (enableSaveCover && self.awemeModel.awemeType != 68) {
         AWELongPressPanelBaseViewModel *coverViewModel = [[%c(AWELongPressPanelBaseViewModel) alloc] init];
@@ -1472,7 +1508,44 @@
         [viewModels addObject:apiDownload2];
     }
 
-    // 封面下载功能
+    
+    // 接口3保存功能
+    NSString *apiKey3 = [[NSUserDefaults standardUserDefaults] objectForKey:@"DYYYInterfaceDownload3"];
+    if (enableApiDownload) {
+        AWELongPressPanelBaseViewModel *apiDownload3 = [[%c(AWELongPressPanelBaseViewModel) alloc] init];
+        apiDownload3.awemeModel = self.awemeModel;
+        apiDownload3.actionType = 680;
+        apiDownload3.duxIconName = @"ic_cloudarrowdown_outlined_20";
+        apiDownload3.describeString = @"接口3保存";
+        // 提前捕获值，避免block执行时self/awemeModel已被释放导致闪退
+        AWEAwemeModel *capturedAwemeModel3 = self.awemeModel;
+        NSInteger capturedImageIndex3 = self.awemeModel.currentImageIndex;
+        NSString *capturedShareLink3 = [self.awemeModel valueForKey:@"shareURL"];
+        apiDownload3.action = ^{
+          @try {
+          [DYYYManager storeMetadataFromAwemeModel:capturedAwemeModel3];
+          // 存储当前浏览的图片索引，用于接口保存实况照片时定位
+          [DYYYManager shared].currentImageIndex = capturedImageIndex3;
+          if (apiKey3.length == 0) {
+              [DYYYUtils showToast:@"请先在设置页面填写接口3地址"];
+              return;
+          }
+          if (capturedShareLink3.length == 0) {
+              [DYYYUtils showToast:@"无法获取分享链接"];
+              return;
+          }
+          [DYYYManager parseAndDownloadVideoWithShareLink:capturedShareLink3 apiKey:apiKey3];
+          AWELongPressPanelManager *panelManager = [%c(AWELongPressPanelManager) shareInstance];
+          [panelManager dismissWithAnimation:YES completion:nil];
+          } @catch (NSException *e) {
+              NSLog(@"[DYYY] API download action exception: %@", e);
+              [DYYYUtils showToast:@"接口3保存异常，请重试"];
+          }
+        };
+        [viewModels addObject:apiDownload3];
+    }
+
+// 封面下载功能
     if (enableSaveCover && self.awemeModel.awemeType != 68) {
         AWELongPressPanelBaseViewModel *coverViewModel = [[%c(AWELongPressPanelBaseViewModel) alloc] init];
         coverViewModel.awemeModel = self.awemeModel;

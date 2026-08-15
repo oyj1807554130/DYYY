@@ -6467,6 +6467,26 @@ static NSHashTable *processedParentViews = nil;
                 [actions addObject:apiDownload2Action];
         }
 
+        // 添加接口3保存选项
+        if (DYYYGetBool(@"DYYYInterfaceDownload3Enabled")) {
+            NSString *apiKey3 = [[NSUserDefaults standardUserDefaults] objectForKey:@"DYYYInterfaceDownload3"];
+            AWEUserSheetAction *apiDownload3Action = [NSClassFromString(@"AWEUserSheetAction") actionWithTitle:@"接口3保存"
+                                                                                                           imgName:nil
+                                                                                                           handler:^{
+                                                                                                             if (apiKey3.length == 0) {
+                                                                                                                 [DYYYUtils showToast:@"请先在设置页面填写接口3地址"];
+                                                                                                                 return;
+                                                                                                             }
+                                                                                                             NSString *shareLink = [awemeModel valueForKey:@"shareURL"];
+                                                                                                             if (shareLink.length == 0) {
+                                                                                                                 [DYYYUtils showToast:@"无法获取分享链接"];
+                                                                                                                 return;
+                                                                                                             }
+                                                                                                             [DYYYManager parseAndDownloadVideoWithShareLink:shareLink apiKey:apiKey3];
+                                                                                                           }];
+                [actions addObject:apiDownload3Action];
+        }
+
         // 添加制作视频功能
         if (DYYYGetBool(@"DYYYDoubleCreateVideo") || ![[NSUserDefaults standardUserDefaults] objectForKey:@"DYYYDoubleCreateVideo"]) {
             if (isImageContent) {

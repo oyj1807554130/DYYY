@@ -2021,6 +2021,20 @@ void showDYYYSettingsVC(UIViewController *rootVC, BOOL hasAgreed) {
               @"cellType" : @20,
               @"imageName" : @"ic_cloudarrowdown_outlined_20"
           },
+          @{@"identifier" : @"DYYYInterfaceDownload3Enabled",
+            @"title" : @"接口3下载",
+            @"subTitle" : @"启用接口3保存按钮",
+            @"detail" : @"",
+            @"cellType" : @6,
+            @"imageName" : @"ic_cloudarrowdown_outlined_20"},
+          @{
+              @"identifier" : @"DYYYInterfaceDownload3",
+              @"title" : @"接口3地址",
+              @"subTitle" : @"填入第三个自定义解析接口",
+              @"detail" : @"",
+              @"cellType" : @20,
+              @"imageName" : @"ic_cloudarrowdown_outlined_20"
+          },
           @{@"identifier" : @"DYYYShowAllVideoQuality",
             @"title" : @"接口显示清晰选项",
             @"detail" : @"",
@@ -2130,6 +2144,29 @@ void showDYYYSettingsVC(UIViewController *rootVC, BOOL hasAgreed) {
                                                [DYYYSettingsHelper setUserDefaults:trimmedText2 forKey:@"DYYYInterfaceDownload2"];
 
                                                item.detail = trimmedText2.length > 0 ? trimmedText2 : @"不填关闭";
+
+                                               [item refreshCell];
+                                             }
+                                              onCancel:nil];
+              };
+          }
+          // 特殊处理接口3选项
+          if ([item.identifier isEqualToString:@"DYYYInterfaceDownload3"]) {
+              // 获取已保存的接口URL
+              NSString *savedURL3 = [[NSUserDefaults standardUserDefaults] objectForKey:@"DYYYInterfaceDownload3"];
+              item.detail = savedURL3.length > 0 ? savedURL3 : @"不填关闭";
+
+              item.cellTappedBlock = ^{
+                NSString *defaultText3 = [item.detail isEqualToString:@"不填关闭"] ? @"" : item.detail;
+                [DYYYSettingsHelper showTextInputAlert:@"设置媒体解析接口3"
+                                           defaultText:defaultText3
+                                           placeholder:@"解析接口以url=结尾"
+                                             onConfirm:^(NSString *text3) {
+                                               // 保存用户输入的接口URL
+                                               NSString *trimmedText3 = [text3 stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+                                               [DYYYSettingsHelper setUserDefaults:trimmedText3 forKey:@"DYYYInterfaceDownload3"];
+
+                                               item.detail = trimmedText3.length > 0 ? trimmedText3 : @"不填关闭";
 
                                                [item refreshCell];
                                              }
