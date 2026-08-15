@@ -2663,6 +2663,7 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
 
         // 第二步：构建画质列表
         Float64 originalFPS = 0;
+        NSInteger originalBitrate = 0;
         // 2.1 如果有videoURI，用play接口获取真正原画 + 多画质
         // 对每个play URL发HEAD请求获取Content-Length(文件大小)
         if (videoURI) {
@@ -2752,6 +2753,7 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
 
             // 保存原画FPS，供后bitrateModels比较用
             originalFPS = [fpsValues[0] floatValue];
+            @try { originalBitrate = [[videoModel valueForKey:@"bitrate"] integerValue]; } @catch (NSException *e) {}
 
             // 构建画质列表
             for (NSInteger i = 0; i < playURLs.count; i++) {
@@ -2842,14 +2844,6 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                         NSDictionary *gearNameMap = @{@"adapt_lowest_1440_1": @"4K", @"adapt_lowest_4_1": @"4K"};
                         NSString *displayName = gearNameMap[gearName] ?: gearName;
 
-                        // 构建label
-                        NSString *qualityLabel;
-                        if (displayName.length > 0) {
-                            qualityLabel = [NSString stringWithFormat:@"[%@]", displayName];
-                        } else {
-                            qualityLabel = [NSString stringWithFormat:@"[%ldkbps]", (long)(bitrate/1000)];
-                        }
-
                         // HEAD请求获取文件大小 + CDN直链URL
                         NSString *sizeStr = @"";
                         __block long long headSize = 0;
@@ -2886,11 +2880,21 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                             }];
                             dispatch_semaphore_wait(fpsSema, dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC));
                         }
+
+                        // 构建label：与原画同码率用"原画lite"
+                        BOOL sameAsOriginal = (originalBitrate > 0 && bitrate > 0 && bitrate == originalBitrate);
+                        NSString *qualityLabel;
+                        if (sameAsOriginal) {
+                            qualityLabel = @"[原画lite]";
+                        } else if (displayName.length > 0) {
+                            qualityLabel = [NSString stringWithFormat:@"[%@]", displayName];
+                        } else {
+                            qualityLabel = [NSString stringWithFormat:@"[%ldkbps]", (long)(bitrate/1000)];
+                        }
                         if (fps > 0) {
                             NSInteger fpsInt = (NSInteger)(fps + 0.5);
                             qualityLabel = [qualityLabel stringByAppendingFormat:@"-[%ldFPS]", (long)fpsInt];
                         }
-
                         if (headSize > 0) {
                             if (headSize >= 1024 * 1024) {
                                 sizeStr = [NSString stringWithFormat:@"%.1fMB", (double)headSize / (1024.0 * 1024.0)];
@@ -2903,20 +2907,10 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                         }
 
                         [existingURLs addObject:urlStr];
-                        // 如果FPS和原画相同，插到原画后面(index 1)
-                        BOOL sameAsOriginal = NO;
-                        if (fps > 0 && originalFPS > 0) {
-                            NSInteger thisFpsInt = (NSInteger)(fps + 0.5);
-                            NSInteger origFpsInt = (NSInteger)(originalFPS + 0.5);
-                            if (thisFpsInt == origFpsInt) {
-                                sameAsOriginal = YES;
-                            }
-                        }
                         if (sameAsOriginal && videoList.count > 0) {
                             [videoList insertObject:@{@"level": qualityLabel, @"url": urlStr} atIndex:1];
                         } else {
                             [videoList addObject:@{@"level": qualityLabel, @"url": urlStr}];
-                        }
                         }
                     } @catch (NSException *e) {}
                 }
