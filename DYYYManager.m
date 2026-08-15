@@ -2515,7 +2515,8 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
         if (completion) completion(nil);
         return;
     }
-    NSString *urlStr = [NSString stringWithFormat:@"https://www.douyin.com/aweme/v1/web/aweme/detail/?aweme_id=%@&device_platform=webapp&aid=6383&channel=channel_pc_web", awemeId];
+    // Method: fetch video page HTML, extract RENDER_DATA JSON, find play_count
+    NSString *urlStr = [NSString stringWithFormat:@"https://www.douyin.com/video/%@", awemeId];
     NSURL *url = [NSURL URLWithString:urlStr];
     if (!url) {
         if (completion) completion(nil);
@@ -2523,59 +2524,103 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
     }
     NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:url];
     [request setHTTPMethod:@"GET"];
-    [request setValue:@"Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1" forHTTPHeaderField:@"User-Agent"];
+    [request setValue:@"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36" forHTTPHeaderField:@"User-Agent"];
     [request setValue:@"https://www.douyin.com/" forHTTPHeaderField:@"Referer"];
-    [request setTimeoutInterval:10];
+    [request setValue:@"text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8" forHTTPHeaderField:@"Accept"];
+    [request setValue:@"zh-CN,zh;q=0.9" forHTTPHeaderField:@"Accept-Language"];
+    [request setTimeoutInterval:15];
     NSURLSessionDataTask *task = [[NSURLSession sharedSession] dataTaskWithRequest:request completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
         NSNumber *result = nil;
         @try {
             if (error || !data) {
-                NSLog(@"[DYYY] fetchPlayCount error: %@", error);
+                NSLog(@"[DYYY] fetchPlayCount HTML error: %@", error);
             } else {
-                NSDictionary *json = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
-                // Try multiple paths to find play_count
-                NSArray *paths = @[
-                    @"aweme_detail.statistics.play_count",
-                    @"aweme_detail.statistics.playCount",
-                    @"statistics.play_count",
-                    @"statistics.playCount"
-                ];
-                for (NSString *path in paths) {
-                    id val = [json valueForKeyPath:path];
-                    if (val && [val isKindOfClass:[NSNumber class]] && [val integerValue] > 0) {
-                        result = val;
-                        NSLog(@"[DYYY] fetchPlayCount found via: %@ value: %@", path, val);
-                        break;
-                    }
-                }
-                if (!result) {
-                    // Try to get statistics dict and find max number
-                    id stats = [json valueForKeyPath:@"aweme_detail.statistics"];
-                    if (!stats) stats = [json valueForKeyPath:@"statistics"];
-                    if (stats && [stats isKindOfClass:[NSDictionary class]]) {
-                        NSNumber *maxVal = nil;
-                        for (NSString *key in [(NSDictionary *)stats allKeys]) {
-                            @try {
-                                id val = [(NSDictionary *)stats objectForKey:key];
-                                if (val && [val isKindOfClass:[NSNumber class]] && [val integerValue] > 0) {
-                                    if (!maxVal || [val integerValue] > [maxVal integerValue]) {
-                                        maxVal = val;
+                NSString *html = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+                // Look for RENDER_DATA script tag
+                NSString *startTag = @"<script id="RENDER_DATA" type="application/json">";
+                NSString *endTag = @"</script>";
+                NSRange startRange = [html rangeOfString:startTag];
+                if (startRange.location != NSNotFound) {
+                    NSUInteger contentStartLoc = startRange.location + startRange.length;
+                    NSRange searchRange = NSMakeRange(contentStartLoc, html.length - contentStartLoc);
+                    NSRange endRange = [html rangeOfString:endTag options:0 range:searchRange];
+                    if (endRange.location != NSNotFound) {
+                        NSRange contentRange = NSMakeRange(contentStartLoc, endRange.location - contentStartLoc);
+                        NSString *encodedContent = [html substringWithRange:contentRange];
+                        NSString *decodedContent = [encodedContent stringByRemovingPercentEncoding];
+                        NSData *jsonData = [decodedContent dataUsingEncoding:NSUTF8StringEncoding];
+                        if (jsonData) {
+                            NSDictionary *json = [NSJSONSerialization JSONObjectWithData:jsonData options:0 error:nil];
+                            if (json) {
+                                // Try multiple keyPaths to find play_count
+                                NSArray *paths = @[
+                                    @"aweme_detail.statistics.play_count",
+                                    @"aweme_detail.statistics.playCount",
+                                    @"aweme_detail.statistics_v2.play_count"
+                                ];
+                                for (NSString *path in paths) {
+                                    id val = [json valueForKeyPath:path];
+                                    if (val && [val isKindOfClass:[NSNumber class]] && [val integerValue] > 0) {
+                                        result = val;
+                                        NSLog(@"[DYYY] fetchPlayCount HTML found via: %@ value: %@", path, val);
+                                        break;
                                     }
                                 }
-                            } @catch (NSException *e) {}
+                                // Fallback: search all keys in statistics dict
+                                if (!result) {
+                                    id stats = [json valueForKeyPath:@"aweme_detail.statistics"];
+                                    if (stats && [stats isKindOfClass:[NSDictionary class]]) {
+                                        id pc = [(NSDictionary *)stats objectForKey:@"play_count"];
+                                        if (!pc) pc = [(NSDictionary *)stats objectForKey:@"playCount"];
+                                        if (!pc) pc = [(NSDictionary *)stats objectForKey:@"vv_count"];
+                                        if (pc && [pc isKindOfClass:[NSNumber class]] && [pc integerValue] > 0) {
+                                            result = pc;
+                                            NSLog(@"[DYYY] fetchPlayCount HTML dict fallback: %@", pc);
+                                        }
+                                    }
+                                }
+                            }
                         }
-                        if (maxVal && [maxVal integerValue] > 0) {
-                            result = maxVal;
-                            NSLog(@"[DYYY] fetchPlayCount fallback max in stats: %@", maxVal);
+                    }
+                }
+                // Also try __NEXT_DATA__ as fallback
+                if (!result) {
+                    NSString *nextStartTag = @"<script id="__NEXT_DATA__" type="application/json">";
+                    NSRange nextStartRange = [html rangeOfString:nextStartTag];
+                    if (nextStartRange.location != NSNotFound) {
+                        NSUInteger nextContentStart = nextStartRange.location + nextStartTag.length;
+                        NSRange nextSearchRange = NSMakeRange(nextContentStart, html.length - nextContentStart);
+                        NSRange nextEndRange = [html rangeOfString:endTag options:0 range:nextSearchRange];
+                        if (nextEndRange.location != NSNotFound) {
+                            NSRange nextContentRange = NSMakeRange(nextContentStart, nextEndRange.location - nextContentStart);
+                            NSString *nextContent = [html substringWithRange:nextContentRange];
+                            NSData *nextJsonData = [nextContent dataUsingEncoding:NSUTF8StringEncoding];
+                            if (nextJsonData) {
+                                NSDictionary *nextJson = [NSJSONSerialization JSONObjectWithData:nextJsonData options:0 error:nil];
+                                if (nextJson) {
+                                    NSArray *nextPaths = @[
+                                        @"props.pageProps.videoStore.videoDetail.statistics.playCount",
+                                        @"props.pageProps.videoStore.videoDetail.statistics.play_count"
+                                    ];
+                                    for (NSString *path in nextPaths) {
+                                        id val = [nextJson valueForKeyPath:path];
+                                        if (val && [val isKindOfClass:[NSNumber class]] && [val integerValue] > 0) {
+                                            result = val;
+                                            NSLog(@"[DYYY] fetchPlayCount NEXT_DATA found via: %@ value: %@", path, val);
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
                 if (!result) {
-                    NSLog(@"[DYYY] fetchPlayCount raw json keys: %@", [(NSDictionary *)json allKeys]);
+                    NSLog(@"[DYYY] fetchPlayCount HTML no play_count found in page, HTML length: %lu", (unsigned long)html.length);
                 }
             }
         } @catch (NSException *e) {
-            NSLog(@"[DYYY] fetchPlayCount exception: %@", e);
+            NSLog(@"[DYYY] fetchPlayCount HTML exception: %@", e);
         }
         dispatch_async(dispatch_get_main_queue(), ^{
             if (completion) completion(result);
@@ -3258,8 +3303,8 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                 NSLog(@"[DYYY] localParse statisticsModel all number props: %@", allProps);
                 // 只有当最大值大于diggCount时才认为可能是播放量（播放量>=点赞数）
                 if (maxVal && [maxVal integerValue] > 0) {
-                    if (diggCountVal && [maxVal isEqualToNumber:diggCountVal] && allProps.count == 1) {
-                        // statisticsModel只有diggCount一个属性，不能当播放量
+                    if (diggCountVal && [maxVal isEqualToNumber:diggCountVal]) {
+                        // maxVal等于diggCount，没有playCount属性，不能当播放量
                         NSLog(@"[DYYY] localParse statisticsModel only has diggCount, skip as playCount");
                     } else {
                         playCount = maxVal;
