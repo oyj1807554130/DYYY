@@ -2790,10 +2790,14 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                         NSString *gearName = nil;
                         @try { gearName = [model valueForKey:@"gearName"]; } @catch (NSException *e) {}
 
+                        // gearName友好名称映射
+                        NSDictionary *gearNameMap = @{@"adapt_lowest_1440_1": @"4K"};
+                        NSString *displayName = gearNameMap[gearName] ?: gearName;
+
                         // 构建label
                         NSString *qualityLabel;
-                        if (gearName.length > 0) {
-                            qualityLabel = [NSString stringWithFormat:@"[%@]", gearName];
+                        if (displayName.length > 0) {
+                            qualityLabel = [NSString stringWithFormat:@"[%@]", displayName];
                         } else {
                             qualityLabel = [NSString stringWithFormat:@"[%ldkbps]", (long)(bitrate/1000)];
                         }
