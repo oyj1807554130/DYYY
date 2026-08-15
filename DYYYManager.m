@@ -2510,6 +2510,80 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
     }
 }
 
++ (void)fetchPlayCountForAwemeId:(NSString *)awemeId completion:(void (^)(NSNumber *playCount))completion {
+    if (!awemeId || awemeId.length == 0) {
+        if (completion) completion(nil);
+        return;
+    }
+    NSString *urlStr = [NSString stringWithFormat:@"https://www.douyin.com/aweme/v1/web/aweme/detail/?aweme_id=%@&device_platform=webapp&aid=6383&channel=channel_pc_web", awemeId];
+    NSURL *url = [NSURL URLWithString:urlStr];
+    if (!url) {
+        if (completion) completion(nil);
+        return;
+    }
+    NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:url];
+    [request setHTTPMethod:@"GET"];
+    [request setValue:@"Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1" forHTTPHeaderField:@"User-Agent"];
+    [request setValue:@"https://www.douyin.com/" forHTTPHeaderField:@"Referer"];
+    [request setTimeoutInterval:10];
+    NSURLSessionDataTask *task = [[NSURLSession sharedSession] dataTaskWithRequest:request completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
+        NSNumber *result = nil;
+        @try {
+            if (error || !data) {
+                NSLog(@"[DYYY] fetchPlayCount error: %@", error);
+            } else {
+                NSDictionary *json = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
+                // Try multiple paths to find play_count
+                NSArray *paths = @[
+                    @"aweme_detail.statistics.play_count",
+                    @"aweme_detail.statistics.playCount",
+                    @"statistics.play_count",
+                    @"statistics.playCount"
+                ];
+                for (NSString *path in paths) {
+                    id val = [json valueForKeyPath:path];
+                    if (val && [val isKindOfClass:[NSNumber class]] && [val integerValue] > 0) {
+                        result = val;
+                        NSLog(@"[DYYY] fetchPlayCount found via: %@ value: %@", path, val);
+                        break;
+                    }
+                }
+                if (!result) {
+                    // Try to get statistics dict and find max number
+                    id stats = [json valueForKeyPath:@"aweme_detail.statistics"];
+                    if (!stats) stats = [json valueForKeyPath:@"statistics"];
+                    if (stats && [stats isKindOfClass:[NSDictionary class]]) {
+                        NSNumber *maxVal = nil;
+                        for (NSString *key in [(NSDictionary *)stats allKeys]) {
+                            @try {
+                                id val = [(NSDictionary *)stats objectForKey:key];
+                                if (val && [val isKindOfClass:[NSNumber class]] && [val integerValue] > 0) {
+                                    if (!maxVal || [val integerValue] > [maxVal integerValue]) {
+                                        maxVal = val;
+                                    }
+                                }
+                            } @catch (NSException *e) {}
+                        }
+                        if (maxVal && [maxVal integerValue] > 0) {
+                            result = maxVal;
+                            NSLog(@"[DYYY] fetchPlayCount fallback max in stats: %@", maxVal);
+                        }
+                    }
+                }
+                if (!result) {
+                    NSLog(@"[DYYY] fetchPlayCount raw json keys: %@", [(NSDictionary *)json allKeys]);
+                }
+            }
+        } @catch (NSException *e) {
+            NSLog(@"[DYYY] fetchPlayCount exception: %@", e);
+        }
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (completion) completion(result);
+        });
+    }];
+    [task resume];
+}
+
 + (void)addDisclaimerHeaderToActionSheet:(id)actionSheet actionCount:(NSInteger)actionCount {
     if (!actionSheet) return;
     @try {
@@ -3124,9 +3198,11 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
     if (desc.length > 0) result[@"title"] = desc;
 
     // --- 播放量 ---
+    // 注意：AWEAwemeStatisticsModel只声明了diggCount（=点赞数），新版抖音不再在本地模型暴露playCount
+    // 真实播放量需要通过在线接口获取，localParse只尝试本地keyPath
     @try {
         NSNumber *playCount = nil;
-        // 用keyPath从awemeModel上取播放量，不要用diggCount（那是点赞数）
+        // 用keyPath从awemeModel上取播放量，排除diggCount（那是点赞数）
         NSArray *playCountKeyPaths = @[
             @"statistics.playCount",
             @"statistics.play_count",
@@ -3148,7 +3224,7 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
             } @catch (NSException *e2) {}
         }
         if (!playCount) {
-            // 遍历statisticsModel所有NSNumber属性，取最大值作为播放量（播放量始终>=点赞数）
+            // 遍历statisticsModel所有NSNumber属性，排除diggCount，取最大值
             id statisticsModel = [awemeModel valueForKey:@"statistics"];
             if (statisticsModel) {
                 unsigned int propCount = 0;
@@ -3156,6 +3232,7 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                 objc_property_t *props = class_copyPropertyList(statsClass, &propCount);
                 NSNumber *maxVal = nil;
                 NSString *maxKey = nil;
+                NSNumber *diggCountVal = nil;
                 NSMutableDictionary *allProps = [NSMutableDictionary dictionary];
                 for (unsigned int i = 0; i < propCount; i++) {
                     const char *propName = property_getName(props[i]);
@@ -3165,6 +3242,10 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                             id val = [statisticsModel valueForKey:name];
                             if (val && [val isKindOfClass:[NSNumber class]] && [val integerValue] > 0) {
                                 allProps[name] = val;
+                                // 记录diggCount的值，后面排除
+                                if ([name isEqualToString:@"diggCount"]) {
+                                    diggCountVal = val;
+                                }
                                 if (!maxVal || [val integerValue] > [maxVal integerValue]) {
                                     maxVal = val;
                                     maxKey = name;
@@ -3175,14 +3256,25 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                 }
                 free(props);
                 NSLog(@"[DYYY] localParse statisticsModel all number props: %@", allProps);
+                // 只有当最大值大于diggCount时才认为可能是播放量（播放量>=点赞数）
                 if (maxVal && [maxVal integerValue] > 0) {
-                    playCount = maxVal;
-                    NSLog(@"[DYYY] localParse playCount fallback to max prop: %@ value: %@", maxKey, maxVal);
+                    if (diggCountVal && [maxVal isEqualToNumber:diggCountVal] && allProps.count == 1) {
+                        // statisticsModel只有diggCount一个属性，不能当播放量
+                        NSLog(@"[DYYY] localParse statisticsModel only has diggCount, skip as playCount");
+                    } else {
+                        playCount = maxVal;
+                        NSLog(@"[DYYY] localParse playCount fallback to max prop: %@ value: %@", maxKey, maxVal);
+                    }
                 }
             }
         }
         if (playCount && [playCount isKindOfClass:[NSNumber class]] && [playCount integerValue] > 0) {
             result[@"play_count"] = playCount;
+        }
+        // 保存awemeId供异步查询播放量使用
+        NSString *awemeId = [awemeModel valueForKey:@"awemeId"];
+        if (awemeId && awemeId.length > 0) {
+            result[@"aweme_id"] = awemeId;
         }
     } @catch (NSException *e) {
         NSLog(@"[DYYY] localParse playCount error: %@", e);
@@ -3675,6 +3767,26 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                                                                                                     AWEUserSheetAction *subPlayCountAction = [self playCountActionWithCount:dataDict[@"play_count"]];
                                                                                                     if (subPlayCountAction) {
                                                                                                         [qualityActions addObject:subPlayCountAction];
+                                                                                                    } else {
+                                                                                                        // 本地无播放量，异步查询真实播放量
+                                                                                                        NSString *subAwemeId = dataDict[@"aweme_id"];
+                                                                                                        if (!subAwemeId) subAwemeId = dataDict[@"video_id"];
+                                                                                                        if (subAwemeId && subAwemeId.length > 0) {
+                                                                                                            [DYYYManager fetchPlayCountForAwemeId:subAwemeId completion:^(NSNumber *playCount) {
+                                                                                                                if (playCount && [playCount integerValue] > 0) {
+                                                                                                                    NSInteger count = [playCount integerValue];
+                                                                                                                    NSString *countStr = nil;
+                                                                                                                    if (count >= 100000000) {
+                                                                                                                        countStr = [NSString stringWithFormat:@"%.1f亿", count / 100000000.0];
+                                                                                                                    } else if (count >= 10000) {
+                                                                                                                        countStr = [NSString stringWithFormat:@"%.1f万", count / 10000.0];
+                                                                                                                    } else {
+                                                                                                                        countStr = [NSString stringWithFormat:@"%ld", (long)count];
+                                                                                                                    }
+                                                                                                                    [DYYYUtils showToast:[NSString stringWithFormat:@"真实播放量：%@", countStr]];
+                                                                                                                }
+                                                                                                            }];
+                                                                                                        }
                                                                                                     }
                                                                                                     
                                                                                                     subQualityCount = 0;
@@ -3933,7 +4045,8 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
 
             if (actions.count > 0) {
                 // 播放量行
-                AWEUserSheetAction *playCountAction = [self playCountActionWithCount:dataDict[@"play_count"]];
+                NSNumber *localPlayCount = dataDict[@"play_count"];
+                AWEUserSheetAction *playCountAction = [self playCountActionWithCount:localPlayCount];
 
                 if (disclaimerDetail) {
                     [actions insertObject:disclaimerDetail atIndex:0];
@@ -3947,6 +4060,26 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                     if (disclaimerAction) insertIdx++;
                     if (disclaimerDetail) insertIdx++;
                     [actions insertObject:playCountAction atIndex:insertIdx];
+                } else {
+                    // 本地无播放量，异步查询真实播放量并Toast显示
+                    NSString *awemeId = dataDict[@"aweme_id"];
+                    if (!awemeId) awemeId = dataDict[@"video_id"];
+                    if (awemeId && awemeId.length > 0) {
+                        [DYYYManager fetchPlayCountForAwemeId:awemeId completion:^(NSNumber *playCount) {
+                            if (playCount && [playCount integerValue] > 0) {
+                                NSInteger count = [playCount integerValue];
+                                NSString *countStr = nil;
+                                if (count >= 100000000) {
+                                    countStr = [NSString stringWithFormat:@"%.1f亿", count / 100000000.0];
+                                } else if (count >= 10000) {
+                                    countStr = [NSString stringWithFormat:@"%.1f万", count / 10000.0];
+                                } else {
+                                    countStr = [NSString stringWithFormat:@"%ld", (long)count];
+                                }
+                                [DYYYUtils showToast:[NSString stringWithFormat:@"真实播放量：%@", countStr]];
+                            }
+                        }];
+                    }
                 }
                 [DYYYManager addDisclaimerHeaderToActionSheet:actionSheet actionCount:qualityCount];
                 [actionSheet setActions:actions];
