@@ -2751,6 +2751,88 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
             }
         }
 
+
+        // 2.3 bitrateModels补充（去重，带gearName和码率信息）
+        {
+            NSArray *bitrateModels = nil;
+            @try { bitrateModels = [videoModel valueForKey:@"bitrateModels"]; } @catch (NSException *e) {}
+            if (bitrateModels && [bitrateModels isKindOfClass:[NSArray class]] && bitrateModels.count > 0) {
+                NSMutableArray *sortedModels = [NSMutableArray arrayWithArray:bitrateModels];
+                [sortedModels sortUsingComparator:^NSComparisonResult(id a, id b) {
+                    NSInteger ba = 0, bb = 0;
+                    @try { ba = [[a valueForKey:@"bitrate"] integerValue]; } @catch (NSException *e) {}
+                    @try { bb = [[b valueForKey:@"bitrate"] integerValue]; } @catch (NSException *e) {}
+                    return bb - ba;
+                }];
+                NSMutableSet *existingURLs = [NSMutableSet set];
+                for (NSDictionary *item in videoList) {
+                    NSString *u = item[@"url"];
+                    if (u) [existingURLs addObject:u];
+                }
+                for (id model in sortedModels) {
+                    @try {
+                        id modelPlayAddr = [model valueForKey:@"playAddr"];
+                        NSString *urlStr = nil;
+                        if (modelPlayAddr && [modelPlayAddr isKindOfClass:NSClassFromString(@"AWEURLModel")]) {
+                            id originList = [modelPlayAddr valueForKey:@"originURLList"];
+                            if ([originList isKindOfClass:[NSArray class]] && [(NSArray *)originList count] > 0) {
+                                urlStr = [(NSArray *)originList firstObject];
+                            }
+                        }
+                        if (urlStr.length == 0 || [existingURLs containsObject:urlStr]) continue;
+
+                        // 取码率
+                        NSInteger bitrate = 0;
+                        @try { bitrate = [[model valueForKey:@"bitrate"] integerValue]; } @catch (NSException *e) {}
+                        if (bitrate <= 0) continue;
+
+                        // 取gearName
+                        NSString *gearName = nil;
+                        @try { gearName = [model valueForKey:@"gearName"]; } @catch (NSException *e) {}
+
+                        // 构建label
+                        NSString *qualityLabel;
+                        if (gearName.length > 0) {
+                            qualityLabel = [NSString stringWithFormat:@"[%@]", gearName];
+                        } else {
+                            qualityLabel = [NSString stringWithFormat:@"[%ldkbps]", (long)(bitrate/1000)];
+                        }
+
+                        // 对play接口URL发HEAD请求获取文件大小
+                        NSString *sizeStr = @"";
+                        NSMutableURLRequest *headReq = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:urlStr]];
+                        headReq.HTTPMethod = @"HEAD";
+                        [headReq setValue:@"Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1" forHTTPHeaderField:@"User-Agent"];
+                        [headReq setValue:@"https://www.douyin.com/" forHTTPHeaderField:@"Referer"];
+                        __block long long headSize = 0;
+                        dispatch_semaphore_t sema = dispatch_semaphore_create(0);
+                        NSURLSessionDataTask *headTask = [[NSURLSession sharedSession] dataTaskWithRequest:headReq completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
+                            if (response && [response isKindOfClass:[NSHTTPURLResponse class]]) {
+                                NSHTTPURLResponse *httpResp = (NSHTTPURLResponse *)response;
+                                headSize = [httpResp expectedContentLength];
+                            }
+                            dispatch_semaphore_signal(sema);
+                        }];
+                        [headTask resume];
+                        dispatch_semaphore_wait(sema, dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC));
+
+                        if (headSize > 0) {
+                            if (headSize >= 1024 * 1024) {
+                                sizeStr = [NSString stringWithFormat:@"%.1fMB", (double)headSize / (1024.0 * 1024.0)];
+                            } else if (headSize >= 1024) {
+                                sizeStr = [NSString stringWithFormat:@"%.0fKB", (double)headSize / 1024.0];
+                            } else {
+                                sizeStr = [NSString stringWithFormat:@"%lldB", headSize];
+                            }
+                            qualityLabel = [qualityLabel stringByAppendingFormat:@"-[%@]", sizeStr];
+                        }
+
+                        [existingURLs addObject:urlStr];
+                        [videoList addObject:@{@"level": qualityLabel, @"url": urlStr}];
+                    } @catch (NSException *e) {}
+                }
+            }
+        }
         id coverURL = [videoModel valueForKey:@"coverURL"];
         if (coverURL && [coverURL valueForKey:@"originURLList"]) {
             NSArray *list = [coverURL valueForKey:@"originURLList"];
