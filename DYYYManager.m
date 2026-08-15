@@ -2684,8 +2684,9 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                 [playLabels addObject:name];
             }
 
-            // 并行HEAD请求获取每个画质的文件大小
+            // 并行HEAD请求获取每个画质的文件大小 + CDN直链URL + FPS
             NSMutableArray *fileSizes = [NSMutableArray arrayWithArray:@[@0, @0, @0, @0]];
+            NSMutableArray *cdnURLs = [NSMutableArray arrayWithArray:@[[NSNull null], [NSNull null], [NSNull null], [NSNull null]]];
             dispatch_group_t headGroup = dispatch_group_create();
             for (NSInteger i = 0; i < playURLs.count; i++) {
                 NSString *urlStr = playURLs[i];
@@ -2703,6 +2704,13 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                                 fileSizes[i] = @(contentLength);
                             }
                         }
+                        // 保存302后的CDN直链URL
+                        NSURL *finalURL = httpResp.URL;
+                        if (finalURL) {
+                            @synchronized(cdnURLs) {
+                                cdnURLs[i] = finalURL;
+                            }
+                        }
                     }
                     dispatch_group_leave(headGroup);
                 }];
@@ -2712,9 +2720,45 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
             dispatch_time_t timeout = dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC);
             dispatch_group_wait(headGroup, timeout);
 
+            // 用AVURLAsset从CDN直链获取FPS（并行+超时3秒）
+            NSMutableArray *fpsValues = [NSMutableArray arrayWithArray:@[@0, @0, @0, @0]];
+            dispatch_group_t fpsGroup = dispatch_group_create();
+            for (NSInteger i = 0; i < cdnURLs.count; i++) {
+                NSURL *cdnURL = cdnURLs[i];
+                if ([cdnURL isKindOfClass:[NSURL class]]) {
+                    dispatch_group_enter(fpsGroup);
+                    AVURLAsset *asset = [AVURLAsset assetWithURL:cdnURL];
+                    NSString *fpsKey = @"tracks";
+                    [asset loadValuesAsynchronouslyForKeys:@[fpsKey] completionHandler:^{
+                        NSError *trackError = nil;
+                        AVKeyValueStatus status = [asset statusOfValueForKey:fpsKey error:&trackError];
+                        if (status == AVKeyValueStatusLoaded) {
+                            NSArray *tracks = [asset tracksWithMediaType:AVMediaTypeVideo];
+                            if (tracks.count > 0) {
+                                AVAssetTrack *videoTrack = tracks[0];
+                                Float64 fps = videoTrack.nominalFrameRate;
+                                @synchronized(fpsValues) {
+                                    fpsValues[i] = @(fps);
+                                }
+                            }
+                        }
+                        dispatch_group_leave(fpsGroup);
+                    }];
+                }
+            }
+            dispatch_time_t fpsTimeout = dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC);
+            dispatch_group_wait(fpsGroup, fpsTimeout);
+
             // 构建画质列表
             for (NSInteger i = 0; i < playURLs.count; i++) {
                 NSString *label = [NSString stringWithFormat:@"[%@]", playLabels[i]];
+                // FPS
+                Float64 fps = [fpsValues[i] floatValue];
+                if (fps > 0) {
+                    NSInteger fpsInt = (NSInteger)(fps + 0.5);
+                    label = [label stringByAppendingFormat:@"-[%ldFPS]", (long)fpsInt];
+                }
+                // 文件大小
                 long long size = [fileSizes[i] longLongValue];
                 if (size > 0) {
                     NSString *sizeStr;
@@ -2802,23 +2846,46 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                             qualityLabel = [NSString stringWithFormat:@"[%ldkbps]", (long)(bitrate/1000)];
                         }
 
-                        // 对play接口URL发HEAD请求获取文件大小
+                        // HEAD请求获取文件大小 + CDN直链URL
                         NSString *sizeStr = @"";
+                        __block long long headSize = 0;
+                        __block NSURL *cdnURL = nil;
                         NSMutableURLRequest *headReq = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:urlStr]];
                         headReq.HTTPMethod = @"HEAD";
                         [headReq setValue:@"Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1" forHTTPHeaderField:@"User-Agent"];
                         [headReq setValue:@"https://www.douyin.com/" forHTTPHeaderField:@"Referer"];
-                        __block long long headSize = 0;
                         dispatch_semaphore_t sema = dispatch_semaphore_create(0);
                         NSURLSessionDataTask *headTask = [[NSURLSession sharedSession] dataTaskWithRequest:headReq completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
                             if (response && [response isKindOfClass:[NSHTTPURLResponse class]]) {
                                 NSHTTPURLResponse *httpResp = (NSHTTPURLResponse *)response;
                                 headSize = [httpResp expectedContentLength];
+                                cdnURL = httpResp.URL;
                             }
                             dispatch_semaphore_signal(sema);
                         }];
                         [headTask resume];
                         dispatch_semaphore_wait(sema, dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC));
+
+                        // AVAsset获取FPS
+                        __block Float64 fps = 0;
+                        if (cdnURL) {
+                            dispatch_semaphore_t fpsSema = dispatch_semaphore_create(0);
+                            AVURLAsset *asset = [AVURLAsset assetWithURL:cdnURL];
+                            [asset loadValuesAsynchronouslyForKeys:@[@"tracks"] completionHandler:^{
+                                if ([asset statusOfValueForKey:@"tracks" error:nil] == AVKeyValueStatusLoaded) {
+                                    NSArray *tracks = [asset tracksWithMediaType:AVMediaTypeVideo];
+                                    if (tracks.count > 0) {
+                                        fps = ((AVAssetTrack *)tracks[0]).nominalFrameRate;
+                                    }
+                                }
+                                dispatch_semaphore_signal(fpsSema);
+                            }];
+                            dispatch_semaphore_wait(fpsSema, dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC));
+                        }
+                        if (fps > 0) {
+                            NSInteger fpsInt = (NSInteger)(fps + 0.5);
+                            qualityLabel = [qualityLabel stringByAppendingFormat:@"-[%ldFPS]", (long)fpsInt];
+                        }
 
                         if (headSize > 0) {
                             if (headSize >= 1024 * 1024) {
