@@ -157,7 +157,7 @@
  */
 + (NSDictionary *)localParseFromAwemeModel:(id)awemeModel;
 + (void)handleVideoData:(NSDictionary *)dataDict;
-+ (void)resolveAndDownloadVideo:(NSURL *)url audio:(NSURL *)audioURL completion:(void (^)(BOOL success))completion;
+- (void)resolveAndDownloadVideo:(NSURL *)url audio:(NSURL *)audioURL completion:(void (^)(BOOL success))completion;
 
 /**
  * 批量下载视频和图片资源

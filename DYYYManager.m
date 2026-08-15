@@ -3179,7 +3179,7 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                                                                                                                                                                                     if (musicURL.length > 0) {
                                                                                                                                                                                         optionalAudioURL = [NSURL URLWithString:musicURL];
                                                                                                                                                                                     }
-                                                                                                                                                                                    [DYYYManager resolveAndDownloadVideo:videoDownloadUrl
+                                                                                                                                                                                    [self resolveAndDownloadVideo:videoDownloadUrl
                                                                                                                                                                                                   audio:optionalAudioURL
                                                                                                                                                                                              completion:^(BOOL success) {
                                                                                                                                                                                                if (!success) {
@@ -3323,7 +3323,7 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                                                                                                             if (musicURL.length > 0) {
                                                                                                                 optionalAudioURL = [NSURL URLWithString:musicURL];
                                                                                                             }
-                                                                                                            [DYYYManager resolveAndDownloadVideo:videoDownloadUrl
+                                                                                                            [self resolveAndDownloadVideo:videoDownloadUrl
                                                                                                                           audio:optionalAudioURL
                                                                                                                      completion:^(BOOL success) {
                                                                                                                        if (!success) {
@@ -3587,7 +3587,7 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                                                                                               if (musicURL.length > 0) {
                                                                                                   optionalAudioURL = [NSURL URLWithString:musicURL];
                                                                                               }
-                                                                                              [DYYYManager resolveAndDownloadVideo:videoDownloadUrl
+                                                                                              [self resolveAndDownloadVideo:videoDownloadUrl
                                                                                                             audio:optionalAudioURL
                                                                                                        completion:^(BOOL success) {
                                                                                                          if (!success) {
@@ -3666,7 +3666,7 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
         if (musicURL.length > 0) {
             optionalAudioURL = [NSURL URLWithString:musicURL];
         }
-        [DYYYManager resolveAndDownloadVideo:videoDownloadUrl
+        [self resolveAndDownloadVideo:videoDownloadUrl
                       audio:optionalAudioURL
                  completion:^(BOOL success) {
                    if (!success) {
@@ -3691,7 +3691,9 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
         [DYYYUtils showToast:@"没有找到可下载的资源"];
     }
 
-+ (void)resolveAndDownloadVideo:(NSURL *)url audio:(NSURL *)audioURL completion:(void (^)(BOOL success))completion {
+}
+
+- (void)resolveAndDownloadVideo:(NSURL *)url audio:(NSURL *)audioURL completion:(void (^)(BOOL success))completion {
     if (!url) {
         if (completion) completion(NO);
         return;
@@ -3721,8 +3723,6 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
     }
     // 非play接口URL，直接下载
     [self downloadMedia:url mediaType:MediaTypeVideo audio:audioURL completion:completion];
-}
-
 }
 
 #define DYYYLogVideo(format, ...) NSLog((@"[DYYY视频合成] " format), ##__VA_ARGS__)
