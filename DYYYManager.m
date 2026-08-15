@@ -2499,7 +2499,7 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
         } else {
             countStr = [NSString stringWithFormat:@"%ld", (long)count];
         }
-        NSString *title = [NSString stringWithFormat:@"当前作品播放量：%@播放", countStr];
+        NSString *title = [NSString stringWithFormat:@"当前作品播放量：%@", countStr];
         return [NSClassFromString(@"AWEUserSheetAction") actionWithTitle:title imgName:nil handler:^{}];
     } @catch (NSException *e) {
         NSLog(@"[DYYY] playCount action exception: %@", e);
@@ -3107,26 +3107,37 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
 
     // --- 播放量 ---
     @try {
-        id statisticsModel = [awemeModel valueForKey:@"statistics"];
-        if (statisticsModel) {
-            // 尝试多个key获取播放量
-            NSNumber *playCount = nil;
-            NSArray *playCountKeys = @[@"playCount", @"awemePlayCount", @"play_count", @"diggCount"];
-            for (NSString *key in playCountKeys) {
-                @try {
-                    id val = [statisticsModel valueForKey:key];
-                    if (val && [val isKindOfClass:[NSNumber class]] && [val integerValue] > 0) {
-                        playCount = val;
-                        NSLog(@"[DYYY] localParse playCount found via key: %@ value: %@", key, val);
-                        break;
-                    }
-                } @catch (NSException *e2) {}
-            }
-            if (!playCount) {
-                // 遍历statisticsModel所有属性找播放量
+        NSNumber *playCount = nil;
+        // 用keyPath从awemeModel上取播放量，不要用diggCount（那是点赞数）
+        NSArray *playCountKeyPaths = @[
+            @"statistics.playCount",
+            @"statistics.play_count",
+            @"statistics.awemePlayCount",
+            @"statistics.viewCount",
+            @"statistics.view_count",
+            @"playCount",
+            @"play_count",
+            @"awemePlayCount"
+        ];
+        for (NSString *keyPath in playCountKeyPaths) {
+            @try {
+                id val = [awemeModel valueForKeyPath:keyPath];
+                if (val && [val isKindOfClass:[NSNumber class]] && [val integerValue] > 0) {
+                    playCount = val;
+                    NSLog(@"[DYYY] localParse playCount found via keyPath: %@ value: %@", keyPath, val);
+                    break;
+                }
+            } @catch (NSException *e2) {}
+        }
+        if (!playCount) {
+            // 遍历statisticsModel所有NSNumber属性，取最大值作为播放量（播放量始终>=点赞数）
+            id statisticsModel = [awemeModel valueForKey:@"statistics"];
+            if (statisticsModel) {
                 unsigned int propCount = 0;
                 Class statsClass = [statisticsModel class];
                 objc_property_t *props = class_copyPropertyList(statsClass, &propCount);
+                NSNumber *maxVal = nil;
+                NSString *maxKey = nil;
                 NSMutableDictionary *allProps = [NSMutableDictionary dictionary];
                 for (unsigned int i = 0; i < propCount; i++) {
                     const char *propName = property_getName(props[i]);
@@ -3136,16 +3147,24 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                             id val = [statisticsModel valueForKey:name];
                             if (val && [val isKindOfClass:[NSNumber class]] && [val integerValue] > 0) {
                                 allProps[name] = val;
+                                if (!maxVal || [val integerValue] > [maxVal integerValue]) {
+                                    maxVal = val;
+                                    maxKey = name;
+                                }
                             }
                         } @catch (NSException *e3) {}
                     }
                 }
                 free(props);
                 NSLog(@"[DYYY] localParse statisticsModel all number props: %@", allProps);
+                if (maxVal && [maxVal integerValue] > 0) {
+                    playCount = maxVal;
+                    NSLog(@"[DYYY] localParse playCount fallback to max prop: %@ value: %@", maxKey, maxVal);
+                }
             }
-            if (playCount && [playCount isKindOfClass:[NSNumber class]] && [playCount integerValue] > 0) {
-                result[@"play_count"] = playCount;
-            }
+        }
+        if (playCount && [playCount isKindOfClass:[NSNumber class]] && [playCount integerValue] > 0) {
+            result[@"play_count"] = playCount;
         }
     } @catch (NSException *e) {
         NSLog(@"[DYYY] localParse playCount error: %@", e);
