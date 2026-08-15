@@ -2724,14 +2724,14 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                         else if (dataSize >= 1024) sizeStr = [NSString stringWithFormat:@"%.0fKB", (double)dataSize / 1024.0];
                         else sizeStr = [NSString stringWithFormat:@"%lldB", dataSize];
                     }
-                    NSString *label = [NSString stringWithFormat:@"[%@]", ratio isEqualToString:@"default" ? @"原画" : [ratio uppercaseString]];
+                    NSString *label = [NSString stringWithFormat:@"[%@]", ([ratio isEqualToString:@"default"] ? @"原画" : [ratio uppercaseString])];
                     if (fpsStr.length > 0) label = [label stringByAppendingFormat:@"-[%@]", fpsStr];
                     if (sizeStr.length > 0) label = [label stringByAppendingFormat:@"-[%@]", sizeStr];
                     return label;
                 }
             }
             // 没匹配到gearName，返回简单label
-            return [NSString stringWithFormat:@"[%@]", ratio isEqualToString:@"default" ? @"原画" : [ratio uppercaseString]];
+            return [NSString stringWithFormat:@"[%@]", ([ratio isEqualToString:@"default"] ? @"原画" : [ratio uppercaseString])];
         };
 
         // 2.1 如果有videoURI，用play接口获取真正原画 + 多画质
@@ -2848,6 +2848,7 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                 }
             }
         }
+        id coverURL = [videoModel valueForKey:@"coverURL"];
         if (coverURL && [coverURL valueForKey:@"originURLList"]) {
             NSArray *list = [coverURL valueForKey:@"originURLList"];
             if ([list isKindOfClass:[NSArray class]] && list.count > 0) {
