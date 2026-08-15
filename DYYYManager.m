@@ -2902,8 +2902,17 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                             dispatch_semaphore_wait(fpsSema, dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC));
                         }
 
-                        // 构建label：与原画同码率用"原画lite"
-                        BOOL sameAsOriginal = (originalBitrate > 0 && bitrate > 0 && bitrate == originalBitrate);
+                        // 构建label：与原画同FPS用"原画lite"（码率比较辅助）
+                        BOOL sameAsOriginal = NO;
+                        if (originalBitrate > 0 && bitrate > 0 && bitrate == originalBitrate) {
+                            sameAsOriginal = YES;
+                        } else {
+                            NSInteger fpsInt = (NSInteger)(fps + 0.5);
+                            NSInteger origFpsInt = (NSInteger)(originalFPS + 0.5);
+                            if (origFpsInt > 0 && fpsInt > 0 && fpsInt == origFpsInt) {
+                                sameAsOriginal = YES;
+                            }
+                        }
                         NSString *qualityLabel;
                         if (sameAsOriginal) {
                             qualityLabel = @"[原画lite]";
