@@ -3109,7 +3109,40 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
     @try {
         id statisticsModel = [awemeModel valueForKey:@"statistics"];
         if (statisticsModel) {
-            NSNumber *playCount = [statisticsModel valueForKey:@"playCount"];
+            // 尝试多个key获取播放量
+            NSNumber *playCount = nil;
+            NSArray *playCountKeys = @[@"playCount", @"awemePlayCount", @"play_count", @"diggCount"];
+            for (NSString *key in playCountKeys) {
+                @try {
+                    id val = [statisticsModel valueForKey:key];
+                    if (val && [val isKindOfClass:[NSNumber class]] && [val integerValue] > 0) {
+                        playCount = val;
+                        NSLog(@"[DYYY] localParse playCount found via key: %@ value: %@", key, val);
+                        break;
+                    }
+                } @catch (NSException *e2) {}
+            }
+            if (!playCount) {
+                // 遍历statisticsModel所有属性找播放量
+                unsigned int propCount = 0;
+                Class statsClass = [statisticsModel class];
+                objc_property_t *props = class_copyPropertyList(statsClass, &propCount);
+                NSMutableDictionary *allProps = [NSMutableDictionary dictionary];
+                for (unsigned int i = 0; i < propCount; i++) {
+                    const char *propName = property_getName(props[i]);
+                    if (propName) {
+                        NSString *name = [NSString stringWithUTF8String:propName];
+                        @try {
+                            id val = [statisticsModel valueForKey:name];
+                            if (val && [val isKindOfClass:[NSNumber class]] && [val integerValue] > 0) {
+                                allProps[name] = val;
+                            }
+                        } @catch (NSException *e3) {}
+                    }
+                }
+                free(props);
+                NSLog(@"[DYYY] localParse statisticsModel all number props: %@", allProps);
+            }
             if (playCount && [playCount isKindOfClass:[NSNumber class]] && [playCount integerValue] > 0) {
                 result[@"play_count"] = playCount;
             }

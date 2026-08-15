@@ -398,7 +398,14 @@
               [pm1 dismissWithAnimation:YES completion:^{
                   AWEUserActionSheetView *imgSheet1 = [[NSClassFromString(@"AWEUserActionSheetView") alloc] init];
                   NSMutableArray *imgActs1 = [NSMutableArray array];
-                  AWEUserSheetAction *saveCur1 = [NSClassFromString(@"AWEUserSheetAction") actionWithTitle:@"保存当前图片" imgName:nil handler:^{
+                  AWEImageAlbumImageModel *curI1ForTitle = nil;
+                  if (capturedAwemeModel.currentImageIndex > 0 && capturedAwemeModel.currentImageIndex <= capturedAwemeModel.albumImages.count) {
+                      curI1ForTitle = capturedAwemeModel.albumImages[capturedAwemeModel.currentImageIndex - 1];
+                  } else {
+                      curI1ForTitle = capturedAwemeModel.albumImages.firstObject;
+                  }
+                  NSString *curSaveTitle1 = (curI1ForTitle && curI1ForTitle.clipVideo != nil) ? @"保存当前实况" : @"保存当前图片";
+                  AWEUserSheetAction *saveCur1 = [NSClassFromString(@"AWEUserSheetAction") actionWithTitle:curSaveTitle1 imgName:nil handler:^{
                       AWEImageAlbumImageModel *curI1 = nil;
                       if (capturedAwemeModel.currentImageIndex > 0 && capturedAwemeModel.currentImageIndex <= capturedAwemeModel.albumImages.count) {
                           curI1 = capturedAwemeModel.albumImages[capturedAwemeModel.currentImageIndex - 1];
@@ -426,7 +433,12 @@
                       }
                   }];
                   [imgActs1 addObject:saveCur1];
-                  AWEUserSheetAction *saveAll1 = [NSClassFromString(@"AWEUserSheetAction") actionWithTitle:@"保存全部图片" imgName:nil handler:^{
+                  BOOL hasAnyLivePhoto1 = NO;
+                  for (AWEImageAlbumImageModel *m in capturedAwemeModel.albumImages) {
+                      if (m.clipVideo != nil) { hasAnyLivePhoto1 = YES; break; }
+                  }
+                  NSString *allSaveTitle1 = hasAnyLivePhoto1 ? @"保存全部（含实况）" : @"保存全部图片";
+                  AWEUserSheetAction *saveAll1 = [NSClassFromString(@"AWEUserSheetAction") actionWithTitle:allSaveTitle1 imgName:nil handler:^{
                       NSMutableArray *iurls1 = [NSMutableArray array];
                       NSMutableArray *lps1 = [NSMutableArray array];
                       for (AWEImageAlbumImageModel *imgM in capturedAwemeModel.albumImages) {
@@ -1338,7 +1350,14 @@
               [pm1 dismissWithAnimation:YES completion:^{
                   AWEUserActionSheetView *imgSheet1 = [[NSClassFromString(@"AWEUserActionSheetView") alloc] init];
                   NSMutableArray *imgActs1 = [NSMutableArray array];
-                  AWEUserSheetAction *saveCur1 = [NSClassFromString(@"AWEUserSheetAction") actionWithTitle:@"保存当前图片" imgName:nil handler:^{
+                  AWEImageAlbumImageModel *curI1ForTitle = nil;
+                  if (capturedAwemeModel.currentImageIndex > 0 && capturedAwemeModel.currentImageIndex <= capturedAwemeModel.albumImages.count) {
+                      curI1ForTitle = capturedAwemeModel.albumImages[capturedAwemeModel.currentImageIndex - 1];
+                  } else {
+                      curI1ForTitle = capturedAwemeModel.albumImages.firstObject;
+                  }
+                  NSString *curSaveTitle1 = (curI1ForTitle && curI1ForTitle.clipVideo != nil) ? @"保存当前实况" : @"保存当前图片";
+                  AWEUserSheetAction *saveCur1 = [NSClassFromString(@"AWEUserSheetAction") actionWithTitle:curSaveTitle1 imgName:nil handler:^{
                       AWEImageAlbumImageModel *curI1 = nil;
                       if (capturedAwemeModel.currentImageIndex > 0 && capturedAwemeModel.currentImageIndex <= capturedAwemeModel.albumImages.count) {
                           curI1 = capturedAwemeModel.albumImages[capturedAwemeModel.currentImageIndex - 1];
@@ -1366,7 +1385,12 @@
                       }
                   }];
                   [imgActs1 addObject:saveCur1];
-                  AWEUserSheetAction *saveAll1 = [NSClassFromString(@"AWEUserSheetAction") actionWithTitle:@"保存全部图片" imgName:nil handler:^{
+                  BOOL hasAnyLivePhoto1 = NO;
+                  for (AWEImageAlbumImageModel *m in capturedAwemeModel.albumImages) {
+                      if (m.clipVideo != nil) { hasAnyLivePhoto1 = YES; break; }
+                  }
+                  NSString *allSaveTitle1 = hasAnyLivePhoto1 ? @"保存全部（含实况）" : @"保存全部图片";
+                  AWEUserSheetAction *saveAll1 = [NSClassFromString(@"AWEUserSheetAction") actionWithTitle:allSaveTitle1 imgName:nil handler:^{
                       NSMutableArray *iurls1 = [NSMutableArray array];
                       NSMutableArray *lps1 = [NSMutableArray array];
                       for (AWEImageAlbumImageModel *imgM in capturedAwemeModel.albumImages) {
