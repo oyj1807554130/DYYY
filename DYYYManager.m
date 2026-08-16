@@ -3864,12 +3864,17 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                 AWEUserSheetAction *allLivePhotoAction = [NSClassFromString(@"AWEUserSheetAction") actionWithTitle:@"保存所有实况"
                                                                                                     imgName:nil
                                                                                                     handler:^{
+                                                                                                        NSMutableArray *allLivePhotoDicts = [NSMutableArray array];
                                                                                                         for (NSDictionary *pair in livePhotoPairs) {
-                                                                                                            [DYYYManager downloadLivePhoto:[NSURL URLWithString:pair[@"image"]]
-                                                                                                                                  videoURL:[NSURL URLWithString:pair[@"video"]]
-                                                                                                                                completion:^{
-                                                                                                                                }];
+                                                                                                            [allLivePhotoDicts addObject:@{
+                                                                                                                @"imageURL": pair[@"image"],
+                                                                                                                @"videoURL": pair[@"video"]
+                                                                                                            }];
                                                                                                         }
+                                                                                                        [DYYYManager downloadAllLivePhotosWithProgress:allLivePhotoDicts
+                                                                                                                                            progress:nil
+                                                                                                                                          completion:^(NSInteger successCount, NSInteger totalCount){
+                                                                                                                                          }];
                                                                                                     }];
                 [actions addObject:allLivePhotoAction];
             }
