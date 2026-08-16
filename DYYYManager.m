@@ -2480,10 +2480,10 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
     }
 }
 
-+ (id)playCountActionWithCount:(NSNumber *)playCount {
++ (id)shareCountActionWithCount:(NSNumber *)shareCount {
     @try {
-        if (!playCount || ![playCount isKindOfClass:[NSNumber class]] || [playCount integerValue] <= 0) return nil;
-        NSInteger count = [playCount integerValue];
+        if (!shareCount || ![shareCount isKindOfClass:[NSNumber class]] || [shareCount integerValue] <= 0) return nil;
+        NSInteger count = [shareCount integerValue];
         NSString *countStr = nil;
         if (count >= 100000000) {
             double yi = count / 100000000.0;
@@ -2502,139 +2502,12 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
         } else {
             countStr = [NSString stringWithFormat:@"%ld", (long)count];
         }
-        NSString *title = [NSString stringWithFormat:@"当前作品播放量：%@", countStr];
+        NSString *title = [NSString stringWithFormat:@"当前作品转发量：%@", countStr];
         return [NSClassFromString(@"AWEUserSheetAction") actionWithTitle:title imgName:nil handler:^{}];
     } @catch (NSException *e) {
-        NSLog(@"[DYYY] playCount action exception: %@", e);
+        NSLog(@"[DYYY] shareCount action exception: %@", e);
         return nil;
     }
-}
-
-+ (void)fetchPlayCountForAwemeId:(NSString *)awemeId completion:(void (^)(NSNumber *playCount))completion {
-    if (!awemeId || awemeId.length == 0) {
-        if (completion) completion(nil);
-        return;
-    }
-    // Method: fetch video page HTML with app cookies, extract RENDER_DATA JSON, find play_count
-    NSString *urlStr = [NSString stringWithFormat:@"https://www.douyin.com/video/%@", awemeId];
-    NSURL *url = [NSURL URLWithString:urlStr];
-    if (!url) {
-        if (completion) completion(nil);
-        return;
-    }
-    NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:url];
-    [request setHTTPMethod:@"GET"];
-    [request setValue:@"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36" forHTTPHeaderField:@"User-Agent"];
-    [request setValue:@"https://www.douyin.com/" forHTTPHeaderField:@"Referer"];
-    [request setValue:@"text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8" forHTTPHeaderField:@"Accept"];
-    [request setValue:@"zh-CN,zh;q=0.9" forHTTPHeaderField:@"Accept-Language"];
-    [request setTimeoutInterval:15];
-    // 将App的Cookie添加到请求中（共享Cookie存储会自动包含）
-    NSHTTPCookieStorage *cookieStore = [NSHTTPCookieStorage sharedHTTPCookieStorage];
-    NSArray *cookies = [cookieStore cookiesForURL:url];
-    NSDictionary *cookieHeaders = [NSHTTPCookie requestHeaderFieldsWithCookies:cookies];
-    NSString *cookieStr = [cookieHeaders objectForKey:@"Cookie"];
-    if (cookieStr.length > 0) {
-        [request setValue:cookieStr forHTTPHeaderField:@"Cookie"];
-    }
-    NSURLSessionDataTask *task = [[NSURLSession sharedSession] dataTaskWithRequest:request completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
-        NSNumber *result = nil;
-        @try {
-            if (error || !data) {
-                NSLog(@"[DYYY] fetchPlayCount HTML error: %@", error);
-            } else {
-                NSString *html = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
-                // Look for RENDER_DATA script tag
-                NSString *startTag = @"<script id=\"RENDER_DATA\" type=\"application/json\">";
-                NSString *endTag = @"</script>";
-                NSRange startRange = [html rangeOfString:startTag];
-                if (startRange.location != NSNotFound) {
-                    NSUInteger contentStartLoc = startRange.location + startRange.length;
-                    NSRange searchRange = NSMakeRange(contentStartLoc, html.length - contentStartLoc);
-                    NSRange endRange = [html rangeOfString:endTag options:0 range:searchRange];
-                    if (endRange.location != NSNotFound) {
-                        NSRange contentRange = NSMakeRange(contentStartLoc, endRange.location - contentStartLoc);
-                        NSString *encodedContent = [html substringWithRange:contentRange];
-                        NSString *decodedContent = [encodedContent stringByRemovingPercentEncoding];
-                        NSData *jsonData = [decodedContent dataUsingEncoding:NSUTF8StringEncoding];
-                        if (jsonData) {
-                            NSDictionary *json = [NSJSONSerialization JSONObjectWithData:jsonData options:0 error:nil];
-                            if (json) {
-                                // Try multiple keyPaths to find play_count
-                                NSArray *paths = @[
-                                    @"aweme_detail.statistics.play_count",
-                                    @"aweme_detail.statistics.playCount",
-                                    @"aweme_detail.statistics_v2.play_count"
-                                ];
-                                for (NSString *path in paths) {
-                                    id val = [json valueForKeyPath:path];
-                                    if (val && [val isKindOfClass:[NSNumber class]] && [val integerValue] > 0) {
-                                        result = val;
-                                        NSLog(@"[DYYY] fetchPlayCount HTML found via: %@ value: %@", path, val);
-                                        break;
-                                    }
-                                }
-                                // Fallback: search all keys in statistics dict
-                                if (!result) {
-                                    id stats = [json valueForKeyPath:@"aweme_detail.statistics"];
-                                    if (stats && [stats isKindOfClass:[NSDictionary class]]) {
-                                        id pc = [(NSDictionary *)stats objectForKey:@"play_count"];
-                                        if (!pc) pc = [(NSDictionary *)stats objectForKey:@"playCount"];
-                                        if (!pc) pc = [(NSDictionary *)stats objectForKey:@"vv_count"];
-                                        if (pc && [pc isKindOfClass:[NSNumber class]] && [pc integerValue] > 0) {
-                                            result = pc;
-                                            NSLog(@"[DYYY] fetchPlayCount HTML dict fallback: %@", pc);
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                // Also try __NEXT_DATA__ as fallback
-                if (!result) {
-                    NSString *nextStartTag = @"<script id=\"__NEXT_DATA__\" type=\"application/json\">";
-                    NSRange nextStartRange = [html rangeOfString:nextStartTag];
-                    if (nextStartRange.location != NSNotFound) {
-                        NSUInteger nextContentStart = nextStartRange.location + nextStartTag.length;
-                        NSRange nextSearchRange = NSMakeRange(nextContentStart, html.length - nextContentStart);
-                        NSRange nextEndRange = [html rangeOfString:endTag options:0 range:nextSearchRange];
-                        if (nextEndRange.location != NSNotFound) {
-                            NSRange nextContentRange = NSMakeRange(nextContentStart, nextEndRange.location - nextContentStart);
-                            NSString *nextContent = [html substringWithRange:nextContentRange];
-                            NSData *nextJsonData = [nextContent dataUsingEncoding:NSUTF8StringEncoding];
-                            if (nextJsonData) {
-                                NSDictionary *nextJson = [NSJSONSerialization JSONObjectWithData:nextJsonData options:0 error:nil];
-                                if (nextJson) {
-                                    NSArray *nextPaths = @[
-                                        @"props.pageProps.videoStore.videoDetail.statistics.playCount",
-                                        @"props.pageProps.videoStore.videoDetail.statistics.play_count"
-                                    ];
-                                    for (NSString *path in nextPaths) {
-                                        id val = [nextJson valueForKeyPath:path];
-                                        if (val && [val isKindOfClass:[NSNumber class]] && [val integerValue] > 0) {
-                                            result = val;
-                                            NSLog(@"[DYYY] fetchPlayCount NEXT_DATA found via: %@ value: %@", path, val);
-                                            break;
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                if (!result) {
-                    NSLog(@"[DYYY] fetchPlayCount HTML no play_count found in page, HTML length: %lu", (unsigned long)html.length);
-                }
-            }
-        } @catch (NSException *e) {
-            NSLog(@"[DYYY] fetchPlayCount HTML exception: %@", e);
-        }
-        dispatch_async(dispatch_get_main_queue(), ^{
-            if (completion) completion(result);
-        });
-    }];
-    [task resume];
 }
 
 + (void)addDisclaimerHeaderToActionSheet:(id)actionSheet actionCount:(NSInteger)actionCount {
@@ -3345,161 +3218,23 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
     }
     if (desc.length > 0) result[@"title"] = desc;
 
-    // --- 播放量 ---
-    // 注意：AWEAwemeStatisticsModel只声明了diggCount（=点赞数），新版抖音不再在本地模型暴露playCount
-    // 真实播放量需要通过在线接口获取，localParse只尝试本地keyPath
+    // --- 转发量 ---
     @try {
-        NSNumber *playCount = nil;
-        // 用keyPath从awemeModel上取播放量，排除diggCount（那是点赞数）
-        NSArray *playCountKeyPaths = @[
-            @"statistics.playCount",
-            @"statistics.play_count",
-            @"statistics.awemePlayCount",
-            @"statistics.viewCount",
-            @"statistics.view_count",
-            @"statistics.vvCount",
-            @"statistics.vv_count",
-            @"statistics.watchCount",
-            @"playCount",
-            @"play_count",
-            @"awemePlayCount",
-            @"vvCount",
-            @"viewCount"
-        ];
-        for (NSString *keyPath in playCountKeyPaths) {
-            @try {
-                id val = [awemeModel valueForKeyPath:keyPath];
-                if (val && [val isKindOfClass:[NSNumber class]] && [val integerValue] > 0) {
-                    playCount = val;
-                    NSLog(@"[DYYY] localParse playCount found via keyPath: %@ value: %@", keyPath, val);
-                    break;
-                }
-            } @catch (NSException *e2) {}
-        }
-        if (!playCount) {
-            // 遍历statisticsModel所有NSNumber属性，排除diggCount，取最大值
-            id statisticsModel = [awemeModel valueForKey:@"statistics"];
-            if (statisticsModel) {
-                unsigned int propCount = 0;
-                Class statsClass = [statisticsModel class];
-                objc_property_t *props = class_copyPropertyList(statsClass, &propCount);
-                NSNumber *maxVal = nil;
-                NSString *maxKey = nil;
-                NSNumber *diggCountVal = nil;
-                NSMutableDictionary *allProps = [NSMutableDictionary dictionary];
-                for (unsigned int i = 0; i < propCount; i++) {
-                    const char *propName = property_getName(props[i]);
-                    if (propName) {
-                        NSString *name = [NSString stringWithUTF8String:propName];
-                        @try {
-                            id val = [statisticsModel valueForKey:name];
-                            if (val && [val isKindOfClass:[NSNumber class]] && [val integerValue] > 0) {
-                                allProps[name] = val;
-                                // 记录diggCount的值，后面排除
-                                if ([name isEqualToString:@"diggCount"]) {
-                                    diggCountVal = val;
-                                }
-                                if (!maxVal || [val integerValue] > [maxVal integerValue]) {
-                                    maxVal = val;
-                                    maxKey = name;
-                                }
-                            }
-                        } @catch (NSException *e3) {}
-                    }
-                }
-                free(props);
-                NSLog(@"[DYYY] localParse statisticsModel all number props: %@", allProps);
-                // 只有当最大值大于diggCount时才认为可能是播放量（播放量>=点赞数）
-                if (maxVal && [maxVal integerValue] > 0) {
-                    if (diggCountVal && [maxVal isEqualToNumber:diggCountVal]) {
-                        // maxVal等于diggCount，没有playCount属性，不能当播放量
-                        NSLog(@"[DYYY] localParse statisticsModel only has diggCount, skip as playCount");
-                    } else {
-                        playCount = maxVal;
-                        NSLog(@"[DYYY] localParse playCount fallback to max prop: %@ value: %@", maxKey, maxVal);
-                    }
-                }
+        id statsModel = [awemeModel valueForKey:@"statistics"];
+        if (statsModel) {
+            NSNumber *shareCount = [statsModel valueForKey:@"shareCount"];
+            if (shareCount && [shareCount isKindOfClass:[NSNumber class]] && [shareCount integerValue] > 0) {
+                result[@"share_count"] = shareCount;
+                NSLog(@"[DYYY] localParse share_count from statistics: %@", shareCount);
             }
         }
-        // 第三步：用class_copyIvarList扫描私有ivar（比class_copyPropertyList更全）
-        if (!playCount) {
-            id statisticsModel = [awemeModel valueForKey:@"statistics"];
-            if (statisticsModel) {
-                unsigned int ivarCount = 0;
-                Class statsClass = [statisticsModel class];
-                Ivar *ivars = class_copyIvarList(statsClass, &ivarCount);
-                if (ivars) {
-                    NSMutableDictionary *ivarVals = [NSMutableDictionary dictionary];
-                    NSNumber *ivarMaxVal = nil;
-                    NSString *ivarMaxKey = nil;
-                    NSNumber *ivarDiggVal = nil;
-                    for (unsigned int i = 0; i < ivarCount; i++) {
-                        const char *ivarName = ivar_getName(ivars[i]);
-                        if (ivarName) {
-                            NSString *name = [NSString stringWithUTF8String:ivarName];
-                            @try {
-                                // KVC: 去掉前缀_来访问ivar
-                                NSString *kvcKey = name;
-                                if ([name hasPrefix:@"_"]) {
-                                    kvcKey = [name substringFromIndex:1];
-                                }
-                                id val = [statisticsModel valueForKey:kvcKey];
-                                if (val && [val isKindOfClass:[NSNumber class]] && [val integerValue] > 0) {
-                                    ivarVals[name] = val;
-                                    if ([name containsString:@"digg"] || [name containsString:@"Digg"]) {
-                                        ivarDiggVal = val;
-                                    }
-                                    if (!ivarMaxVal || [val integerValue] > [ivarMaxVal integerValue]) {
-                                        ivarMaxVal = val;
-                                        ivarMaxKey = name;
-                                    }
-                                }
-                            } @catch (NSException *e3) {}
-                        }
-                    }
-                    free(ivars);
-                    NSLog(@"[DYYY] localParse ivar scan found: %@ (digg=%@)", ivarVals, ivarDiggVal);
-                    if (ivarMaxVal && [ivarMaxVal integerValue] > 0) {
-                        if (ivarDiggVal && [ivarMaxVal isEqualToNumber:ivarDiggVal]) {
-                            NSLog(@"[DYYY] localParse ivar max=diggCount, skip");
-                        } else {
-                            playCount = ivarMaxVal;
-                            NSLog(@"[DYYY] localParse playCount from ivar: %@ value: %@", ivarMaxKey, ivarMaxVal);
-                        }
-                    }
-                }
-            }
-        }
-        // 第四步：直接KVC尝试更多键名
-        if (!playCount) {
-            NSArray *extraKeys = @[
-                @"vvCount", @"_vvCount", @"vv_count", @"viewCount", @"_viewCount",
-                @"watchCount", @"_watchCount", @"awemePlayCount", @"_awemePlayCount",
-                @"play_count", @"_play_count", @"playCount", @"_playCount"
-            ];
-            id statsModel = [awemeModel valueForKey:@"statistics"];
-            id targetModel = statsModel ? statsModel : awemeModel;
-            for (NSString *key in extraKeys) {
-                @try {
-                    id val = [targetModel valueForKey:key];
-                    if (val && [val isKindOfClass:[NSNumber class]] && [val integerValue] > 0) {
-                        playCount = val;
-                        NSLog(@"[DYYY] localParse playCount from extra key: %@ = %@", key, val);
-                        break;
-                    }
-                } @catch (NSException *e4) {}
-            }
-        }
-        if (playCount && [playCount isKindOfClass:[NSNumber class]] && [playCount integerValue] > 0) {
-            result[@"play_count"] = playCount;
-        }
-        // 保存awemeId供异步查询播放量使用
+        // 保存awemeId
         NSString *awemeId = [awemeModel valueForKey:@"awemeId"];
         if (awemeId && awemeId.length > 0) {
             result[@"aweme_id"] = awemeId;
         }
     } @catch (NSException *e) {
-        NSLog(@"[DYYY] localParse playCount error: %@", e);
+        NSLog(@"[DYYY] localParse shareCount error: %@", e);
     }
 
     if (videoList.count > 0) result[@"video_list"] = videoList;
@@ -3991,29 +3726,9 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                                                                                                     if (subDisclaimerDetail) {
                                                                                                         [qualityActions addObject:subDisclaimerDetail];
                                                                                                     }
-                                                                                                    AWEUserSheetAction *subPlayCountAction = [self playCountActionWithCount:dataDict[@"play_count"]];
-                                                                                                    if (subPlayCountAction) {
-                                                                                                        [qualityActions addObject:subPlayCountAction];
-                                                                                                    } else {
-                                                                                                        // 本地无播放量，异步查询真实播放量
-                                                                                                        NSString *subAwemeId = dataDict[@"aweme_id"];
-                                                                                                        if (!subAwemeId) subAwemeId = dataDict[@"video_id"];
-                                                                                                        if (subAwemeId && subAwemeId.length > 0) {
-                                                                                                            [DYYYManager fetchPlayCountForAwemeId:subAwemeId completion:^(NSNumber *playCount) {
-                                                                                                                if (playCount && [playCount integerValue] > 0) {
-                                                                                                                    NSInteger count = [playCount integerValue];
-                                                                                                                    NSString *countStr = nil;
-                                                                                                                    if (count >= 100000000) {
-                                                                                                                        countStr = [NSString stringWithFormat:@"%.1f亿", count / 100000000.0];
-                                                                                                                    } else if (count >= 10000) {
-                                                                                                                        countStr = [NSString stringWithFormat:@"%.1f万", count / 10000.0];
-                                                                                                                    } else {
-                                                                                                                        countStr = [NSString stringWithFormat:@"%ld", (long)count];
-                                                                                                                    }
-                                                                                                                    [DYYYUtils showToast:[NSString stringWithFormat:@"真实播放量：%@", countStr]];
-                                                                                                                }
-                                                                                                            }];
-                                                                                                        }
+                                                                                                    AWEUserSheetAction *subShareCountAction = [self shareCountActionWithCount:dataDict[@"share_count"]];
+                                                                                                    if (subShareCountAction) {
+                                                                                                        [qualityActions addObject:subShareCountAction];
                                                                                                     }
                                                                                                     
                                                                                                     subQualityCount = 0;
@@ -4271,9 +3986,9 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
             }
 
             if (actions.count > 0) {
-                // 播放量行
-                NSNumber *localPlayCount = dataDict[@"play_count"];
-                AWEUserSheetAction *playCountAction = [self playCountActionWithCount:localPlayCount];
+                // 转发量行
+                NSNumber *localShareCount = dataDict[@"share_count"];
+                AWEUserSheetAction *shareCountAction = [self shareCountActionWithCount:localShareCount];
 
                 if (disclaimerDetail) {
                     [actions insertObject:disclaimerDetail atIndex:0];
@@ -4281,32 +3996,11 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                 if (disclaimerAction) {
                     [actions insertObject:disclaimerAction atIndex:0];
                 }
-                if (playCountAction) {
-                    // 播放量插在免责声明详情行之后、画质选项之前
+                if (shareCountAction) {
                     NSInteger insertIdx = 0;
                     if (disclaimerAction) insertIdx++;
                     if (disclaimerDetail) insertIdx++;
-                    [actions insertObject:playCountAction atIndex:insertIdx];
-                } else {
-                    // 本地无播放量，异步查询真实播放量并Toast显示
-                    NSString *awemeId = dataDict[@"aweme_id"];
-                    if (!awemeId) awemeId = dataDict[@"video_id"];
-                    if (awemeId && awemeId.length > 0) {
-                        [DYYYManager fetchPlayCountForAwemeId:awemeId completion:^(NSNumber *playCount) {
-                            if (playCount && [playCount integerValue] > 0) {
-                                NSInteger count = [playCount integerValue];
-                                NSString *countStr = nil;
-                                if (count >= 100000000) {
-                                    countStr = [NSString stringWithFormat:@"%.1f亿", count / 100000000.0];
-                                } else if (count >= 10000) {
-                                    countStr = [NSString stringWithFormat:@"%.1f万", count / 10000.0];
-                                } else {
-                                    countStr = [NSString stringWithFormat:@"%ld", (long)count];
-                                }
-                                [DYYYUtils showToast:[NSString stringWithFormat:@"真实播放量：%@", countStr]];
-                            }
-                        }];
-                    }
+                    [actions insertObject:shareCountAction atIndex:insertIdx];
                 }
                 [DYYYManager addDisclaimerHeaderToActionSheet:actionSheet actionCount:qualityCount];
                 [actionSheet setActions:actions];

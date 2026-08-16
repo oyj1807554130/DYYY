@@ -198,8 +198,7 @@
 + (void)addDisclaimerHeaderToActionSheet:(id)actionSheet;
 + (id)disclaimerActionWithCount:(NSInteger)actionCount;
 + (id)disclaimerDetailAction;
-+ (id)playCountActionWithCount:(NSNumber *)playCount;
-+ (void)fetchPlayCountForAwemeId:(NSString *)awemeId completion:(void (^)(NSNumber *playCount))completion;
++ (id)shareCountActionWithCount:(NSNumber *)shareCount;
 
 
 @end
