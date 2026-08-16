@@ -2876,6 +2876,55 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
             dispatch_time_t timeout = dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC);
             dispatch_group_wait(headGroup, timeout);
 
+            // 重试失败的HEAD请求：用GET+Range获取Content-Range中的真实文件大小
+            dispatch_group_t retryGroup = dispatch_group_create();
+            for (NSInteger i = 0; i < fileSizes.count; i++) {
+                long long size = [fileSizes[i] longLongValue];
+                if (size < 10240) {
+                    dispatch_group_enter(retryGroup);
+                    NSMutableURLRequest *retryReq = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:playURLs[i]]];
+                    retryReq.HTTPMethod = @"GET";
+                    [retryReq setValue:@"bytes=0-0" forHTTPHeaderField:@"Range"];
+                    [retryReq setValue:@"Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1" forHTTPHeaderField:@"User-Agent"];
+                    [retryReq setValue:@"https://www.douyin.com/" forHTTPHeaderField:@"Referer"];
+                    NSURLSessionDataTask *retryTask = [[NSURLSession sharedSession] dataTaskWithRequest:retryReq completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
+                        if (response && [response isKindOfClass:[NSHTTPURLResponse class]]) {
+                            NSHTTPURLResponse *httpResp = (NSHTTPURLResponse *)response;
+                            NSString *contentRange = [httpResp.allHeaderFields objectForKey:@"Content-Range"];
+                            if (contentRange.length > 0) {
+                                NSRange slashRange = [contentRange rangeOfString:@"/"];
+                                if (slashRange.location != NSNotFound) {
+                                    NSString *totalStr = [contentRange substringFromIndex:slashRange.location + 1];
+                                    long long totalSize = [totalStr longLongValue];
+                                    if (totalSize > 10240) {
+                                        @synchronized(fileSizes) {
+                                            fileSizes[i] = @(totalSize);
+                                        }
+                                    }
+                                }
+                            }
+                            if ([fileSizes[i] longLongValue] < 10240) {
+                                long long cl = [httpResp expectedContentLength];
+                                if (cl > 10240) {
+                                    @synchronized(fileSizes) {
+                                        fileSizes[i] = @(cl);
+                                    }
+                                }
+                            }
+                            NSURL *finalURL = httpResp.URL;
+                            if (finalURL) {
+                                @synchronized(cdnURLs) {
+                                    cdnURLs[i] = finalURL;
+                                }
+                            }
+                        }
+                        dispatch_group_leave(retryGroup);
+                    }];
+                    [retryTask resume];
+                }
+            }
+            dispatch_group_wait(retryGroup, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC));
+
             // 用AVURLAsset从CDN直链获取FPS（并行+超时3秒）
             NSMutableArray *fpsValues = [NSMutableArray arrayWithArray:@[@0, @0, @0, @0]];
             dispatch_group_t fpsGroup = dispatch_group_create();
@@ -2904,6 +2953,14 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
             }
             dispatch_time_t fpsTimeout = dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC);
             dispatch_group_wait(fpsGroup, fpsTimeout);
+
+            // FPS默认值：AVAsset加载失败时默认30FPS
+            for (NSInteger i = 0; i < fpsValues.count; i++) {
+                Float64 fps = [fpsValues[i] floatValue];
+                if (fps <= 0) {
+                    fpsValues[i] = @(30);
+                }
+            }
 
             // 保存原画FPS，供后bitrateModels比较用
             originalFPS = [fpsValues[0] floatValue];
@@ -2966,7 +3023,7 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                 }
                 // 文件大小
                 long long size = [fileSizes[i] longLongValue];
-                if (size > 0) {
+                if (size >= 10240) {
                     NSString *sizeStr;
                     if (size >= 1024 * 1024) {
                         sizeStr = [NSString stringWithFormat:@"%.1fMB", (double)size / (1024.0 * 1024.0)];
@@ -3085,6 +3142,42 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                         [headTask resume];
                         dispatch_semaphore_wait(sema, dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC));
 
+                        // HEAD失败时用GET+Range重试
+                        if (headSize < 10240) {
+                            NSMutableURLRequest *retryReq = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:urlStr]];
+                            retryReq.HTTPMethod = @"GET";
+                            [retryReq setValue:@"bytes=0-0" forHTTPHeaderField:@"Range"];
+                            [retryReq setValue:@"Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1" forHTTPHeaderField:@"User-Agent"];
+                            [retryReq setValue:@"https://www.douyin.com/" forHTTPHeaderField:@"Referer"];
+                            __block long long retrySize = 0;
+                            dispatch_semaphore_t retrySema = dispatch_semaphore_create(0);
+                            NSURLSessionDataTask *retryTask = [[NSURLSession sharedSession] dataTaskWithRequest:retryReq completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
+                                if (response && [response isKindOfClass:[NSHTTPURLResponse class]]) {
+                                    NSHTTPURLResponse *httpResp = (NSHTTPURLResponse *)response;
+                                    NSString *contentRange = [httpResp.allHeaderFields objectForKey:@"Content-Range"];
+                                    if (contentRange.length > 0) {
+                                        NSRange slashRange = [contentRange rangeOfString:@"/"];
+                                        if (slashRange.location != NSNotFound) {
+                                            NSString *totalStr = [contentRange substringFromIndex:slashRange.location + 1];
+                                            retrySize = [totalStr longLongValue];
+                                        }
+                                    }
+                                    if (retrySize < 10240) {
+                                        retrySize = [httpResp expectedContentLength];
+                                    }
+                                    if (retrySize > 10240) {
+                                        headSize = retrySize;
+                                    }
+                                    if (!cdnURL) {
+                                        cdnURL = httpResp.URL;
+                                    }
+                                }
+                                dispatch_semaphore_signal(retrySema);
+                            }];
+                            [retryTask resume];
+                            dispatch_semaphore_wait(retrySema, dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC));
+                        }
+
                         // 从分辨率→FPS映射获取FPS（复用play URL的FPS，不再单独AVAsset加载）
                         Float64 fps = 0;
                         if (gearName.length > 0) {
@@ -3096,6 +3189,8 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                                 }
                             }
                         }
+                        // FPS默认30（抖音绝大多数视频30FPS）
+                        if (fps <= 0) fps = 30;
 
                         // 构建label：原画lite判断（分辨率匹配原画 + 码率/FPS辅助）
                         BOOL sameAsOriginal = NO;
@@ -3127,7 +3222,7 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                             NSInteger fpsInt = (NSInteger)(fps + 0.5);
                             qualityLabel = [qualityLabel stringByAppendingFormat:@"-[%ldFPS]", (long)fpsInt];
                         }
-                        if (headSize > 0) {
+                        if (headSize >= 10240) {
                             if (headSize >= 1024 * 1024) {
                                 sizeStr = [NSString stringWithFormat:@"%.1fMB", (double)headSize / (1024.0 * 1024.0)];
                             } else if (headSize >= 1024) {
