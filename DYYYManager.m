@@ -2515,7 +2515,7 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
         if (completion) completion(nil);
         return;
     }
-    // Method: fetch video page HTML, extract RENDER_DATA JSON, find play_count
+    // Method: fetch video page HTML with app cookies, extract RENDER_DATA JSON, find play_count
     NSString *urlStr = [NSString stringWithFormat:@"https://www.douyin.com/video/%@", awemeId];
     NSURL *url = [NSURL URLWithString:urlStr];
     if (!url) {
@@ -2529,6 +2529,14 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
     [request setValue:@"text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8" forHTTPHeaderField:@"Accept"];
     [request setValue:@"zh-CN,zh;q=0.9" forHTTPHeaderField:@"Accept-Language"];
     [request setTimeoutInterval:15];
+    // 将App的Cookie添加到请求中（共享Cookie存储会自动包含）
+    NSHTTPCookieStorage *cookieStore = [NSHTTPCookieStorage sharedHTTPCookieStorage];
+    NSArray *cookies = [cookieStore cookiesForURL:url];
+    NSDictionary *cookieHeaders = [NSHTTPCookie requestHeaderFieldsWithCookies:cookies];
+    NSString *cookieStr = [cookieHeaders objectForKey:@"Cookie"];
+    if (cookieStr.length > 0) {
+        [request setValue:cookieStr forHTTPHeaderField:@"Cookie"];
+    }
     NSURLSessionDataTask *task = [[NSURLSession sharedSession] dataTaskWithRequest:request completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
         NSNumber *result = nil;
         @try {
@@ -3349,9 +3357,14 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
             @"statistics.awemePlayCount",
             @"statistics.viewCount",
             @"statistics.view_count",
+            @"statistics.vvCount",
+            @"statistics.vv_count",
+            @"statistics.watchCount",
             @"playCount",
             @"play_count",
-            @"awemePlayCount"
+            @"awemePlayCount",
+            @"vvCount",
+            @"viewCount"
         ];
         for (NSString *keyPath in playCountKeyPaths) {
             @try {
@@ -3406,6 +3419,75 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                         NSLog(@"[DYYY] localParse playCount fallback to max prop: %@ value: %@", maxKey, maxVal);
                     }
                 }
+            }
+        }
+        // 第三步：用class_copyIvarList扫描私有ivar（比class_copyPropertyList更全）
+        if (!playCount) {
+            id statisticsModel = [awemeModel valueForKey:@"statistics"];
+            if (statisticsModel) {
+                unsigned int ivarCount = 0;
+                Class statsClass = [statisticsModel class];
+                Ivar *ivars = class_copyIvarList(statsClass, &ivarCount);
+                if (ivars) {
+                    NSMutableDictionary *ivarVals = [NSMutableDictionary dictionary];
+                    NSNumber *ivarMaxVal = nil;
+                    NSString *ivarMaxKey = nil;
+                    NSNumber *ivarDiggVal = nil;
+                    for (unsigned int i = 0; i < ivarCount; i++) {
+                        const char *ivarName = ivar_getName(ivars[i]);
+                        if (ivarName) {
+                            NSString *name = [NSString stringWithUTF8String:ivarName];
+                            @try {
+                                // KVC: 去掉前缀_来访问ivar
+                                NSString *kvcKey = name;
+                                if ([name hasPrefix:@"_"]) {
+                                    kvcKey = [name substringFromIndex:1];
+                                }
+                                id val = [statisticsModel valueForKey:kvcKey];
+                                if (val && [val isKindOfClass:[NSNumber class]] && [val integerValue] > 0) {
+                                    ivarVals[name] = val;
+                                    if ([name containsString:@"digg"] || [name containsString:@"Digg"]) {
+                                        ivarDiggVal = val;
+                                    }
+                                    if (!ivarMaxVal || [val integerValue] > [ivarMaxVal integerValue]) {
+                                        ivarMaxVal = val;
+                                        ivarMaxKey = name;
+                                    }
+                                }
+                            } @catch (NSException *e3) {}
+                        }
+                    }
+                    free(ivars);
+                    NSLog(@"[DYYY] localParse ivar scan found: %@ (digg=%@)", ivarVals, ivarDiggVal);
+                    if (ivarMaxVal && [ivarMaxVal integerValue] > 0) {
+                        if (ivarDiggVal && [ivarMaxVal isEqualToNumber:ivarDiggVal]) {
+                            NSLog(@"[DYYY] localParse ivar max=diggCount, skip");
+                        } else {
+                            playCount = ivarMaxVal;
+                            NSLog(@"[DYYY] localParse playCount from ivar: %@ value: %@", ivarMaxKey, ivarMaxVal);
+                        }
+                    }
+                }
+            }
+        }
+        // 第四步：直接KVC尝试更多键名
+        if (!playCount) {
+            NSArray *extraKeys = @[
+                @"vvCount", @"_vvCount", @"vv_count", @"viewCount", @"_viewCount",
+                @"watchCount", @"_watchCount", @"awemePlayCount", @"_awemePlayCount",
+                @"play_count", @"_play_count", @"playCount", @"_playCount"
+            ];
+            id statsModel = [awemeModel valueForKey:@"statistics"];
+            id targetModel = statsModel ? statsModel : awemeModel;
+            for (NSString *key in extraKeys) {
+                @try {
+                    id val = [targetModel valueForKey:key];
+                    if (val && [val isKindOfClass:[NSNumber class]] && [val integerValue] > 0) {
+                        playCount = val;
+                        NSLog(@"[DYYY] localParse playCount from extra key: %@ = %@", key, val);
+                        break;
+                    }
+                } @catch (NSException *e4) {}
             }
         }
         if (playCount && [playCount isKindOfClass:[NSNumber class]] && [playCount integerValue] > 0) {
