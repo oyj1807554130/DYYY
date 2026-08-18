@@ -466,16 +466,20 @@
                   [imgSheet1 setActions:imgActs1];
                   [imgSheet1 show];
               }];
-          } else {
-              NSDictionary *localData = [DYYYManager localParseFromAwemeModel:capturedAwemeModel];
-              if (localData) {
-                  [DYYYManager handleVideoData:localData];
-              } else {
-                  [DYYYUtils showToast:@"本地解析失败，视频数据为空"];
-              }
-              AWELongPressPanelManager *panelManager = [%c(AWELongPressPanelManager) shareInstance];
-              [panelManager dismissWithAnimation:YES completion:nil];
-          }
+           } else {
+               AWELongPressPanelManager *panelManager = [%c(AWELongPressPanelManager) shareInstance];
+               [panelManager dismissWithAnimation:YES completion:nil];
+               [DYYYUtils showToast:@"正在解析画质..."];
+               [DYYYManager localParseFromAwemeModel:capturedAwemeModel completion:^(NSDictionary *localData) {
+                   dispatch_async(dispatch_get_main_queue(), ^{
+                       if (localData) {
+                           [DYYYManager handleVideoData:localData];
+                       } else {
+                           [DYYYUtils showToast:@"本地解析失败，视频数据为空"];
+                       }
+                   });
+               }];
+           }
           } @catch (NSException *e) {
               NSLog(@"[DYYY] API download action exception: %@", e);
               [DYYYUtils showToast:@"接口1保存异常，请重试"];
@@ -1454,16 +1458,20 @@
                   [imgSheet1 setActions:imgActs1];
                   [imgSheet1 show];
               }];
-          } else {
-              NSDictionary *localData = [DYYYManager localParseFromAwemeModel:capturedAwemeModel];
-              if (localData) {
-                  [DYYYManager handleVideoData:localData];
-              } else {
-                  [DYYYUtils showToast:@"本地解析失败，视频数据为空"];
-              }
-              AWELongPressPanelManager *panelManager = [%c(AWELongPressPanelManager) shareInstance];
-              [panelManager dismissWithAnimation:YES completion:nil];
-          }
+           } else {
+               AWELongPressPanelManager *panelManager = [%c(AWELongPressPanelManager) shareInstance];
+               [panelManager dismissWithAnimation:YES completion:nil];
+               [DYYYUtils showToast:@"正在解析画质..."];
+               [DYYYManager localParseFromAwemeModel:capturedAwemeModel completion:^(NSDictionary *localData) {
+                   dispatch_async(dispatch_get_main_queue(), ^{
+                       if (localData) {
+                           [DYYYManager handleVideoData:localData];
+                       } else {
+                           [DYYYUtils showToast:@"本地解析失败，视频数据为空"];
+                       }
+                   });
+               }];
+           }
           } @catch (NSException *e) {
               NSLog(@"[DYYY] API download action exception: %@", e);
               [DYYYUtils showToast:@"接口1保存异常，请重试"];

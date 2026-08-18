@@ -151,11 +151,11 @@
 + (void)parseAndDownloadVideoWithShareLink:(NSString *)shareLink apiKey:(NSString *)apiKey retryCount:(NSInteger)retryCount;
 
 /**
- * 从awemeModel本地解析视频数据（不依赖外部API）
+ * 从awemeModel本地解析视频数据（不依赖外部API），异步版本
  * @param awemeModel 抖音视频模型
- * @return 兼容接口格式的数据字典
+ * @param completion 解析完成回调，在后台线程执行，需自行dispatch到主线程更新UI
  */
-+ (NSDictionary *)localParseFromAwemeModel:(id)awemeModel;
++ (void)localParseFromAwemeModel:(id)awemeModel completion:(void(^)(NSDictionary *result))completion;
 + (void)handleVideoData:(NSDictionary *)dataDict;
 + (void)resolveAndDownloadVideo:(NSURL *)url audio:(NSURL *)audioURL completion:(void (^)(BOOL success))completion;
 

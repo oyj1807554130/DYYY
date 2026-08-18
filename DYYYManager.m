@@ -2535,263 +2535,224 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
 }
 
 
-+ (NSDictionary *)localParseFromAwemeModel:(id)awemeModel {
-    if (!awemeModel) return nil;
++ (void)localParseFromAwemeModel:(id)awemeModel completion:(void(^)(NSDictionary *result))completion {
+    if (!awemeModel || !completion) {
+        if (completion) completion(nil);
+        return;
+    }
 
-    NSMutableDictionary *result = [NSMutableDictionary dictionary];
-    NSMutableArray *videoList = [NSMutableArray array];
-    NSMutableArray *images = [NSMutableArray array];
+    // 在后台线程执行所有网络操作，不阻塞主线程
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+        NSMutableDictionary *result = [NSMutableDictionary dictionary];
+        NSMutableArray *videoList = [NSMutableArray array];
+        NSMutableArray *images = [NSMutableArray array];
 
-    // 提取视频模型
-    id videoModel = [awemeModel valueForKey:@"video"];
-    id musicModel = [awemeModel valueForKey:@"music"];
-    id authorModel = [awemeModel valueForKey:@"author"];
+        // 提取视频模型
+        id videoModel = [awemeModel valueForKey:@"video"];
+        id musicModel = [awemeModel valueForKey:@"music"];
+        id authorModel = [awemeModel valueForKey:@"author"];
 
 
-        // --- 视频码率列表 ---
-    if (videoModel) {
-        // 第一步：收集所有可用的URL，从中提取video_id
-        NSString *videoURI = nil;
-        NSMutableSet *collectedURLs = [NSMutableSet set];
-        NSMutableArray *urlSources = [NSMutableArray array]; // 收集所有URL来源
+            // --- 视频码率列表 ---
+        if (videoModel) {
+            // 第一步：收集所有可用的URL，从中提取video_id
+            NSString *videoURI = nil;
+            NSMutableSet *collectedURLs = [NSMutableSet set];
+            NSMutableArray *urlSources = [NSMutableArray array]; // 收集所有URL来源
 
-        // 从h264URL收集
-        @try {
-            id h264URL = [videoModel valueForKey:@"h264URL"];
-            if (h264URL && [h264URL valueForKey:@"originURLList"]) {
-                NSArray *list = [h264URL valueForKey:@"originURLList"];
-                if ([list isKindOfClass:[NSArray class]]) {
-                    for (NSString *u in list) {
-                        if (u.length > 0 && ![collectedURLs containsObject:u]) {
-                            [collectedURLs addObject:u];
-                            [urlSources addObject:u];
+            // 从h264URL收集
+            @try {
+                id h264URL = [videoModel valueForKey:@"h264URL"];
+                if (h264URL && [h264URL valueForKey:@"originURLList"]) {
+                    NSArray *list = [h264URL valueForKey:@"originURLList"];
+                    if ([list isKindOfClass:[NSArray class]]) {
+                        for (NSString *u in list) {
+                            if (u.length > 0 && ![collectedURLs containsObject:u]) {
+                                [collectedURLs addObject:u];
+                                [urlSources addObject:u];
+                            }
                         }
                     }
                 }
-            }
-        } @catch (NSException *e) {}
+            } @catch (NSException *e) {}
 
-        // 从playURL收集
-        @try {
-            id playURL = [videoModel valueForKey:@"playURL"];
-            if (playURL && [playURL isKindOfClass:NSClassFromString(@"AWEURLModel")]) {
-                // 先尝试直接取uri属性（对应竞品的play_addr.uri）
-                id uriVal = [playURL valueForKey:@"URI"];
-                if (uriVal && [uriVal isKindOfClass:[NSString class]] && [(NSString *)uriVal length] > 0) {
-                    videoURI = (NSString *)uriVal;
-                }
-                NSArray *list = [playURL valueForKey:@"originURLList"];
-                if ([list isKindOfClass:[NSArray class]]) {
-                    for (NSString *u in list) {
-                        if (u.length > 0 && ![collectedURLs containsObject:u]) {
-                            [collectedURLs addObject:u];
-                            [urlSources addObject:u];
-                        }
-                    }
-                }
-            }
-        } @catch (NSException *e) {}
-
-        // 从playAddr收集（有些视频模型直接有playAddr属性）
-        @try {
-            id playAddr = [videoModel valueForKey:@"playAddr"];
-            if (playAddr) {
-                // 先尝试取uri
-                if (!videoURI || videoURI.length == 0) {
-                    id uriVal = [playAddr valueForKey:@"URI"];
+            // 从playURL收集
+            @try {
+                id playURL = [videoModel valueForKey:@"playURL"];
+                if (playURL && [playURL isKindOfClass:NSClassFromString(@"AWEURLModel")]) {
+                    // 先尝试直接取uri属性（对应竞品的play_addr.uri）
+                    id uriVal = [playURL valueForKey:@"URI"];
                     if (uriVal && [uriVal isKindOfClass:[NSString class]] && [(NSString *)uriVal length] > 0) {
                         videoURI = (NSString *)uriVal;
                     }
-                }
-                NSArray *list = [playAddr valueForKey:@"originURLList"];
-                if (!list || ![list isKindOfClass:[NSArray class]] || list.count == 0) {
-                    list = [playAddr valueForKey:@"urlList"];
-                }
-                if ([list isKindOfClass:[NSArray class]]) {
-                    for (NSString *u in list) {
-                        if (u.length > 0 && ![collectedURLs containsObject:u]) {
-                            [collectedURLs addObject:u];
-                            [urlSources addObject:u];
+                    NSArray *list = [playURL valueForKey:@"originURLList"];
+                    if ([list isKindOfClass:[NSArray class]]) {
+                        for (NSString *u in list) {
+                            if (u.length > 0 && ![collectedURLs containsObject:u]) {
+                                [collectedURLs addObject:u];
+                                [urlSources addObject:u];
+                            }
                         }
                     }
                 }
-            }
-        } @catch (NSException *e) {}
+            } @catch (NSException *e) {}
 
-        // 从bitrateModels收集（最全的URL来源）
-        @try {
-            NSArray *bitrateModels = [videoModel valueForKey:@"bitrateModels"];
-            if (bitrateModels && [bitrateModels isKindOfClass:[NSArray class]]) {
-                for (id model in bitrateModels) {
-                    id modelPlayAddr = [model valueForKey:@"playAddr"];
-                    if (modelPlayAddr) {
-                        // 从bitrateModel的playAddr取uri
-                        if (!videoURI || videoURI.length == 0) {
-                            id uriVal = [modelPlayAddr valueForKey:@"URI"];
-                            if (uriVal && [uriVal isKindOfClass:[NSString class]] && [(NSString *)uriVal length] > 0) {
-                                videoURI = (NSString *)uriVal;
+            // 从playAddr收集（有些视频模型直接有playAddr属性）
+            @try {
+                id playAddr = [videoModel valueForKey:@"playAddr"];
+                if (playAddr) {
+                    // 先尝试取uri
+                    if (!videoURI || videoURI.length == 0) {
+                        id uriVal = [playAddr valueForKey:@"URI"];
+                        if (uriVal && [uriVal isKindOfClass:[NSString class]] && [(NSString *)uriVal length] > 0) {
+                            videoURI = (NSString *)uriVal;
+                        }
+                    }
+                    NSArray *list = [playAddr valueForKey:@"originURLList"];
+                    if (!list || ![list isKindOfClass:[NSArray class]] || list.count == 0) {
+                        list = [playAddr valueForKey:@"urlList"];
+                    }
+                    if ([list isKindOfClass:[NSArray class]]) {
+                        for (NSString *u in list) {
+                            if (u.length > 0 && ![collectedURLs containsObject:u]) {
+                                [collectedURLs addObject:u];
+                                [urlSources addObject:u];
                             }
                         }
-                        NSArray *list = [modelPlayAddr valueForKey:@"originURLList"];
-                        if (!list || ![list isKindOfClass:[NSArray class]] || list.count == 0) {
-                            list = [modelPlayAddr valueForKey:@"urlList"];
+                    }
+                }
+            } @catch (NSException *e) {}
+
+            // 从bitrateModels收集（最全的URL来源）
+            @try {
+                NSArray *bitrateModels = [videoModel valueForKey:@"bitrateModels"];
+                if (bitrateModels && [bitrateModels isKindOfClass:[NSArray class]]) {
+                    for (id model in bitrateModels) {
+                        id modelPlayAddr = [model valueForKey:@"playAddr"];
+                        if (modelPlayAddr) {
+                            // 从bitrateModel的playAddr取uri
+                            if (!videoURI || videoURI.length == 0) {
+                                id uriVal = [modelPlayAddr valueForKey:@"URI"];
+                                if (uriVal && [uriVal isKindOfClass:[NSString class]] && [(NSString *)uriVal length] > 0) {
+                                    videoURI = (NSString *)uriVal;
+                                }
+                            }
+                            NSArray *list = [modelPlayAddr valueForKey:@"originURLList"];
+                            if (!list || ![list isKindOfClass:[NSArray class]] || list.count == 0) {
+                                list = [modelPlayAddr valueForKey:@"urlList"];
+                            }
+                            if ([list isKindOfClass:[NSArray class]]) {
+                                for (NSString *u in list) {
+                                    if (u.length > 0 && ![collectedURLs containsObject:u]) {
+                                        [collectedURLs addObject:u];
+                                        [urlSources addObject:u];
+                                    }
+                                }
+                            }
                         }
-                        if ([list isKindOfClass:[NSArray class]]) {
-                            for (NSString *u in list) {
-                                if (u.length > 0 && ![collectedURLs containsObject:u]) {
-                                    [collectedURLs addObject:u];
-                                    [urlSources addObject:u];
+                        // 也尝试从playURL取（有些BSModel有playURL而非playAddr）
+                        id modelPlayURL = [model valueForKey:@"playURL"];
+                        if (modelPlayURL && modelPlayURL != [videoModel valueForKey:@"playURL"]) {
+                            if (!videoURI || videoURI.length == 0) {
+                                id uriVal = [modelPlayURL valueForKey:@"URI"];
+                                if (uriVal && [uriVal isKindOfClass:[NSString class]] && [(NSString *)uriVal length] > 0) {
+                                    videoURI = (NSString *)uriVal;
+                                }
+                            }
+                            NSArray *list = [modelPlayURL valueForKey:@"originURLList"];
+                            if ([list isKindOfClass:[NSArray class]]) {
+                                for (NSString *u in list) {
+                                    if (u.length > 0 && ![collectedURLs containsObject:u]) {
+                                        [collectedURLs addObject:u];
+                                        [urlSources addObject:u];
+                                    }
                                 }
                             }
                         }
                     }
-                    // 也尝试从playURL取（有些BSModel有playURL而非playAddr）
-                    id modelPlayURL = [model valueForKey:@"playURL"];
-                    if (modelPlayURL && modelPlayURL != [videoModel valueForKey:@"playURL"]) {
-                        if (!videoURI || videoURI.length == 0) {
-                            id uriVal = [modelPlayURL valueForKey:@"URI"];
-                            if (uriVal && [uriVal isKindOfClass:[NSString class]] && [(NSString *)uriVal length] > 0) {
-                                videoURI = (NSString *)uriVal;
-                            }
-                        }
-                        NSArray *list = [modelPlayURL valueForKey:@"originURLList"];
-                        if ([list isKindOfClass:[NSArray class]]) {
-                            for (NSString *u in list) {
-                                if (u.length > 0 && ![collectedURLs containsObject:u]) {
-                                    [collectedURLs addObject:u];
-                                    [urlSources addObject:u];
-                                }
-                            }
-                        }
-                    }
                 }
-            }
-        } @catch (NSException *e) {}
+            } @catch (NSException *e) {}
 
-        // 如果uri仍为空，从收集到的URL中提取video_id
-        if (!videoURI || videoURI.length == 0) {
-            for (NSString *urlStr in urlSources) {
-                NSRange vidRange = [urlStr rangeOfString:@"/video_id/" options:NSBackwardsSearch];
-                if (vidRange.location != NSNotFound) {
-                    NSString *afterVid = [urlStr substringFromIndex:vidRange.location + vidRange.length];
-                    NSRange slashRange = [afterVid rangeOfString:@"/"];
-                    if (slashRange.location != NSNotFound && slashRange.location > 0) {
-                        videoURI = [afterVid substringToIndex:slashRange.location];
-                        break;
-                    } else {
-                        NSRange paramRange = [afterVid rangeOfString:@"?"];
-                        if (paramRange.location != NSNotFound && paramRange.location > 0) {
-                            videoURI = [afterVid substringToIndex:paramRange.location];
+            // 如果uri仍为空，从收集到的URL中提取video_id
+            if (!videoURI || videoURI.length == 0) {
+                for (NSString *urlStr in urlSources) {
+                    NSRange vidRange = [urlStr rangeOfString:@"/video_id/" options:NSBackwardsSearch];
+                    if (vidRange.location != NSNotFound) {
+                        NSString *afterVid = [urlStr substringFromIndex:vidRange.location + vidRange.length];
+                        NSRange slashRange = [afterVid rangeOfString:@"/"];
+                        if (slashRange.location != NSNotFound && slashRange.location > 0) {
+                            videoURI = [afterVid substringToIndex:slashRange.location];
                             break;
+                        } else {
+                            NSRange paramRange = [afterVid rangeOfString:@"?"];
+                            if (paramRange.location != NSNotFound && paramRange.location > 0) {
+                                videoURI = [afterVid substringToIndex:paramRange.location];
+                                break;
+                            }
                         }
                     }
                 }
             }
-        }
 
-        // 验证videoURI有效性
-        if (!videoURI || ![videoURI isKindOfClass:[NSString class]] || videoURI.length == 0) {
-            videoURI = nil;
-        }
-
-        // 第二步：构建画质列表
-        Float64 originalFPS = 0;
-        NSInteger originalBitrate = 0;
-        NSMutableDictionary *resolutionFPSMap = [NSMutableDictionary dictionary];
-        NSString *originalResKey = nil;
-        // 2.1 如果有videoURI，用play接口获取真正原画 + 多画质
-        // 对每个play URL发HEAD请求获取Content-Length(文件大小)
-        if (videoURI) {
-            NSArray *ratios = @[
-                @[@"default", @"原画"],
-                @[@"1080p", @"1080P"],
-                @[@"720p", @"720P"],
-                @[@"540p", @"540P"]
-            ];
-            // 先构建所有play URL
-            NSMutableArray *playURLs = [NSMutableArray array];
-            NSMutableArray *playLabels = [NSMutableArray array];
-            for (NSArray *ratioItem in ratios) {
-                NSString *ratio = ratioItem[0];
-                NSString *name = ratioItem[1];
-                NSString *playAPIURL = [NSString stringWithFormat:
-                    @"https://www.douyin.com/aweme/v1/play/?video_id=%@&ratio=%@&line=1&device_platform=webapp&aid=6383&channel=channel_pc_web",
-                    videoURI, ratio];
-                [playURLs addObject:playAPIURL];
-                [playLabels addObject:name];
+            // 验证videoURI有效性
+            if (!videoURI || ![videoURI isKindOfClass:[NSString class]] || videoURI.length == 0) {
+                videoURI = nil;
             }
 
-            // 并行HEAD请求获取每个画质的文件大小 + CDN直链URL + FPS
-            NSMutableArray *fileSizes = [NSMutableArray arrayWithArray:@[@0, @0, @0, @0]];
-            NSMutableArray *cdnURLs = [NSMutableArray arrayWithArray:@[[NSNull null], [NSNull null], [NSNull null], [NSNull null]]];
-            dispatch_group_t headGroup = dispatch_group_create();
-            for (NSInteger i = 0; i < playURLs.count; i++) {
-                NSString *urlStr = playURLs[i];
-                dispatch_group_enter(headGroup);
-                NSMutableURLRequest *headReq = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:urlStr]];
-                headReq.HTTPMethod = @"HEAD";
-                [headReq setValue:@"Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1" forHTTPHeaderField:@"User-Agent"];
-                [headReq setValue:@"https://www.douyin.com/" forHTTPHeaderField:@"Referer"];
-                NSURLSessionDataTask *headTask = [[NSURLSession sharedSession] dataTaskWithRequest:headReq completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
-                    if (response && [response isKindOfClass:[NSHTTPURLResponse class]]) {
-                        NSHTTPURLResponse *httpResp = (NSHTTPURLResponse *)response;
-                        long long contentLength = [httpResp expectedContentLength];
-                        if (contentLength > 0) {
-                            @synchronized(fileSizes) {
-                                fileSizes[i] = @(contentLength);
-                            }
-                        }
-                        // 保存302后的CDN直链URL
-                        NSURL *finalURL = httpResp.URL;
-                        if (finalURL) {
-                            @synchronized(cdnURLs) {
-                                cdnURLs[i] = finalURL;
-                            }
-                        }
-                    }
-                    dispatch_group_leave(headGroup);
-                }];
-                [headTask resume];
-            }
-            // 等待所有HEAD请求完成（最多5秒）
-            dispatch_time_t timeout = dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC);
-            dispatch_group_wait(headGroup, timeout);
+            // 第二步：构建画质列表
+            Float64 originalFPS = 0;
+            NSInteger originalBitrate = 0;
+            NSMutableDictionary *resolutionFPSMap = [NSMutableDictionary dictionary];
+            NSString *originalResKey = nil;
+            // 2.1 如果有videoURI，用play接口获取真正原画 + 多画质
+            // 对每个play URL发HEAD请求获取Content-Length(文件大小)
+            if (videoURI) {
+                NSArray *ratios = @[
+                    @[@"default", @"原画"],
+                    @[@"1080p", @"1080P"],
+                    @[@"720p", @"720P"],
+                    @[@"540p", @"540P"]
+                ];
+                // 先构建所有play URL
+                NSMutableArray *playURLs = [NSMutableArray array];
+                NSMutableArray *playLabels = [NSMutableArray array];
+                for (NSArray *ratioItem in ratios) {
+                    NSString *ratio = ratioItem[0];
+                    NSString *name = ratioItem[1];
+                    NSString *playAPIURL = [NSString stringWithFormat:
+                        @"https://www.douyin.com/aweme/v1/play/?video_id=%@&ratio=%@&line=1&device_platform=webapp&aid=6383&channel=channel_pc_web",
+                        videoURI, ratio];
+                    [playURLs addObject:playAPIURL];
+                    [playLabels addObject:name];
+                }
 
-            // 重试失败的HEAD请求：用GET+Range获取Content-Range中的真实文件大小
-            dispatch_group_t retryGroup = dispatch_group_create();
-            for (NSInteger i = 0; i < fileSizes.count; i++) {
-                long long size = [fileSizes[i] longLongValue];
-                if (size < 10240) {
-                    dispatch_group_enter(retryGroup);
-                    NSMutableURLRequest *retryReq = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:playURLs[i]]];
-                    retryReq.HTTPMethod = @"GET";
-                    [retryReq setValue:@"bytes=0-0" forHTTPHeaderField:@"Range"];
-                    [retryReq setValue:@"Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1" forHTTPHeaderField:@"User-Agent"];
-                    [retryReq setValue:@"https://www.douyin.com/" forHTTPHeaderField:@"Referer"];
-                    NSURLSessionDataTask *retryTask = [[NSURLSession sharedSession] dataTaskWithRequest:retryReq completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
+                // 并行HEAD请求获取每个画质的文件大小 + CDN直链URL + FPS
+                // 所有网络请求放入同一个dispatch_group，一次wait，总超时8秒
+                NSMutableArray *fileSizes = [NSMutableArray arrayWithArray:@[@0, @0, @0, @0]];
+                NSMutableArray *cdnURLs = [NSMutableArray arrayWithArray:@[[NSNull null], [NSNull null], [NSNull null], [NSNull null]]];
+                NSMutableArray *fpsValues = [NSMutableArray arrayWithArray:@[@0, @0, @0, @0]];
+                NSMutableArray *headCompleted = [NSMutableArray arrayWithArray:@[@NO, @NO, @NO, @NO]];
+
+                dispatch_group_t netGroup = dispatch_group_create();
+
+                // 阶段1：并行发起所有HEAD请求
+                for (NSInteger i = 0; i < playURLs.count; i++) {
+                    NSString *urlStr = playURLs[i];
+                    dispatch_group_enter(netGroup);
+                    NSMutableURLRequest *headReq = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:urlStr]];
+                    headReq.HTTPMethod = @"HEAD";
+                    [headReq setValue:@"Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1" forHTTPHeaderField:@"User-Agent"];
+                    [headReq setValue:@"https://www.douyin.com/" forHTTPHeaderField:@"Referer"];
+                    NSURLSessionDataTask *headTask = [[NSURLSession sharedSession] dataTaskWithRequest:headReq completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
                         if (response && [response isKindOfClass:[NSHTTPURLResponse class]]) {
                             NSHTTPURLResponse *httpResp = (NSHTTPURLResponse *)response;
-                            NSString *contentRange = [httpResp.allHeaderFields objectForKey:@"Content-Range"];
-                            if (contentRange.length > 0) {
-                                NSRange slashRange = [contentRange rangeOfString:@"/"];
-                                if (slashRange.location != NSNotFound) {
-                                    NSString *totalStr = [contentRange substringFromIndex:slashRange.location + 1];
-                                    long long totalSize = [totalStr longLongValue];
-                                    if (totalSize > 10240) {
-                                        @synchronized(fileSizes) {
-                                            fileSizes[i] = @(totalSize);
-                                        }
-                                    }
+                            long long contentLength = [httpResp expectedContentLength];
+                            if (contentLength > 0) {
+                                @synchronized(fileSizes) {
+                                    fileSizes[i] = @(contentLength);
                                 }
                             }
-                            if ([fileSizes[i] longLongValue] < 10240) {
-                                long long cl = [httpResp expectedContentLength];
-                                if (cl > 10240) {
-                                    @synchronized(fileSizes) {
-                                        fileSizes[i] = @(cl);
-                                    }
-                                }
-                            }
+                            // 保存302后的CDN直链URL
                             NSURL *finalURL = httpResp.URL;
                             if (finalURL) {
                                 @synchronized(cdnURLs) {
@@ -2799,243 +2760,302 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                                 }
                             }
                         }
-                        dispatch_group_leave(retryGroup);
+                        @synchronized(headCompleted) {
+                            headCompleted[i] = @YES;
+                        }
+                        dispatch_group_leave(netGroup);
                     }];
-                    [retryTask resume];
+                    [headTask resume];
                 }
-            }
-            dispatch_group_wait(retryGroup, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC));
 
-            // 用AVURLAsset从CDN直链获取FPS（并行+超时3秒）
-            NSMutableArray *fpsValues = [NSMutableArray arrayWithArray:@[@0, @0, @0, @0]];
-            dispatch_group_t fpsGroup = dispatch_group_create();
-            for (NSInteger i = 0; i < cdnURLs.count; i++) {
-                NSURL *cdnURL = cdnURLs[i];
-                if ([cdnURL isKindOfClass:[NSURL class]]) {
-                    dispatch_group_enter(fpsGroup);
-                    AVURLAsset *asset = [AVURLAsset assetWithURL:cdnURL];
-                    NSString *fpsKey = @"tracks";
-                    [asset loadValuesAsynchronouslyForKeys:@[fpsKey] completionHandler:^{
-                        NSError *trackError = nil;
-                        AVKeyValueStatus status = [asset statusOfValueForKey:fpsKey error:&trackError];
-                        if (status == AVKeyValueStatusLoaded) {
-                            NSArray *tracks = [asset tracksWithMediaType:AVMediaTypeVideo];
-                            if (tracks.count > 0) {
-                                AVAssetTrack *videoTrack = tracks[0];
-                                Float64 fps = videoTrack.nominalFrameRate;
-                                @synchronized(fpsValues) {
-                                    fpsValues[i] = @(fps);
-                                }
-                            }
-                        }
-                        dispatch_group_leave(fpsGroup);
-                    }];
-                }
-            }
-            dispatch_time_t fpsTimeout = dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC);
-            dispatch_group_wait(fpsGroup, fpsTimeout);
+                // 等待所有网络请求完成（总超时8秒，覆盖HEAD+重试+FPS）
+                dispatch_time_t netTimeout = dispatch_time(DISPATCH_TIME_NOW, 8 * NSEC_PER_SEC);
+                dispatch_group_wait(netGroup, netTimeout);
 
-            // FPS默认值：AVAsset加载失败时默认30FPS
-            for (NSInteger i = 0; i < fpsValues.count; i++) {
-                Float64 fps = [fpsValues[i] floatValue];
-                if (fps <= 0) {
-                    fpsValues[i] = @(30);
-                }
-            }
+                // 阶段2：对HEAD失败的请求发起GET+Range重试，同时对有CDN URL的请求获取FPS
+                dispatch_group_t phase2Group = dispatch_group_create();
 
-            // 保存原画FPS，供后bitrateModels比较用
-            originalFPS = [fpsValues[0] floatValue];
-            @try { originalBitrate = [[videoModel valueForKey:@"bitrate"] integerValue]; } @catch (NSException *e) {}
-
-            // 构建分辨率→FPS映射（供bitrateModels复用）
-            NSArray *resolutionKeys = @[@"1440", @"1080", @"720", @"540", @"480"];
-            for (NSInteger i = 0; i < playLabels.count; i++) {
-                Float64 f = [fpsValues[i] floatValue];
-                if (f > 0) {
-                    NSString *label = playLabels[i];
-                    for (NSString *rKey in resolutionKeys) {
-                        if ([label containsString:rKey] || (i == 0 && [rKey isEqualToString:@"1440"])) {
-                            resolutionFPSMap[rKey] = @(f);
-                            break;
-                        }
+                for (NSInteger i = 0; i < fileSizes.count; i++) {
+                    BOOL headDone = NO;
+                    @synchronized(headCompleted) {
+                        headDone = [headCompleted[i] boolValue];
                     }
-                }
-            }
-            // 原画(default)的FPS也映射到所有分辨率key（作为fallback）
-            if (originalFPS > 0) {
-                for (NSString *rKey in resolutionKeys) {
-                    if (!resolutionFPSMap[rKey]) {
-                        resolutionFPSMap[rKey] = @(originalFPS);
-                    }
-                }
-            }
+                    long long size = [fileSizes[i] longLongValue];
 
-            // 获取视频原始分辨率（用于原画lite判断）
-            NSInteger videoWidth = 0;
-            @try {
-                id playAddrModel = [videoModel valueForKey:@"playAddr"];
-                if (playAddrModel) {
-                    NSNumber *w = [playAddrModel valueForKey:@"imageWidth"];
-                    if (w && [w isKindOfClass:[NSNumber class]]) videoWidth = [w integerValue];
-                }
-                if (videoWidth <= 0) {
-                    id h264URLModel = [videoModel valueForKey:@"h264URL"];
-                    if (h264URLModel) {
-                        NSNumber *w = [h264URLModel valueForKey:@"imageWidth"];
-                        if (w && [w isKindOfClass:[NSNumber class]]) videoWidth = [w integerValue];
-                    }
-                }
-            } @catch (NSException *e) {}
-            // 原画分辨率key
-            if (videoWidth >= 2160) originalResKey = @"1440";
-            else if (videoWidth >= 1080) originalResKey = @"1080";
-            else if (videoWidth >= 720) originalResKey = @"720";
-            else if (videoWidth >= 540) originalResKey = @"540";
-            else if (videoWidth >= 480) originalResKey = @"480";
-
-            // 构建画质列表
-            for (NSInteger i = 0; i < playURLs.count; i++) {
-                NSString *label = [NSString stringWithFormat:@"[%@]", playLabels[i]];
-                // FPS
-                Float64 fps = [fpsValues[i] floatValue];
-                if (fps > 0) {
-                    NSInteger fpsInt = (NSInteger)(fps + 0.5);
-                    label = [label stringByAppendingFormat:@"-[%ldFPS]", (long)fpsInt];
-                }
-                // 文件大小
-                long long size = [fileSizes[i] longLongValue];
-                if (size >= 10240) {
-                    NSString *sizeStr;
-                    if (size >= 1024 * 1024) {
-                        sizeStr = [NSString stringWithFormat:@"%.1fMB", (double)size / (1024.0 * 1024.0)];
-                    } else if (size >= 1024) {
-                        sizeStr = [NSString stringWithFormat:@"%.0fKB", (double)size / 1024.0];
-                    } else {
-                        sizeStr = [NSString stringWithFormat:@"%lldB", size];
-                    }
-                    label = [label stringByAppendingFormat:@"-[%@]", sizeStr];
-                }
-                [videoList addObject:@{@"level": label, @"url": playURLs[i]}];
-            }
-        }
-
-        // 2.2 h264URL/playURL作为直链备用（无videoURI时的唯一选项，有videoURI时跳过）
-        if (!videoURI) {
-            NSString *urlStr = nil;
-            id h264URL = [videoModel valueForKey:@"h264URL"];
-            if (h264URL && [h264URL valueForKey:@"originURLList"]) {
-                NSArray *list = [h264URL valueForKey:@"originURLList"];
-                if ([list isKindOfClass:[NSArray class]] && list.count > 0) urlStr = list.firstObject;
-            }
-            if (urlStr.length == 0) {
-                id playURL = [videoModel valueForKey:@"playURL"];
-                if (playURL && [playURL isKindOfClass:NSClassFromString(@"AWEURLModel")]) {
-                    NSArray *list = [playURL valueForKey:@"originURLList"];
-                    if ([list isKindOfClass:[NSArray class]] && list.count > 0) urlStr = list.firstObject;
-                }
-            }
-            if (urlStr.length > 0) {
-                [videoList addObject:@{@"level": @"[原画(直链)]", @"url": urlStr}];
-            }
-        }
-
-
-        // 2.3 bitrateModels补充（去重，带gearName和码率信息）
-        {
-            NSArray *bitrateModels = nil;
-            @try { bitrateModels = [videoModel valueForKey:@"bitrateModels"]; } @catch (NSException *e) {}
-            if (bitrateModels && [bitrateModels isKindOfClass:[NSArray class]] && bitrateModels.count > 0) {
-                NSMutableArray *sortedModels = [NSMutableArray arrayWithArray:bitrateModels];
-                [sortedModels sortUsingComparator:^NSComparisonResult(id a, id b) {
-                    NSInteger ba = 0, bb = 0;
-                    @try { ba = [[a valueForKey:@"bitrate"] integerValue]; } @catch (NSException *e) {}
-                    @try { bb = [[b valueForKey:@"bitrate"] integerValue]; } @catch (NSException *e) {}
-                    return bb - ba;
-                }];
-                NSMutableSet *existingURLs = [NSMutableSet set];
-                for (NSDictionary *item in videoList) {
-                    NSString *u = item[@"url"];
-                    if (u) [existingURLs addObject:u];
-                }
-                for (id model in sortedModels) {
-                    @try {
-                        id modelPlayAddr = [model valueForKey:@"playAddr"];
-                        NSString *urlStr = nil;
-                        if (modelPlayAddr && [modelPlayAddr isKindOfClass:NSClassFromString(@"AWEURLModel")]) {
-                            id originList = [modelPlayAddr valueForKey:@"originURLList"];
-                            if ([originList isKindOfClass:[NSArray class]] && [(NSArray *)originList count] > 0) {
-                                urlStr = [(NSArray *)originList firstObject];
-                            }
-                        }
-                        if (urlStr.length == 0 || [existingURLs containsObject:urlStr]) continue;
-
-                        // 取码率
-                        NSInteger bitrate = 0;
-                        @try { bitrate = [[model valueForKey:@"bitrate"] integerValue]; } @catch (NSException *e) {}
-                        if (bitrate <= 0) continue;
-
-                        // 取gearName
-                        NSString *gearName = nil;
-                        @try { gearName = [model valueForKey:@"gearName"]; } @catch (NSException *e) {}
-
-                        // gearName友好名称：从gearName自动解析分辨率
-                        NSDictionary *gearNameMap = @{@"adapt_lowest_1440_1": @"4K", @"adapt_lowest_4_1": @"4K"};
-                        NSString *displayName = gearNameMap[gearName];
-                        if (!displayName && gearName.length > 0) {
-                            NSRange r = [gearName rangeOfString:@"1440"];
-                            if (r.location != NSNotFound) { displayName = @"4K"; }
-                            else {
-                                r = [gearName rangeOfString:@"1080"];
-                                if (r.location != NSNotFound) { displayName = @"1080P"; }
-                                else {
-                                    r = [gearName rangeOfString:@"720"];
-                                    if (r.location != NSNotFound) { displayName = @"720P"; }
-                                    else {
-                                        r = [gearName rangeOfString:@"540"];
-                                        if (r.location != NSNotFound) { displayName = @"540P"; }
-                                        else {
-                                            r = [gearName rangeOfString:@"480"];
-                                            if (r.location != NSNotFound) { displayName = @"480P"; }
-                                            else { displayName = gearName; }
+                    // HEAD失败（未完成或文件太小）→ 重试
+                    if (!headDone || size < 10240) {
+                        dispatch_group_enter(phase2Group);
+                        NSMutableURLRequest *retryReq = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:playURLs[i]]];
+                        retryReq.HTTPMethod = @"GET";
+                        [retryReq setValue:@"bytes=0-0" forHTTPHeaderField:@"Range"];
+                        [retryReq setValue:@"Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1" forHTTPHeaderField:@"User-Agent"];
+                        [retryReq setValue:@"https://www.douyin.com/" forHTTPHeaderField:@"Referer"];
+                        NSURLSessionDataTask *retryTask = [[NSURLSession sharedSession] dataTaskWithRequest:retryReq completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
+                            if (response && [response isKindOfClass:[NSHTTPURLResponse class]]) {
+                                NSHTTPURLResponse *httpResp = (NSHTTPURLResponse *)response;
+                                NSString *contentRange = [httpResp.allHeaderFields objectForKey:@"Content-Range"];
+                                if (contentRange.length > 0) {
+                                    NSRange slashRange = [contentRange rangeOfString:@"/"];
+                                    if (slashRange.location != NSNotFound) {
+                                        NSString *totalStr = [contentRange substringFromIndex:slashRange.location + 1];
+                                        long long totalSize = [totalStr longLongValue];
+                                        if (totalSize > 10240) {
+                                            @synchronized(fileSizes) {
+                                                fileSizes[i] = @(totalSize);
+                                            }
                                         }
                                     }
                                 }
+                                if ([fileSizes[i] longLongValue] < 10240) {
+                                    long long cl = [httpResp expectedContentLength];
+                                    if (cl > 10240) {
+                                        @synchronized(fileSizes) {
+                                            fileSizes[i] = @(cl);
+                                        }
+                                    }
+                                }
+                                NSURL *finalURL = httpResp.URL;
+                                if (finalURL) {
+                                    @synchronized(cdnURLs) {
+                                        cdnURLs[i] = finalURL;
+                                    }
+                                }
+                            }
+                            dispatch_group_leave(phase2Group);
+                        }];
+                        [retryTask resume];
+                    }
+
+                    // 有CDN URL → 并行获取FPS
+                    NSURL *cdnURL = nil;
+                    @synchronized(cdnURLs) {
+                        cdnURL = cdnURLs[i];
+                    }
+                    if ([cdnURL isKindOfClass:[NSURL class]]) {
+                        dispatch_group_enter(phase2Group);
+                        AVURLAsset *asset = [AVURLAsset assetWithURL:cdnURL];
+                        NSString *fpsKey = @"tracks";
+                        [asset loadValuesAsynchronouslyForKeys:@[fpsKey] completionHandler:^{
+                            NSError *trackError = nil;
+                            AVKeyValueStatus status = [asset statusOfValueForKey:fpsKey error:&trackError];
+                            if (status == AVKeyValueStatusLoaded) {
+                                NSArray *tracks = [asset tracksWithMediaType:AVMediaTypeVideo];
+                                if (tracks.count > 0) {
+                                    AVAssetTrack *videoTrack = tracks[0];
+                                    Float64 fps = videoTrack.nominalFrameRate;
+                                    @synchronized(fpsValues) {
+                                        fpsValues[i] = @(fps);
+                                    }
+                                }
+                            }
+                            dispatch_group_leave(phase2Group);
+                        }];
+                    }
+                }
+
+                // 等待阶段2完成（重试+FPS，超时5秒）
+                dispatch_group_wait(phase2Group, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC));
+
+                // FPS默认值：AVAsset加载失败时默认30FPS
+                for (NSInteger i = 0; i < fpsValues.count; i++) {
+                    Float64 fps = [fpsValues[i] floatValue];
+                    if (fps <= 0) {
+                        fpsValues[i] = @(30);
+                    }
+                }
+
+                // 保存原画FPS，供后bitrateModels比较用
+                originalFPS = [fpsValues[0] floatValue];
+                @try { originalBitrate = [[videoModel valueForKey:@"bitrate"] integerValue]; } @catch (NSException *e) {}
+
+                // 构建分辨率→FPS映射（供bitrateModels复用）
+                NSArray *resolutionKeys = @[@"1440", @"1080", @"720", @"540", @"480"];
+                for (NSInteger i = 0; i < playLabels.count; i++) {
+                    Float64 f = [fpsValues[i] floatValue];
+                    if (f > 0) {
+                        NSString *label = playLabels[i];
+                        for (NSString *rKey in resolutionKeys) {
+                            if ([label containsString:rKey] || (i == 0 && [rKey isEqualToString:@"1440"])) {
+                                resolutionFPSMap[rKey] = @(f);
+                                break;
                             }
                         }
+                    }
+                }
+                // 原画(default)的FPS也映射到所有分辨率key（作为fallback）
+                if (originalFPS > 0) {
+                    for (NSString *rKey in resolutionKeys) {
+                        if (!resolutionFPSMap[rKey]) {
+                            resolutionFPSMap[rKey] = @(originalFPS);
+                        }
+                    }
+                }
 
-                        // HEAD请求获取文件大小 + CDN直链URL
-                        NSString *sizeStr = @"";
-                        __block long long headSize = 0;
-                        __block NSURL *cdnURL = nil;
+                // 获取视频原始分辨率（用于原画lite判断）
+                NSInteger videoWidth = 0;
+                @try {
+                    id playAddrModel = [videoModel valueForKey:@"playAddr"];
+                    if (playAddrModel) {
+                        NSNumber *w = [playAddrModel valueForKey:@"imageWidth"];
+                        if (w && [w isKindOfClass:[NSNumber class]]) videoWidth = [w integerValue];
+                    }
+                    if (videoWidth <= 0) {
+                        id h264URLModel = [videoModel valueForKey:@"h264URL"];
+                        if (h264URLModel) {
+                            NSNumber *w = [h264URLModel valueForKey:@"imageWidth"];
+                            if (w && [w isKindOfClass:[NSNumber class]]) videoWidth = [w integerValue];
+                        }
+                    }
+                } @catch (NSException *e) {}
+                // 原画分辨率key
+                if (videoWidth >= 2160) originalResKey = @"1440";
+                else if (videoWidth >= 1080) originalResKey = @"1080";
+                else if (videoWidth >= 720) originalResKey = @"720";
+                else if (videoWidth >= 540) originalResKey = @"540";
+                else if (videoWidth >= 480) originalResKey = @"480";
+
+                // 构建画质列表
+                for (NSInteger i = 0; i < playURLs.count; i++) {
+                    NSString *label = [NSString stringWithFormat:@"[%@]", playLabels[i]];
+                    // FPS
+                    Float64 fps = [fpsValues[i] floatValue];
+                    if (fps > 0) {
+                        NSInteger fpsInt = (NSInteger)(fps + 0.5);
+                        label = [label stringByAppendingFormat:@"-[%ldFPS]", (long)fpsInt];
+                    }
+                    // 文件大小
+                    long long size = [fileSizes[i] longLongValue];
+                    if (size >= 10240) {
+                        NSString *sizeStr;
+                        if (size >= 1024 * 1024) {
+                            sizeStr = [NSString stringWithFormat:@"%.1fMB", (double)size / (1024.0 * 1024.0)];
+                        } else if (size >= 1024) {
+                            sizeStr = [NSString stringWithFormat:@"%.0fKB", (double)size / 1024.0];
+                        } else {
+                            sizeStr = [NSString stringWithFormat:@"%lldB", size];
+                        }
+                        label = [label stringByAppendingFormat:@"-[%@]", sizeStr];
+                    }
+                    [videoList addObject:@{@"level": label, @"url": playURLs[i]}];
+                }
+            }
+
+            // 2.2 h264URL/playURL作为直链备用（无videoURI时的唯一选项，有videoURI时跳过）
+            if (!videoURI) {
+                NSString *urlStr = nil;
+                id h264URL = [videoModel valueForKey:@"h264URL"];
+                if (h264URL && [h264URL valueForKey:@"originURLList"]) {
+                    NSArray *list = [h264URL valueForKey:@"originURLList"];
+                    if ([list isKindOfClass:[NSArray class]] && list.count > 0) urlStr = list.firstObject;
+                }
+                if (urlStr.length == 0) {
+                    id playURL = [videoModel valueForKey:@"playURL"];
+                    if (playURL && [playURL isKindOfClass:NSClassFromString(@"AWEURLModel")]) {
+                        NSArray *list = [playURL valueForKey:@"originURLList"];
+                        if ([list isKindOfClass:[NSArray class]] && list.count > 0) urlStr = list.firstObject;
+                    }
+                }
+                if (urlStr.length > 0) {
+                    [videoList addObject:@{@"level": @"[原画(直链)]", @"url": urlStr}];
+                }
+            }
+
+
+            // 2.3 bitrateModels补充（去重，带gearName和码率信息）
+            // 所有bitrateModel的HEAD请求也并行执行
+            {
+                NSArray *bitrateModels = nil;
+                @try { bitrateModels = [videoModel valueForKey:@"bitrateModels"]; } @catch (NSException *e) {}
+                if (bitrateModels && [bitrateModels isKindOfClass:[NSArray class]] && bitrateModels.count > 0) {
+                    NSMutableArray *sortedModels = [NSMutableArray arrayWithArray:bitrateModels];
+                    [sortedModels sortUsingComparator:^NSComparisonResult(id a, id b) {
+                        NSInteger ba = 0, bb = 0;
+                        @try { ba = [[a valueForKey:@"bitrate"] integerValue]; } @catch (NSException *e) {}
+                        @try { bb = [[b valueForKey:@"bitrate"] integerValue]; } @catch (NSException *e) {}
+                        return bb - ba;
+                    }];
+                    NSMutableSet *existingURLs = [NSMutableSet set];
+                    for (NSDictionary *item in videoList) {
+                        NSString *u = item[@"url"];
+                        if (u) [existingURLs addObject:u];
+                    }
+
+                    // 收集需要HEAD的bitrateModel项
+                    NSMutableArray *bmItems = [NSMutableArray array]; // 存储: @{@"index": @(idx), @"url": urlStr, @"model": model}
+                    for (id model in sortedModels) {
+                        @try {
+                            id modelPlayAddr = [model valueForKey:@"playAddr"];
+                            NSString *urlStr = nil;
+                            if (modelPlayAddr && [modelPlayAddr isKindOfClass:NSClassFromString(@"AWEURLModel")]) {
+                                id originList = [modelPlayAddr valueForKey:@"originURLList"];
+                                if ([originList isKindOfClass:[NSArray class]] && [(NSArray *)originList count] > 0) {
+                                    urlStr = [(NSArray *)originList firstObject];
+                                }
+                            }
+                            if (urlStr.length == 0 || [existingURLs containsObject:urlStr]) continue;
+
+                            // 取码率
+                            NSInteger bitrate = 0;
+                            @try { bitrate = [[model valueForKey:@"bitrate"] integerValue]; } @catch (NSException *e) {}
+                            if (bitrate <= 0) continue;
+
+                            [bmItems addObject:@{@"url": urlStr, @"model": model, @"bitrate": @(bitrate)}];
+                        } @catch (NSException *e) {}
+                    }
+
+                    // 并行HEAD请求所有bitrateModel
+                    NSMutableArray *bmSizes = [NSMutableArray array];
+                    for (NSInteger k = 0; k < bmItems.count; k++) [bmSizes addObject:@0];
+                    NSMutableArray *bmCdnURLs = [NSMutableArray array];
+                    for (NSInteger k = 0; k < bmItems.count; k++) [bmCdnURLs addObject:[NSNull null]];
+
+                    dispatch_group_t bmGroup = dispatch_group_create();
+                    for (NSInteger bi = 0; bi < bmItems.count; bi++) {
+                        NSString *urlStr = bmItems[bi][@"url"];
+                        dispatch_group_enter(bmGroup);
                         NSMutableURLRequest *headReq = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:urlStr]];
                         headReq.HTTPMethod = @"HEAD";
                         [headReq setValue:@"Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1" forHTTPHeaderField:@"User-Agent"];
                         [headReq setValue:@"https://www.douyin.com/" forHTTPHeaderField:@"Referer"];
-                        dispatch_semaphore_t sema = dispatch_semaphore_create(0);
                         NSURLSessionDataTask *headTask = [[NSURLSession sharedSession] dataTaskWithRequest:headReq completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
                             if (response && [response isKindOfClass:[NSHTTPURLResponse class]]) {
                                 NSHTTPURLResponse *httpResp = (NSHTTPURLResponse *)response;
-                                headSize = [httpResp expectedContentLength];
-                                cdnURL = httpResp.URL;
+                                long long contentLength = [httpResp expectedContentLength];
+                                if (contentLength > 10240) {
+                                    @synchronized(bmSizes) {
+                                        bmSizes[bi] = @(contentLength);
+                                    }
+                                }
+                                NSURL *finalURL = httpResp.URL;
+                                if (finalURL) {
+                                    @synchronized(bmCdnURLs) {
+                                        bmCdnURLs[bi] = finalURL;
+                                    }
+                                }
                             }
-                            dispatch_semaphore_signal(sema);
+                            dispatch_group_leave(bmGroup);
                         }];
                         [headTask resume];
-                        dispatch_semaphore_wait(sema, dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC));
+                    }
+                    dispatch_group_wait(bmGroup, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC));
 
-                        // HEAD失败时用GET+Range重试
-                        if (headSize < 10240) {
+                    // 对HEAD失败的bitrateModel重试（GET+Range），也并行
+                    dispatch_group_t bmRetryGroup = dispatch_group_create();
+                    for (NSInteger bi = 0; bi < bmItems.count; bi++) {
+                        long long size = [bmSizes[bi] longLongValue];
+                        if (size < 10240) {
+                            NSString *urlStr = bmItems[bi][@"url"];
+                            dispatch_group_enter(bmRetryGroup);
                             NSMutableURLRequest *retryReq = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:urlStr]];
                             retryReq.HTTPMethod = @"GET";
                             [retryReq setValue:@"bytes=0-0" forHTTPHeaderField:@"Range"];
                             [retryReq setValue:@"Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1" forHTTPHeaderField:@"User-Agent"];
                             [retryReq setValue:@"https://www.douyin.com/" forHTTPHeaderField:@"Referer"];
-                            __block long long retrySize = 0;
-                            dispatch_semaphore_t retrySema = dispatch_semaphore_create(0);
                             NSURLSessionDataTask *retryTask = [[NSURLSession sharedSession] dataTaskWithRequest:retryReq completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
                                 if (response && [response isKindOfClass:[NSHTTPURLResponse class]]) {
                                     NSHTTPURLResponse *httpResp = (NSHTTPURLResponse *)response;
                                     NSString *contentRange = [httpResp.allHeaderFields objectForKey:@"Content-Range"];
+                                    long long retrySize = 0;
                                     if (contentRange.length > 0) {
                                         NSRange slashRange = [contentRange rangeOfString:@"/"];
                                         if (slashRange.location != NSNotFound) {
@@ -3047,200 +3067,246 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                                         retrySize = [httpResp expectedContentLength];
                                     }
                                     if (retrySize > 10240) {
-                                        headSize = retrySize;
+                                        @synchronized(bmSizes) {
+                                            bmSizes[bi] = @(retrySize);
+                                        }
                                     }
-                                    if (!cdnURL) {
-                                        cdnURL = httpResp.URL;
+                                    NSURL *finalURL = httpResp.URL;
+                                    if (finalURL) {
+                                        @synchronized(bmCdnURLs) {
+                                            bmCdnURLs[bi] = finalURL;
+                                        }
                                     }
                                 }
-                                dispatch_semaphore_signal(retrySema);
+                                dispatch_group_leave(bmRetryGroup);
                             }];
                             [retryTask resume];
-                            dispatch_semaphore_wait(retrySema, dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC));
                         }
+                    }
+                    dispatch_group_wait(bmRetryGroup, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC));
 
-                        // 从分辨率→FPS映射获取FPS（复用play URL的FPS，不再单独AVAsset加载）
-                        Float64 fps = 0;
-                        if (gearName.length > 0) {
-                            for (NSString *rKey in @[@"1440", @"1080", @"720", @"540", @"480"]) {
-                                if ([gearName containsString:rKey]) {
-                                    NSNumber *mappedFPS = resolutionFPSMap[rKey];
-                                    if (mappedFPS) fps = [mappedFPS floatValue];
-                                    break;
+                    // 构建bitrateModel画质列表
+                    for (NSInteger bi = 0; bi < bmItems.count; bi++) {
+                        @try {
+                            id model = bmItems[bi][@"model"];
+                            NSString *urlStr = bmItems[bi][@"url"];
+                            NSInteger bitrate = [bmItems[bi][@"bitrate"] integerValue];
+                            long long headSize = [bmSizes[bi] longLongValue];
+
+                            // 取gearName
+                            NSString *gearName = nil;
+                            @try { gearName = [model valueForKey:@"gearName"]; } @catch (NSException *e) {}
+
+                            // gearName友好名称：从gearName自动解析分辨率
+                            NSDictionary *gearNameMap = @{@"adapt_lowest_1440_1": @"4K", @"adapt_lowest_4_1": @"4K"};
+                            NSString *displayName = gearNameMap[gearName];
+                            if (!displayName && gearName.length > 0) {
+                                NSRange r = [gearName rangeOfString:@"1440"];
+                                if (r.location != NSNotFound) { displayName = @"4K"; }
+                                else {
+                                    r = [gearName rangeOfString:@"1080"];
+                                    if (r.location != NSNotFound) { displayName = @"1080P"; }
+                                    else {
+                                        r = [gearName rangeOfString:@"720"];
+                                        if (r.location != NSNotFound) { displayName = @"720P"; }
+                                        else {
+                                            r = [gearName rangeOfString:@"540"];
+                                            if (r.location != NSNotFound) { displayName = @"540P"; }
+                                            else {
+                                                r = [gearName rangeOfString:@"480"];
+                                                if (r.location != NSNotFound) { displayName = @"480P"; }
+                                                else { displayName = gearName; }
+                                            }
+                                        }
+                                    }
                                 }
                             }
-                        }
-                        // FPS默认30（抖音绝大多数视频30FPS）
-                        if (fps <= 0) fps = 30;
 
-                        // 构建label：原画lite判断（分辨率匹配原画 + 码率/FPS辅助）
-                        BOOL sameAsOriginal = NO;
-                        // 方法1：分辨率与原画分辨率一致
-                        if (originalResKey.length > 0 && gearName.length > 0 && [gearName containsString:originalResKey]) {
-                            sameAsOriginal = YES;
-                        }
-                        // 方法2：码率相同
-                        if (!sameAsOriginal && originalBitrate > 0 && bitrate > 0 && bitrate == originalBitrate) {
-                            sameAsOriginal = YES;
-                        }
-                        // 方法3：FPS与原画相同且都>0
-                        if (!sameAsOriginal) {
-                            NSInteger fpsInt = (NSInteger)(fps + 0.5);
-                            NSInteger origFpsInt = (NSInteger)(originalFPS + 0.5);
-                            if (origFpsInt > 0 && fpsInt > 0 && fpsInt == origFpsInt) {
+                            // 从分辨率→FPS映射获取FPS（复用play URL的FPS，不再单独AVAsset加载）
+                            Float64 fps = 0;
+                            if (gearName.length > 0) {
+                                for (NSString *rKey in @[@"1440", @"1080", @"720", @"540", @"480"]) {
+                                    if ([gearName containsString:rKey]) {
+                                        NSNumber *mappedFPS = resolutionFPSMap[rKey];
+                                        if (mappedFPS) fps = [mappedFPS floatValue];
+                                        break;
+                                    }
+                                }
+                            }
+                            // FPS默认30（抖音绝大多数视频30FPS）
+                            if (fps <= 0) fps = 30;
+
+                            // 构建label：原画lite判断（分辨率匹配原画 + 码率/FPS辅助）
+                            BOOL sameAsOriginal = NO;
+                            // 方法1：分辨率与原画分辨率一致
+                            if (originalResKey.length > 0 && gearName.length > 0 && [gearName containsString:originalResKey]) {
                                 sameAsOriginal = YES;
                             }
-                        }
-                        NSString *qualityLabel;
-                        if (sameAsOriginal) {
-                            qualityLabel = @"[原画lite]";
-                        } else if (displayName.length > 0) {
-                            qualityLabel = [NSString stringWithFormat:@"[%@]", displayName];
-                        } else {
-                            qualityLabel = [NSString stringWithFormat:@"[%ldkbps]", (long)(bitrate/1000)];
-                        }
-                        if (fps > 0) {
-                            NSInteger fpsInt = (NSInteger)(fps + 0.5);
-                            qualityLabel = [qualityLabel stringByAppendingFormat:@"-[%ldFPS]", (long)fpsInt];
-                        }
-                        if (headSize >= 10240) {
-                            if (headSize >= 1024 * 1024) {
-                                sizeStr = [NSString stringWithFormat:@"%.1fMB", (double)headSize / (1024.0 * 1024.0)];
-                            } else if (headSize >= 1024) {
-                                sizeStr = [NSString stringWithFormat:@"%.0fKB", (double)headSize / 1024.0];
+                            // 方法2：码率相同
+                            if (!sameAsOriginal && originalBitrate > 0 && bitrate > 0 && bitrate == originalBitrate) {
+                                sameAsOriginal = YES;
+                            }
+                            // 方法3：FPS与原画相同且都>0
+                            if (!sameAsOriginal) {
+                                NSInteger fpsInt = (NSInteger)(fps + 0.5);
+                                NSInteger origFpsInt = (NSInteger)(originalFPS + 0.5);
+                                if (origFpsInt > 0 && fpsInt > 0 && fpsInt == origFpsInt) {
+                                    sameAsOriginal = YES;
+                                }
+                            }
+                            NSString *qualityLabel;
+                            if (sameAsOriginal) {
+                                qualityLabel = @"[原画lite]";
+                            } else if (displayName.length > 0) {
+                                qualityLabel = [NSString stringWithFormat:@"[%@]", displayName];
                             } else {
-                                sizeStr = [NSString stringWithFormat:@"%lldB", headSize];
+                                qualityLabel = [NSString stringWithFormat:@"[%ldkbps]", (long)(bitrate/1000)];
                             }
-                            qualityLabel = [qualityLabel stringByAppendingFormat:@"-[%@]", sizeStr];
-                        }
+                            if (fps > 0) {
+                                NSInteger fpsInt = (NSInteger)(fps + 0.5);
+                                qualityLabel = [qualityLabel stringByAppendingFormat:@"-[%ldFPS]", (long)fpsInt];
+                            }
+                            NSString *sizeStr = @"";
+                            if (headSize >= 10240) {
+                                if (headSize >= 1024 * 1024) {
+                                    sizeStr = [NSString stringWithFormat:@"%.1fMB", (double)headSize / (1024.0 * 1024.0)];
+                                } else if (headSize >= 1024) {
+                                    sizeStr = [NSString stringWithFormat:@"%.0fKB", (double)headSize / 1024.0];
+                                } else {
+                                    sizeStr = [NSString stringWithFormat:@"%lldB", headSize];
+                                }
+                                qualityLabel = [qualityLabel stringByAppendingFormat:@"-[%@]", sizeStr];
+                            }
 
-                        // 非lite标准分辨率用play接口URL（不过期），lite和非标准分辨率用CDN直链
-                        NSString *downloadURL = urlStr;
-                        if (!sameAsOriginal && videoURI.length > 0) {
-                            NSString *ratioForPlay = nil;
-                            if ([gearName containsString:@"1080"]) ratioForPlay = @"1080p";
-                            else if ([gearName containsString:@"720"]) ratioForPlay = @"720p";
-                            else if ([gearName containsString:@"540"]) ratioForPlay = @"540p";
-                            else if ([gearName containsString:@"480"]) ratioForPlay = @"480p";
-                            if (ratioForPlay) {
-                                downloadURL = [NSString stringWithFormat:@"https://www.douyin.com/aweme/v1/play/?video_id=%@&ratio=%@&line=1&device_platform=webapp&aid=6383&channel=channel_pc_web", videoURI, ratioForPlay];
+                            // 非lite标准分辨率用play接口URL（不过期），lite和非标准分辨率用CDN直链
+                            NSString *downloadURL = urlStr;
+                            if (!sameAsOriginal && videoURI.length > 0) {
+                                NSString *ratioForPlay = nil;
+                                if ([gearName containsString:@"1080"]) ratioForPlay = @"1080p";
+                                else if ([gearName containsString:@"720"]) ratioForPlay = @"720p";
+                                else if ([gearName containsString:@"540"]) ratioForPlay = @"540p";
+                                else if ([gearName containsString:@"480"]) ratioForPlay = @"480p";
+                                if (ratioForPlay) {
+                                    downloadURL = [NSString stringWithFormat:@"https://www.douyin.com/aweme/v1/play/?video_id=%@&ratio=%@&line=1&device_platform=webapp&aid=6383&channel=channel_pc_web", videoURI, ratioForPlay];
+                                }
                             }
-                        }
-                        [existingURLs addObject:urlStr];
-                        if (![downloadURL isEqualToString:urlStr]) {
-                            [existingURLs addObject:downloadURL];
-                        }
-                        if (sameAsOriginal && videoList.count > 0) {
-                            [videoList insertObject:@{@"level": qualityLabel, @"url": downloadURL} atIndex:1];
-                        } else {
-                            [videoList addObject:@{@"level": qualityLabel, @"url": downloadURL}];
-                        }
-                    } @catch (NSException *e) {}
+                            [existingURLs addObject:urlStr];
+                            if (![downloadURL isEqualToString:urlStr]) {
+                                [existingURLs addObject:downloadURL];
+                            }
+                            if (sameAsOriginal && videoList.count > 0) {
+                                [videoList insertObject:@{@"level": qualityLabel, @"url": downloadURL} atIndex:1];
+                            } else {
+                                [videoList addObject:@{@"level": qualityLabel, @"url": downloadURL}];
+                            }
+                        } @catch (NSException *e) {}
+                    }
+                }
+            }
+            id coverURL = [videoModel valueForKey:@"coverURL"];
+            if (coverURL && [coverURL valueForKey:@"originURLList"]) {
+                NSArray *list = [coverURL valueForKey:@"originURLList"];
+                if ([list isKindOfClass:[NSArray class]] && list.count > 0) {
+                    result[@"cover"] = list.firstObject;
                 }
             }
         }
-        id coverURL = [videoModel valueForKey:@"coverURL"];
-        if (coverURL && [coverURL valueForKey:@"originURLList"]) {
-            NSArray *list = [coverURL valueForKey:@"originURLList"];
-            if ([list isKindOfClass:[NSArray class]] && list.count > 0) {
-                result[@"cover"] = list.firstObject;
-            }
-        }
-    }
 
-    // --- 图集图片 ---
-    NSArray *albumImages = [awemeModel valueForKey:@"albumImages"];
-    if (albumImages && [albumImages isKindOfClass:[NSArray class]]) {
-        for (id imgModel in albumImages) {
-            @try {
-                // 检查是否有实况视频（clipVideo）
-                id clipVideo = [imgModel valueForKey:@"clipVideo"];
-                if (clipVideo) {
-                    id playURL = [clipVideo valueForKey:@"playURL"];
-                    NSString *videoURLStr = nil;
-                    if (playURL && [playURL isKindOfClass:NSClassFromString(@"AWEURLModel")]) {
-                        NSArray *list = [playURL valueForKey:@"originURLList"];
-                        if ([list isKindOfClass:[NSArray class]] && list.count > 0) videoURLStr = list.firstObject;
-                    }
-
-                    NSArray *urlList = [imgModel valueForKey:@"urlList"];
-                    NSString *imageURLStr = nil;
-                    if ([urlList isKindOfClass:[NSArray class]] && urlList.count > 0) {
-                        for (NSString *u in urlList) {
-                            if (![u hasSuffix:@".image"]) { imageURLStr = u; break; }
+        // --- 图集图片 ---
+        NSArray *albumImages = [awemeModel valueForKey:@"albumImages"];
+        if (albumImages && [albumImages isKindOfClass:[NSArray class]]) {
+            for (id imgModel in albumImages) {
+                @try {
+                    // 检查是否有实况视频（clipVideo）
+                    id clipVideo = [imgModel valueForKey:@"clipVideo"];
+                    if (clipVideo) {
+                        id playURL = [clipVideo valueForKey:@"playURL"];
+                        NSString *videoURLStr = nil;
+                        if (playURL && [playURL isKindOfClass:NSClassFromString(@"AWEURLModel")]) {
+                            NSArray *list = [playURL valueForKey:@"originURLList"];
+                            if ([list isKindOfClass:[NSArray class]] && list.count > 0) videoURLStr = list.firstObject;
                         }
-                        if (!imageURLStr) imageURLStr = urlList.firstObject;
-                    }
 
-                    if (videoURLStr.length > 0 && imageURLStr.length > 0) {
-                        [videoList addObject:@{@"level": @"实况", @"url": videoURLStr}];
-                        [images addObject:imageURLStr];
-                    }
-                } else {
-                    // 普通图片
-                    NSArray *urlList = [imgModel valueForKey:@"urlList"];
-                    if ([urlList isKindOfClass:[NSArray class]] && urlList.count > 0) {
-                        NSString *imgURL = nil;
-                        for (NSString *u in urlList) {
-                            if (![u hasSuffix:@".image"]) { imgURL = u; break; }
+                        NSArray *urlList = [imgModel valueForKey:@"urlList"];
+                        NSString *imageURLStr = nil;
+                        if ([urlList isKindOfClass:[NSArray class]] && urlList.count > 0) {
+                            for (NSString *u in urlList) {
+                                if (![u hasSuffix:@".image"]) { imageURLStr = u; break; }
+                            }
+                            if (!imageURLStr) imageURLStr = urlList.firstObject;
                         }
-                        if (!imgURL) imgURL = urlList.firstObject;
-                        if (imgURL.length > 0) [images addObject:imgURL];
+
+                        if (videoURLStr.length > 0 && imageURLStr.length > 0) {
+                            [videoList addObject:@{@"level": @"实况", @"url": videoURLStr}];
+                            [images addObject:imageURLStr];
+                        }
+                    } else {
+                        // 普通图片
+                        NSArray *urlList = [imgModel valueForKey:@"urlList"];
+                        if ([urlList isKindOfClass:[NSArray class]] && urlList.count > 0) {
+                            NSString *imgURL = nil;
+                            for (NSString *u in urlList) {
+                                if (![u hasSuffix:@".image"]) { imgURL = u; break; }
+                            }
+                            if (!imgURL) imgURL = urlList.firstObject;
+                            if (imgURL.length > 0) [images addObject:imgURL];
+                        }
                     }
+                } @catch (NSException *e) {
+                    NSLog(@"[DYYY] localParse albumImage error: %@", e);
                 }
-            } @catch (NSException *e) {
-                NSLog(@"[DYYY] localParse albumImage error: %@", e);
             }
         }
-    }
 
-    // --- 音乐 ---
-    if (musicModel) {
-        id playURL = [musicModel valueForKey:@"playURL"];
-        if (playURL && [playURL valueForKey:@"originURLList"]) {
-            NSArray *list = [playURL valueForKey:@"originURLList"];
-            if ([list isKindOfClass:[NSArray class]] && list.count > 0) {
-                result[@"music"] = list.firstObject;
+        // --- 音乐 ---
+        if (musicModel) {
+            id playURL = [musicModel valueForKey:@"playURL"];
+            if (playURL && [playURL valueForKey:@"originURLList"]) {
+                NSArray *list = [playURL valueForKey:@"originURLList"];
+                if ([list isKindOfClass:[NSArray class]] && list.count > 0) {
+                    result[@"music"] = list.firstObject;
+                }
             }
         }
-    }
 
-    // --- 作者信息 ---
-    if (authorModel) {
-        NSString *nickname = [authorModel valueForKey:@"nickname"];
-        if (nickname.length > 0) result[@"author"] = nickname;
-    }
+        // --- 作者信息 ---
+        if (authorModel) {
+            NSString *nickname = [authorModel valueForKey:@"nickname"];
+            if (nickname.length > 0) result[@"author"] = nickname;
+        }
 
-    // --- 标题 ---
-    NSString *desc = [awemeModel valueForKey:@"desc"];
-    if (!desc || ![desc isKindOfClass:[NSString class]]) {
-        desc = [awemeModel valueForKey:@"descriptionString"];
-    }
-    if (desc.length > 0) result[@"title"] = desc;
+        // --- 标题 ---
+        NSString *desc = [awemeModel valueForKey:@"desc"];
+        if (!desc || ![desc isKindOfClass:[NSString class]]) {
+            desc = [awemeModel valueForKey:@"descriptionString"];
+        }
+        if (desc.length > 0) result[@"title"] = desc;
 
-    // --- 转发量 ---
-    @try {
-        id statsModel = [awemeModel valueForKey:@"statistics"];
-        if (statsModel) {
-            NSNumber *shareCount = [statsModel valueForKey:@"shareCount"];
-            if (shareCount && [shareCount isKindOfClass:[NSNumber class]] && [shareCount integerValue] > 0) {
-                result[@"share_count"] = shareCount;
-                NSLog(@"[DYYY] localParse share_count from statistics: %@", shareCount);
+        // --- 转发量 ---
+        @try {
+            id statsModel = [awemeModel valueForKey:@"statistics"];
+            if (statsModel) {
+                NSNumber *shareCount = [statsModel valueForKey:@"shareCount"];
+                if (shareCount && [shareCount isKindOfClass:[NSNumber class]] && [shareCount integerValue] > 0) {
+                    result[@"share_count"] = shareCount;
+                    NSLog(@"[DYYY] localParse share_count from statistics: %@", shareCount);
+                }
             }
+            // 保存awemeId
+            NSString *awemeId = [awemeModel valueForKey:@"awemeId"];
+            if (awemeId && awemeId.length > 0) {
+                result[@"aweme_id"] = awemeId;
+            }
+        } @catch (NSException *e) {
+            NSLog(@"[DYYY] localParse shareCount error: %@", e);
         }
-        // 保存awemeId
-        NSString *awemeId = [awemeModel valueForKey:@"awemeId"];
-        if (awemeId && awemeId.length > 0) {
-            result[@"aweme_id"] = awemeId;
-        }
-    } @catch (NSException *e) {
-        NSLog(@"[DYYY] localParse shareCount error: %@", e);
-    }
 
-    if (videoList.count > 0) result[@"video_list"] = videoList;
-    if (images.count > 0) result[@"images"] = images;
+        if (videoList.count > 0) result[@"video_list"] = videoList;
+        if (images.count > 0) result[@"images"] = images;
 
-    return result.count > 0 ? result : nil;
+        NSDictionary *finalResult = result.count > 0 ? result : nil;
+        completion(finalResult);
+    });
 }
 
 + (void)parseAndDownloadVideoWithShareLink:(NSString *)shareLink apiKey:(NSString *)apiKey {

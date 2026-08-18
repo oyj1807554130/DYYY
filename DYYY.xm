@@ -6435,13 +6435,17 @@ static NSHashTable *processedParentViews = nil;
                                                                                                                  [imgSheet setActions:imgActions];
                                                                                                                  [imgSheet show];
                                                                                                              } else {
-                                                                                                                 // 视频：本地解析
-                                                                                                                 NSDictionary *localData = [DYYYManager localParseFromAwemeModel:awemeModel];
-                                                                                                                 if (localData) {
-                                                                                                                     [DYYYManager handleVideoData:localData];
-                                                                                                                 } else {
-                                                                                                                     [DYYYUtils showToast:@"本地解析失败，视频数据为空"];
-                                                                                                                 }
+                                                                                                                 // 视频：本地解析（异步，不卡主线程）
+                                                                                                                 [DYYYUtils showToast:@"正在解析画质..."];
+                                                                                                                 [DYYYManager localParseFromAwemeModel:awemeModel completion:^(NSDictionary *localData) {
+                                                                                                                     dispatch_async(dispatch_get_main_queue(), ^{
+                                                                                                                         if (localData) {
+                                                                                                                             [DYYYManager handleVideoData:localData];
+                                                                                                                         } else {
+                                                                                                                             [DYYYUtils showToast:@"本地解析失败，视频数据为空"];
+                                                                                                                         }
+                                                                                                                     });
+                                                                                                                 }];
                                                                                                              }
                                                                                                            }];
                 [actions addObject:apiDownload1Action];
