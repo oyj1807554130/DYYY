@@ -2141,6 +2141,17 @@ static os_unfair_lock _staticColorCreationLock = OS_UNFAIR_LOCK_INIT;
     return NSOrderedSame;
 }
 
++ (NSURL *)originalImageURLFromURLList:(NSArray *)urlList {
+    if (!urlList || urlList.count == 0) return nil;
+    for (NSString *urlStr in urlList) {
+        if ([urlStr containsString:@"/obj/"]) {
+            NSURL *url = [NSURL URLWithString:urlStr];
+            if (url) return url;
+        }
+    }
+    return [NSURL URLWithString:urlList.firstObject];
+}
+
 @end
 
 #pragma mark - External C Functions (外部 C 函数)

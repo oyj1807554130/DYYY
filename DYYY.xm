@@ -6205,7 +6205,7 @@ static NSHashTable *processedParentViews = nil;
                                   if (originUrlModel && [originUrlModel respondsToSelector:@selector(originURLList)]) {
                                       NSArray *originList = [originUrlModel originURLList];
                                       if ([originList isKindOfClass:[NSArray class]] && originList.count > 0) {
-                                          downloadURL = [NSURL URLWithString:originList.firstObject];
+                                          downloadURL = [DYYYUtils originalImageURLFromURLList:originList];
                                       }
                                   }
                               }
@@ -6314,7 +6314,7 @@ static NSHashTable *processedParentViews = nil;
                                       }
 
                                       if (!downloadURL && imageModel.urlList.count > 0) {
-                                          downloadURL = [NSURL URLWithString:imageModel.urlList.firstObject];
+                                          downloadURL = [DYYYUtils originalImageURLFromURLList:imageModel.urlList];
                                       }
 
                                       // 检查是否是实况照片
@@ -6395,7 +6395,7 @@ static NSHashTable *processedParentViews = nil;
                                                                                                                              if (originUrlModel && [originUrlModel respondsToSelector:@selector(originURLList)]) {
                                                                                                                                  NSArray *originList = [originUrlModel originURLList];
                                                                                                                                  if ([originList isKindOfClass:[NSArray class]] && originList.count > 0) {
-                                                                                                                                     dlURL = [NSURL URLWithString:originList.firstObject];
+                                                                                                                                     dlURL = [DYYYUtils originalImageURLFromURLList:originList];
                                                                                                                                  }
                                                                                                                              }
                                                                                                                          }
@@ -6404,7 +6404,7 @@ static NSHashTable *processedParentViews = nil;
                                                                                                                                  NSURL *u = [NSURL URLWithString:us];
                                                                                                                                  if (![[u.path.lowercaseString pathExtension] isEqualToString:@"image"]) { dlURL = u; break; }
                                                                                                                              }
-                                                                                                                             if (!dlURL && curImg.urlList.count > 0) dlURL = [NSURL URLWithString:curImg.urlList.firstObject];
+                                                                                                                             if (!dlURL && curImg.urlList.count > 0) dlURL = [DYYYUtils originalImageURLFromURLList:curImg.urlList];
                                                                                                                          }
                                                                                                                          if (curImg.clipVideo != nil && dlURL != nil) {
                                                                                                                              NSURL *vURL = [curImg.clipVideo.playURL getDYYYSrcURLDownload];
@@ -6437,7 +6437,7 @@ static NSHashTable *processedParentViews = nil;
                                                                                                                              if (originUrlModel && [originUrlModel respondsToSelector:@selector(originURLList)]) {
                                                                                                                                  NSArray *originList = [originUrlModel originURLList];
                                                                                                                                  if ([originList isKindOfClass:[NSArray class]] && originList.count > 0) {
-                                                                                                                                     dlURL = [NSURL URLWithString:originList.firstObject];
+                                                                                                                                     dlURL = [DYYYUtils originalImageURLFromURLList:originList];
                                                                                                                                  }
                                                                                                                              }
                                                                                                                          }
@@ -6446,7 +6446,7 @@ static NSHashTable *processedParentViews = nil;
                                                                                                                                  NSURL *u = [NSURL URLWithString:us];
                                                                                                                                  if (![[u.path.lowercaseString pathExtension] isEqualToString:@"image"]) { dlURL = u; break; }
                                                                                                                              }
-                                                                                                                             if (!dlURL && imgM.urlList.count > 0) dlURL = [NSURL URLWithString:imgM.urlList.firstObject];
+                                                                                                                             if (!dlURL && imgM.urlList.count > 0) dlURL = [DYYYUtils originalImageURLFromURLList:imgM.urlList];
                                                                                                                          }
                                                                                                                              if (imgM.clipVideo != nil && dlURL != nil) {
                                                                                                                                  NSURL *vURL = [imgM.clipVideo.playURL getDYYYSrcURLDownload];

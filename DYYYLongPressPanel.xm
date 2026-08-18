@@ -419,7 +419,7 @@
                               if (originUrlModel1 && [originUrlModel1 respondsToSelector:@selector(originURLList)]) {
                                   NSArray *originList1 = [originUrlModel1 originURLList];
                                   if ([originList1 isKindOfClass:[NSArray class]] && originList1.count > 0) {
-                                      d1 = [NSURL URLWithString:originList1.firstObject];
+                                      d1 = [DYYYUtils originalImageURLFromURLList:originList1];
                                   }
                               }
                           }
@@ -428,7 +428,7 @@
                                   NSURL *u1 = [NSURL URLWithString:us];
                                   if (![[u1.path.lowercaseString pathExtension] isEqualToString:@"image"]) { d1 = u1; break; }
                               }
-                              if (!d1 && curI1.urlList.count > 0) d1 = [NSURL URLWithString:curI1.urlList.firstObject];
+                              if (!d1 && curI1.urlList.count > 0) d1 = [DYYYUtils originalImageURLFromURLList:curI1.urlList];
                           }
                           if (curI1.clipVideo != nil && d1 != nil) {
                               NSURL *v1 = [curI1.clipVideo.playURL getDYYYSrcURLDownload];
@@ -460,7 +460,7 @@
                                   if (originUrlModel1 && [originUrlModel1 respondsToSelector:@selector(originURLList)]) {
                                       NSArray *originList1 = [originUrlModel1 originURLList];
                                       if ([originList1 isKindOfClass:[NSArray class]] && originList1.count > 0) {
-                                          d1 = [NSURL URLWithString:originList1.firstObject];
+                                          d1 = [DYYYUtils originalImageURLFromURLList:originList1];
                                       }
                                   }
                               }
@@ -469,7 +469,7 @@
                                       NSURL *u1 = [NSURL URLWithString:us];
                                       if (![[u1.path.lowercaseString pathExtension] isEqualToString:@"image"]) { d1 = u1; break; }
                                   }
-                                  if (!d1 && imgM.urlList.count > 0) d1 = [NSURL URLWithString:imgM.urlList.firstObject];
+                                  if (!d1 && imgM.urlList.count > 0) d1 = [DYYYUtils originalImageURLFromURLList:imgM.urlList];
                               }
                               if (imgM.clipVideo != nil && d1 != nil) {
                                   NSURL *v1 = [imgM.clipVideo.playURL getDYYYSrcURLDownload];
@@ -1461,7 +1461,7 @@
                               if (originUrlModel1 && [originUrlModel1 respondsToSelector:@selector(originURLList)]) {
                                   NSArray *originList1 = [originUrlModel1 originURLList];
                                   if ([originList1 isKindOfClass:[NSArray class]] && originList1.count > 0) {
-                                      d1 = [NSURL URLWithString:originList1.firstObject];
+                                      d1 = [DYYYUtils originalImageURLFromURLList:originList1];
                                   }
                               }
                           }
@@ -1470,7 +1470,7 @@
                                   NSURL *u1 = [NSURL URLWithString:us];
                                   if (![[u1.path.lowercaseString pathExtension] isEqualToString:@"image"]) { d1 = u1; break; }
                               }
-                              if (!d1 && curI1.urlList.count > 0) d1 = [NSURL URLWithString:curI1.urlList.firstObject];
+                              if (!d1 && curI1.urlList.count > 0) d1 = [DYYYUtils originalImageURLFromURLList:curI1.urlList];
                           }
                           if (curI1.clipVideo != nil && d1 != nil) {
                               NSURL *v1 = [curI1.clipVideo.playURL getDYYYSrcURLDownload];
@@ -1502,7 +1502,7 @@
                                   if (originUrlModel1 && [originUrlModel1 respondsToSelector:@selector(originURLList)]) {
                                       NSArray *originList1 = [originUrlModel1 originURLList];
                                       if ([originList1 isKindOfClass:[NSArray class]] && originList1.count > 0) {
-                                          d1 = [NSURL URLWithString:originList1.firstObject];
+                                          d1 = [DYYYUtils originalImageURLFromURLList:originList1];
                                       }
                                   }
                               }
@@ -1511,7 +1511,7 @@
                                       NSURL *u1 = [NSURL URLWithString:us];
                                       if (![[u1.path.lowercaseString pathExtension] isEqualToString:@"image"]) { d1 = u1; break; }
                                   }
-                                  if (!d1 && imgM.urlList.count > 0) d1 = [NSURL URLWithString:imgM.urlList.firstObject];
+                                  if (!d1 && imgM.urlList.count > 0) d1 = [DYYYUtils originalImageURLFromURLList:imgM.urlList];
                               }
                               if (imgM.clipVideo != nil && d1 != nil) {
                                   NSURL *v1 = [imgM.clipVideo.playURL getDYYYSrcURLDownload];
