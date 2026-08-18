@@ -6476,8 +6476,14 @@ static NSHashTable *processedParentViews = nil;
                                                                                                                          }
                                                                                                                          if (curImg && curImg.clipVideo != nil) {
                                                                                                                              NSURL *vURL = [curImg.clipVideo.playURL getDYYYSrcURLDownload];
+                                                                                                                             if (!vURL && curImg.clipVideo.playURL.originURLList.count > 0) {
+                                                                                                                                 vURL = [NSURL URLWithString:curImg.clipVideo.playURL.originURLList.firstObject];
+                                                                                                                             }
                                                                                                                              if (vURL) {
-                                                                                                                                 [DYYYManager downloadMedia:vURL mediaType:MediaTypeVideo audio:nil completion:^(BOOL s) {}];
+                                                                                                                                 [DYYYUtils showToast:@"正在下载实况视频..."];
+                                                                                                                                 [DYYYManager downloadMedia:vURL mediaType:MediaTypeVideo audio:nil completion:^(BOOL s) {
+                                                                                                                                     if (!s) [DYYYUtils showToast:@"实况视频下载失败"];
+                                                                                                                                 }];
                                                                                                                              } else {
                                                                                                                                  [DYYYUtils showToast:@"无法获取实况视频地址"];
                                                                                                                              }
@@ -6494,15 +6500,86 @@ static NSHashTable *processedParentViews = nil;
                                                                                                                          for (AWEImageAlbumImageModel *imgM in awemeModel.albumImages) {
                                                                                                                              if (imgM.clipVideo != nil) {
                                                                                                                                  NSURL *vURL = [imgM.clipVideo.playURL getDYYYSrcURLDownload];
+                                                                                                                                 if (!vURL && imgM.clipVideo.playURL.originURLList.count > 0) {
+                                                                                                                                     vURL = [NSURL URLWithString:imgM.clipVideo.playURL.originURLList.firstObject];
+                                                                                                                                 }
                                                                                                                                  if (vURL) {
-                                                                                                                                     [DYYYManager downloadMedia:vURL mediaType:MediaTypeVideo audio:nil completion:^(BOOL s) {}];
+                                                                                                                                     [DYYYManager downloadMedia:vURL mediaType:MediaTypeVideo audio:nil completion:nil];
                                                                                                                                      liveCount++;
                                                                                                                                  }
                                                                                                                              }
                                                                                                                          }
                                                                                                                          if (liveCount == 0) [DYYYUtils showToast:@"没有找到实况视频"];
+                                                                                                                         else [DYYYUtils showToast:[NSString stringWithFormat:@"正在下载%ld个实况视频...", (long)liveCount]];
                                                                                                                      }];
                                                                                                                      [imgActions addObject:saveAllLiveAsVideo];
+                                                                                                                 }
+                                                                                                                 // 保存当前图片为视频
+                                                                                                                 {
+                                                                                                                     AWEUserSheetAction *saveCurImgAsVideo = [NSClassFromString(@"AWEUserSheetAction") actionWithTitle:@"保存当前图片为视频" imgName:nil handler:^{
+                                                                                                                         AWEImageAlbumImageModel *curImg = nil;
+                                                                                                                         if (awemeModel.currentImageIndex > 0 && awemeModel.currentImageIndex <= awemeModel.albumImages.count) {
+                                                                                                                             curImg = awemeModel.albumImages[awemeModel.currentImageIndex - 1];
+                                                                                                                         } else {
+                                                                                                                             curImg = awemeModel.albumImages.firstObject;
+                                                                                                                         }
+                                                                                                                         if (curImg) {
+                                                                                                                             NSURL *dlURL = nil;
+                                                                                                                             for (NSString *us in curImg.urlList) {
+                                                                                                                                 NSURL *u = [NSURL URLWithString:us];
+                                                                                                                                 if (![[u.path.lowercaseString pathExtension] isEqualToString:@"image"]) { dlURL = u; break; }
+                                                                                                                             }
+                                                                                                                             if (!dlURL && curImg.urlList.count > 0) dlURL = [NSURL URLWithString:curImg.urlList.firstObject];
+                                                                                                                             if (dlURL) {
+                                                                                                                                 NSMutableArray *imgArr = [NSMutableArray arrayWithObject:dlURL.absoluteString];
+                                                                                                                                 [DYYYManager createVideoFromMedia:imgArr livePhotos:@[] bgmURL:nil progress:nil completion:^(BOOL s, NSString *msg) {
+                                                                                                                                     if (!s) [DYYYUtils showToast:[NSString stringWithFormat:@"图片转视频失败: %@", msg]];
+                                                                                                                                 }];
+                                                                                                                             } else {
+                                                                                                                                 [DYYYUtils showToast:@"没有找到当前图片"];
+                                                                                                                             }
+                                                                                                                         } else {
+                                                                                                                             [DYYYUtils showToast:@"没有找到当前图片"];
+                                                                                                                         }
+                                                                                                                     }];
+                                                                                                                     [imgActions addObject:saveCurImgAsVideo];
+                                                                                                                 }
+                                                                                                                 // 保存全部图片为视频
+                                                                                                                 {
+                                                                                                                     AWEUserSheetAction *saveAllImgAsVideo = [NSClassFromString(@"AWEUserSheetAction") actionWithTitle:@"保存全部图片为视频" imgName:nil handler:^{
+                                                                                                                         NSMutableArray *imgURLs = [NSMutableArray array];
+                                                                                                                         NSMutableArray *lpArr = [NSMutableArray array];
+                                                                                                                         for (AWEImageAlbumImageModel *imgM in awemeModel.albumImages) {
+                                                                                                                             NSURL *dlURL = nil;
+                                                                                                                             for (NSString *us in imgM.urlList) {
+                                                                                                                                 NSURL *u = [NSURL URLWithString:us];
+                                                                                                                                 if (![[u.path.lowercaseString pathExtension] isEqualToString:@"image"]) { dlURL = u; break; }
+                                                                                                                             }
+                                                                                                                             if (!dlURL && imgM.urlList.count > 0) dlURL = [NSURL URLWithString:imgM.urlList.firstObject];
+                                                                                                                             if (imgM.clipVideo != nil && dlURL != nil) {
+                                                                                                                                 NSURL *vURL = [imgM.clipVideo.playURL getDYYYSrcURLDownload];
+                                                                                                                                 if (!vURL && imgM.clipVideo.playURL.originURLList.count > 0) {
+                                                                                                                                     vURL = [NSURL URLWithString:imgM.clipVideo.playURL.originURLList.firstObject];
+                                                                                                                                 }
+                                                                                                                                 if (vURL) [lpArr addObject:@{@"imageURL": dlURL.absoluteString, @"videoURL": vURL.absoluteString}];
+                                                                                                                                 else [imgURLs addObject:dlURL.absoluteString];
+                                                                                                                             } else if (dlURL != nil) {
+                                                                                                                                 [imgURLs addObject:dlURL.absoluteString];
+                                                                                                                             }
+                                                                                                                         }
+                                                                                                                         if (imgURLs.count > 0 || lpArr.count > 0) {
+                                                                                                                             NSString *bgmURL = nil;
+                                                                                                                             if (musicModel && musicModel.playURL && musicModel.playURL.originURLList.count > 0) {
+                                                                                                                                 bgmURL = musicModel.playURL.originURLList.firstObject;
+                                                                                                                             }
+                                                                                                                             [DYYYManager createVideoFromMedia:imgURLs livePhotos:lpArr bgmURL:bgmURL progress:nil completion:^(BOOL s, NSString *msg) {
+                                                                                                                                 if (!s) [DYYYUtils showToast:[NSString stringWithFormat:@"图片转视频失败: %@", msg]];
+                                                                                                                             }];
+                                                                                                                         } else {
+                                                                                                                             [DYYYUtils showToast:@"没有找到图片"];
+                                                                                                                         }
+                                                                                                                     }];
+                                                                                                                     [imgActions addObject:saveAllImgAsVideo];
                                                                                                                  }
                                                                                                                  [imgSheet setActions:imgActions];
                                                                                                                  [imgSheet show];
