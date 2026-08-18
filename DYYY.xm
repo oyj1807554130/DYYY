@@ -6455,7 +6455,6 @@ static NSHashTable *processedParentViews = nil;
                                                                                                                              } else if (dlURL != nil) {
                                                                                                                                  [imageURLs addObject:dlURL.absoluteString];
                                                                                                                              }
-                                                                                                                         }
                                                                                                                      }
                                                                                                                      if (livePhotos.count > 0) {
                                                                                                                          [DYYYManager downloadAllLivePhotosWithProgress:livePhotos progress:nil completion:^(NSInteger s, NSInteger t) {}];
