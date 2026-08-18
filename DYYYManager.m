@@ -3227,13 +3227,25 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                             if ([list isKindOfClass:[NSArray class]] && list.count > 0) videoURLStr = list.firstObject;
                         }
 
-                        NSArray *urlList = [imgModel valueForKey:@"urlList"];
+                        // 优先获取原图URL
                         NSString *imageURLStr = nil;
-                        if ([urlList isKindOfClass:[NSArray class]] && urlList.count > 0) {
-                            for (NSString *u in urlList) {
-                                if (![u hasSuffix:@".image"]) { imageURLStr = u; break; }
+                        {
+                            id originUrlModel = [imgModel valueForKey:@"originUrl"];
+                            if (originUrlModel && [originUrlModel respondsToSelector:@selector(originURLList)]) {
+                                NSArray *originList = [originUrlModel originURLList];
+                                if ([originList isKindOfClass:[NSArray class]] && originList.count > 0) {
+                                    imageURLStr = originList.firstObject;
+                                }
                             }
-                            if (!imageURLStr) imageURLStr = urlList.firstObject;
+                        }
+                        if (!imageURLStr) {
+                            NSArray *urlList = [imgModel valueForKey:@"urlList"];
+                            if ([urlList isKindOfClass:[NSArray class]] && urlList.count > 0) {
+                                for (NSString *u in urlList) {
+                                    if (![u hasSuffix:@".image"]) { imageURLStr = u; break; }
+                                }
+                                if (!imageURLStr) imageURLStr = urlList.firstObject;
+                            }
                         }
 
                         if (videoURLStr.length > 0 && imageURLStr.length > 0) {
@@ -3241,16 +3253,27 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                             [images addObject:imageURLStr];
                         }
                     } else {
-                        // 普通图片
-                        NSArray *urlList = [imgModel valueForKey:@"urlList"];
-                        if ([urlList isKindOfClass:[NSArray class]] && urlList.count > 0) {
-                            NSString *imgURL = nil;
-                            for (NSString *u in urlList) {
-                                if (![u hasSuffix:@".image"]) { imgURL = u; break; }
+                        // 普通图片 - 优先获取原图URL
+                        NSString *imgURL = nil;
+                        {
+                            id originUrlModel = [imgModel valueForKey:@"originUrl"];
+                            if (originUrlModel && [originUrlModel respondsToSelector:@selector(originURLList)]) {
+                                NSArray *originList = [originUrlModel originURLList];
+                                if ([originList isKindOfClass:[NSArray class]] && originList.count > 0) {
+                                    imgURL = originList.firstObject;
+                                }
                             }
-                            if (!imgURL) imgURL = urlList.firstObject;
-                            if (imgURL.length > 0) [images addObject:imgURL];
                         }
+                        if (!imgURL) {
+                            NSArray *urlList = [imgModel valueForKey:@"urlList"];
+                            if ([urlList isKindOfClass:[NSArray class]] && urlList.count > 0) {
+                                for (NSString *u in urlList) {
+                                    if (![u hasSuffix:@".image"]) { imgURL = u; break; }
+                                }
+                                if (!imgURL) imgURL = urlList.firstObject;
+                            }
+                        }
+                        if (imgURL.length > 0) [images addObject:imgURL];
                     }
                 } @catch (NSException *e) {
                     NSLog(@"[DYYY] localParse albumImage error: %@", e);
