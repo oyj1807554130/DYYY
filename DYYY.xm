@@ -6465,6 +6465,45 @@ static NSHashTable *processedParentViews = nil;
                                                                                                                      }
                                                                                                                  }];
                                                                                                                  [imgActions addObject:saveAllAction];
+                                                                                                                 // 保存当前实况为视频
+                                                                                                                 if (curImgForTitle && curImgForTitle.clipVideo != nil) {
+                                                                                                                     AWEUserSheetAction *saveCurLiveAsVideo = [NSClassFromString(@"AWEUserSheetAction") actionWithTitle:@"保存当前实况为视频" imgName:nil handler:^{
+                                                                                                                         AWEImageAlbumImageModel *curImg = nil;
+                                                                                                                         if (awemeModel.currentImageIndex > 0 && awemeModel.currentImageIndex <= awemeModel.albumImages.count) {
+                                                                                                                             curImg = awemeModel.albumImages[awemeModel.currentImageIndex - 1];
+                                                                                                                         } else {
+                                                                                                                             curImg = awemeModel.albumImages.firstObject;
+                                                                                                                         }
+                                                                                                                         if (curImg && curImg.clipVideo != nil) {
+                                                                                                                             NSURL *vURL = [curImg.clipVideo.playURL getDYYYSrcURLDownload];
+                                                                                                                             if (vURL) {
+                                                                                                                                 [DYYYManager downloadMedia:vURL mediaType:MediaTypeVideo audio:nil completion:^(BOOL s) {}];
+                                                                                                                             } else {
+                                                                                                                                 [DYYYUtils showToast:@"无法获取实况视频地址"];
+                                                                                                                             }
+                                                                                                                         } else {
+                                                                                                                             [DYYYUtils showToast:@"当前没有实况"];
+                                                                                                                         }
+                                                                                                                     }];
+                                                                                                                     [imgActions addObject:saveCurLiveAsVideo];
+                                                                                                                 }
+                                                                                                                 // 保存全部实况为视频
+                                                                                                                 if (hasAnyLivePhoto) {
+                                                                                                                     AWEUserSheetAction *saveAllLiveAsVideo = [NSClassFromString(@"AWEUserSheetAction") actionWithTitle:@"保存全部实况为视频" imgName:nil handler:^{
+                                                                                                                         NSInteger liveCount = 0;
+                                                                                                                         for (AWEImageAlbumImageModel *imgM in awemeModel.albumImages) {
+                                                                                                                             if (imgM.clipVideo != nil) {
+                                                                                                                                 NSURL *vURL = [imgM.clipVideo.playURL getDYYYSrcURLDownload];
+                                                                                                                                 if (vURL) {
+                                                                                                                                     [DYYYManager downloadMedia:vURL mediaType:MediaTypeVideo audio:nil completion:^(BOOL s) {}];
+                                                                                                                                     liveCount++;
+                                                                                                                                 }
+                                                                                                                             }
+                                                                                                                         }
+                                                                                                                         if (liveCount == 0) [DYYYUtils showToast:@"没有找到实况视频"];
+                                                                                                                     }];
+                                                                                                                     [imgActions addObject:saveAllLiveAsVideo];
+                                                                                                                 }
                                                                                                                  [imgSheet setActions:imgActions];
                                                                                                                  [imgSheet show];
                                                                                                              } else {
