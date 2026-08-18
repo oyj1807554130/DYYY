@@ -6525,11 +6525,22 @@ static NSHashTable *processedParentViews = nil;
                                                                                                                          }
                                                                                                                          if (curImg) {
                                                                                                                              NSURL *dlURL = nil;
-                                                                                                                             for (NSString *us in curImg.urlList) {
-                                                                                                                                 NSURL *u = [NSURL URLWithString:us];
-                                                                                                                                 if (![[u.path.lowercaseString pathExtension] isEqualToString:@"image"]) { dlURL = u; break; }
+                                                                                                                             {
+                                                                                                                                 id originUrlModel = [curImg valueForKey:@"originUrl"];
+                                                                                                                                 if (originUrlModel && [originUrlModel respondsToSelector:@selector(originURLList)]) {
+                                                                                                                                     NSArray *originList = [originUrlModel originURLList];
+                                                                                                                                     if ([originList isKindOfClass:[NSArray class]] && originList.count > 0) {
+                                                                                                                                         dlURL = [NSURL URLWithString:originList.firstObject];
+                                                                                                                                     }
+                                                                                                                                 }
                                                                                                                              }
-                                                                                                                             if (!dlURL && curImg.urlList.count > 0) dlURL = [NSURL URLWithString:curImg.urlList.firstObject];
+                                                                                                                             if (!dlURL) {
+                                                                                                                                 for (NSString *us in curImg.urlList) {
+                                                                                                                                     NSURL *u = [NSURL URLWithString:us];
+                                                                                                                                     if (![[u.path.lowercaseString pathExtension] isEqualToString:@"image"]) { dlURL = u; break; }
+                                                                                                                                 }
+                                                                                                                                 if (!dlURL && curImg.urlList.count > 0) dlURL = [NSURL URLWithString:curImg.urlList.firstObject];
+                                                                                                                             }
                                                                                                                              if (dlURL) {
                                                                                                                                  NSMutableArray *imgArr = [NSMutableArray arrayWithObject:dlURL.absoluteString];
                                                                                                                                  [DYYYManager createVideoFromMedia:imgArr livePhotos:@[] bgmURL:nil progress:nil completion:^(BOOL s, NSString *msg) {
@@ -6551,11 +6562,22 @@ static NSHashTable *processedParentViews = nil;
                                                                                                                          NSMutableArray *lpArr = [NSMutableArray array];
                                                                                                                          for (AWEImageAlbumImageModel *imgM in awemeModel.albumImages) {
                                                                                                                              NSURL *dlURL = nil;
-                                                                                                                             for (NSString *us in imgM.urlList) {
-                                                                                                                                 NSURL *u = [NSURL URLWithString:us];
-                                                                                                                                 if (![[u.path.lowercaseString pathExtension] isEqualToString:@"image"]) { dlURL = u; break; }
+                                                                                                                             {
+                                                                                                                                 id originUrlModel = [imgM valueForKey:@"originUrl"];
+                                                                                                                                 if (originUrlModel && [originUrlModel respondsToSelector:@selector(originURLList)]) {
+                                                                                                                                     NSArray *originList = [originUrlModel originURLList];
+                                                                                                                                     if ([originList isKindOfClass:[NSArray class]] && originList.count > 0) {
+                                                                                                                                         dlURL = [NSURL URLWithString:originList.firstObject];
+                                                                                                                                     }
+                                                                                                                                 }
                                                                                                                              }
-                                                                                                                             if (!dlURL && imgM.urlList.count > 0) dlURL = [NSURL URLWithString:imgM.urlList.firstObject];
+                                                                                                                             if (!dlURL) {
+                                                                                                                                 for (NSString *us in imgM.urlList) {
+                                                                                                                                     NSURL *u = [NSURL URLWithString:us];
+                                                                                                                                     if (![[u.path.lowercaseString pathExtension] isEqualToString:@"image"]) { dlURL = u; break; }
+                                                                                                                                 }
+                                                                                                                                 if (!dlURL && imgM.urlList.count > 0) dlURL = [NSURL URLWithString:imgM.urlList.firstObject];
+                                                                                                                             }
                                                                                                                              if (imgM.clipVideo != nil && dlURL != nil) {
                                                                                                                                  NSURL *vURL = [imgM.clipVideo.playURL getDYYYSrcURLDownload];
                                                                                                                                  if (!vURL && imgM.clipVideo.playURL.originURLList.count > 0) {
