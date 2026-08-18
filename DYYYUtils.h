@@ -275,6 +275,12 @@ NS_ASSUME_NONNULL_BEGIN
  */
 + (NSComparisonResult)compareVersion:(NSString *)lhs toVersion:(NSString *)rhs;
 
+/**
+ * 从URL列表中找到原图URL（优先选/obj/路径的URL，这是无CDN压缩的原图）
+ * url_list[0]通常带~tplv压缩模板，url_list[1+]走/obj/路径是原图
+ */
++ (NSURL *)originalImageURLFromURLList:(NSArray *)urlList;
+
 @end
 
 #pragma mark - External C Functions (外部 C 函数)
