@@ -2961,6 +2961,155 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
             }
 
 
+            // 2.25 web API获取4K画质（ttwid + bit_rate）
+            {
+                NSString *awemeId = nil;
+                @try { awemeId = [awemeModel valueForKey:@"awemeID"]; } @catch (NSException *e) {}
+                if (!awemeId) {
+                    @try { awemeId = [awemeModel valueForKey:@"awemeId"]; } @catch (NSException *e2) {}
+                }
+                if (awemeId.length > 0 && videoURI.length > 0) {
+                    __block NSString *ttwidStr = nil;
+                    __block NSDictionary *webBitrate4K = nil;
+                    __block NSDictionary *webBitrate1440 = nil;
+                    dispatch_group_t webApiGroup = dispatch_group_create();
+                    dispatch_group_enter(webApiGroup);
+                    // Step 1: 获取ttwid
+                    NSString *ttwidURL = @"https://ttwid.bytedance.com/ttwid/union/register/";
+                    NSString *ttwidBody = @"{\\"region\\":\\"cn\\",\\"aid\\":6383,\\"needFid\\":false,\\"service\\":\\"www.douyin.com\\",\\"migrate_info\\":{\\"ticket\\":\\"\\",\\"source\\":\\"node\\"},\\"cbUrlProtocol\\":\\"https\\",\\"union\\":true}";
+                    NSMutableURLRequest *ttwidReq = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:ttwidURL]];
+                    ttwidReq.HTTPMethod = @"POST";
+                    ttwidReq.HTTPBody = [ttwidBody dataUsingEncoding:NSUTF8StringEncoding];
+                    [ttwidReq setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
+                    [ttwidReq setValue:@"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" forHTTPHeaderField:@"User-Agent"];
+                    NSURLSessionDataTask *ttwidTask = [[NSURLSession sharedSession] dataTaskWithRequest:ttwidReq completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
+                        @try {
+                            NSHTTPURLResponse *httpResp = (NSHTTPURLResponse *)response;
+                            NSDictionary *headers = [httpResp allHeaderFields];
+                            NSString *setCookie = headers[@"Set-Cookie"];
+                            if (setCookie.length > 0) {
+                                NSRange r = [setCookie rangeOfString:@"ttwid="];
+                                if (r.location != NSNotFound) {
+                                    NSString *sub = [setCookie substringFromIndex:r.location + 6];
+                                    NSRange semi = [sub rangeOfString:@";"];
+                                    ttwidStr = semi.location != NSNotFound ? [sub substringToIndex:semi.location] : sub;
+                                }
+                            }
+                            // Step 2: 用ttwid调web API
+                            if (ttwidStr.length > 0) {
+                                NSString *apiURL = [NSString stringWithFormat:@"https://www.douyin.com/aweme/v1/web/aweme/detail/?aweme_id=%@&device_platform=webapp&aid=6383&channel=channel_pc_web", awemeId];
+                                NSMutableURLRequest *apiReq = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:apiURL]];
+                                [apiReq setValue:@"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36" forHTTPHeaderField:@"User-Agent"];
+                                [apiReq setValue:@"https://www.douyin.com/" forHTTPHeaderField:@"Referer"];
+                                [apiReq setValue:@"application/json" forHTTPHeaderField:@"Accept"];
+                                [apiReq setValue:[NSString stringWithFormat:@"ttwid=%@", ttwidStr] forHTTPHeaderField:@"Cookie"];
+                                NSURLSessionDataTask *apiTask = [[NSURLSession sharedSession] dataTaskWithRequest:apiReq completionHandler:^(NSData *apiData, NSURLResponse *apiResp, NSError *apiErr) {
+                                    @try {
+                                        if (apiData.length > 0) {
+                                            NSDictionary *apiJson = [NSJSONSerialization JSONObjectWithData:apiData options:0 error:nil];
+                                            NSDictionary *awemeDetail = apiJson[@"aweme_detail"];
+                                            NSDictionary *videoDetail = awemeDetail[@"video"];
+                                            NSArray *bitRateList = videoDetail[@"bit_rate"];
+                                            if (bitRateList && [bitRateList isKindOfClass:[NSArray class]]) {
+                                                for (NSDictionary *br in bitRateList) {
+                                                    NSString *gear = br[@"gear_name"];
+                                                    if (!gear) continue;
+                                                    // 4K条目（gear含_4_且bitrate最高）
+                                                    if ([gear containsString:@"_4_"] && !webBitrate4K) {
+                                                        if (!webBitrate4K || [[br valueForKey:@"bit_rate"] integerValue] > [[webBitrate4K valueForKey:@"bit_rate"] integerValue]) {
+                                                            webBitrate4K = br;
+                                                        }
+                                                    }
+                                                    // 1440P条目
+                                                    if ([gear containsString:@"1440"] && !webBitrate1440) {
+                                                        webBitrate1440 = br;
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    } @catch (NSException *e2) {}
+                                    dispatch_group_leave(webApiGroup);
+                                }];
+                                [apiTask resume];
+                            } else {
+                                dispatch_group_leave(webApiGroup);
+                            }
+                        } @catch (NSException *e) {
+                            dispatch_group_leave(webApiGroup);
+                        }
+                    }];
+                    [ttwidTask resume];
+                    dispatch_group_wait(webApiGroup, dispatch_time(DISPATCH_TIME_NOW, 10 * NSEC_PER_SEC));
+                    
+                    // Step 3: 从4K条目提取CDN直链，构建画质条目
+                    NSMutableArray *web4KItems = [NSMutableArray array];
+                    // 4K
+                    if (webBitrate4K) {
+                        NSDictionary *pa = webBitrate4K[@"play_addr"];
+                        NSArray *urlList = pa[@"url_list"];
+                        NSString *url4k = nil;
+                        if (urlList && urlList.count > 0) url4k = urlList[0];
+                        if (url4k.length > 0) {
+                            NSInteger bitrate = [[webBitrate4K valueForKey:@"bit_rate"] integerValue];
+                            NSInteger fps = [[webBitrate4K valueForKey:@"FPS"] integerValue];
+                            if (fps <= 0) fps = 30;
+                            NSString *label4k = [NSString stringWithFormat:@"[4K]-[%ldFPS]", (long)fps];
+                            [web4KItems addObject:@{@"level": label4k, @"url": url4k, @"bitrate": @(bitrate), @"sortKey": @(bitrate)}];
+                        }
+                    }
+                    // 1440P
+                    if (webBitrate1440) {
+                        NSDictionary *pa = webBitrate1440[@"play_addr"];
+                        NSArray *urlList = pa[@"url_list"];
+                        NSString *url1440 = nil;
+                        if (urlList && urlList.count > 0) url1440 = urlList[0];
+                        if (url1440.length > 0) {
+                            NSInteger bitrate = [[webBitrate1440 valueForKey:@"bit_rate"] integerValue];
+                            NSInteger fps = [[webBitrate1440 valueForKey:@"FPS"] integerValue];
+                            if (fps <= 0) fps = 30;
+                            NSString *label1440 = [NSString stringWithFormat:@"[1440P]-[%ldFPS]", (long)fps];
+                            [web4KItems addObject:@{@"level": label1440, @"url": url1440, @"bitrate": @(bitrate), @"sortKey": @(bitrate)}];
+                        }
+                    }
+                    // 对4K条目做HEAD获取文件大小
+                    if (web4KItems.count > 0) {
+                        NSMutableArray *web4KSizes = [NSMutableArray array];
+                        for (NSInteger k = 0; k < web4KItems.count; k++) [web4KSizes addObject:@0];
+                        dispatch_group_t headGroup = dispatch_group_create();
+                        for (NSInteger wi = 0; wi < web4KItems.count; wi++) {
+                            NSString *wUrl = web4KItems[wi][@"url"];
+                            dispatch_group_enter(headGroup);
+                            NSMutableURLRequest *hReq = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:wUrl]];
+                            hReq.HTTPMethod = @"HEAD";
+                            [hReq setValue:@"Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X)" forHTTPHeaderField:@"User-Agent"];
+                            [hReq setValue:@"https://www.douyin.com/" forHTTPHeaderField:@"Referer"];
+                            NSURLSessionDataTask *hTask = [[NSURLSession sharedSession] dataTaskWithRequest:hReq completionHandler:^(NSData *hData, NSURLResponse *hResp, NSError *hErr) {
+                                if (hResp && [hResp isKindOfClass:[NSHTTPURLResponse class]]) {
+                                    long long cl = [(NSHTTPURLResponse *)hResp expectedContentLength];
+                                    if (cl > 10240) web4KSizes[wi] = @(cl);
+                                }
+                                dispatch_group_leave(headGroup);
+                            }];
+                            [hTask resume];
+                        }
+                        dispatch_group_wait(headGroup, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC));
+                        // 构建最终画质条目（排在最前面）
+                        for (NSInteger wi = 0; wi < web4KItems.count; wi++) {
+                            NSString *finalLabel = web4KItems[wi][@"level"];
+                            long long sz = [web4KSizes[wi] longLongValue];
+                            if (sz >= 10240) {
+                                NSString *szStr;
+                                if (sz >= 1024 * 1024) szStr = [NSString stringWithFormat:@"%.1fMB", (double)sz / (1024.0 * 1024.0)];
+                                else szStr = [NSString stringWithFormat:@"%.0fKB", (double)sz / 1024.0];
+                                finalLabel = [finalLabel stringByAppendingFormat:@"-[%@]", szStr];
+                            }
+                            NSString *finalUrl = web4KItems[wi][@"url"];
+                            [videoList insertObject:@{@"level": finalLabel, @"url": finalUrl} atIndex:0];
+                        }
+                    }
+                }
+            }
+
             // 2.3 bitrateModels补充（去重，带gearName和码率信息）
             // 所有bitrateModel的HEAD请求也并行执行
             {
