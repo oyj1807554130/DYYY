@@ -2927,7 +2927,9 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                     long long size = [fileSizes[i] longLongValue];
                     if (size >= 10240) {
                         NSString *sizeStr;
-                        if (size >= 1024 * 1024) {
+                        if (size >= 1024 * 1024 * 1024) {
+                            sizeStr = [NSString stringWithFormat:@"%.2fGB", (double)size / (1024.0 * 1024.0 * 1024.0)];
+                        } else if (size >= 1024 * 1024) {
                             sizeStr = [NSString stringWithFormat:@"%.1fMB", (double)size / (1024.0 * 1024.0)];
                         } else if (size >= 1024) {
                             sizeStr = [NSString stringWithFormat:@"%.0fKB", (double)size / 1024.0];
@@ -3099,7 +3101,8 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                             long long sz = [web4KSizes[wi] longLongValue];
                             if (sz >= 10240) {
                                 NSString *szStr;
-                                if (sz >= 1024 * 1024) szStr = [NSString stringWithFormat:@"%.1fMB", (double)sz / (1024.0 * 1024.0)];
+                                if (sz >= 1024 * 1024 * 1024) szStr = [NSString stringWithFormat:@"%.2fGB", (double)sz / (1024.0 * 1024.0 * 1024.0)];
+                                else if (sz >= 1024 * 1024) szStr = [NSString stringWithFormat:@"%.1fMB", (double)sz / (1024.0 * 1024.0)];
                                 else szStr = [NSString stringWithFormat:@"%.0fKB", (double)sz / 1024.0];
                                 finalLabel = [finalLabel stringByAppendingFormat:@"-[%@]", szStr];
                             }
@@ -3323,7 +3326,9 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                             }
                             NSString *sizeStr = @"";
                             if (headSize >= 10240) {
-                                if (headSize >= 1024 * 1024) {
+                                if (headSize >= 1024 * 1024 * 1024) {
+                                    sizeStr = [NSString stringWithFormat:@"%.2fGB", (double)headSize / (1024.0 * 1024.0 * 1024.0)];
+                                } else if (headSize >= 1024 * 1024) {
                                     sizeStr = [NSString stringWithFormat:@"%.1fMB", (double)headSize / (1024.0 * 1024.0)];
                                 } else if (headSize >= 1024) {
                                     sizeStr = [NSString stringWithFormat:@"%.0fKB", (double)headSize / 1024.0];
