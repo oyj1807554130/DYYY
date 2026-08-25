@@ -3305,7 +3305,13 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                             }
                             NSString *qualityLabel;
                             if (sameAsOriginal) {
-                                qualityLabel = @"[原画lite]";
+                                if (bitrate > 0) {
+                                    qualityLabel = [NSString stringWithFormat:@"[%ldkbps]", (long)(bitrate/1000)];
+                                } else if (displayName.length > 0) {
+                                    qualityLabel = [NSString stringWithFormat:@"[%@]", displayName];
+                                } else {
+                                    qualityLabel = @"[原画lite]";
+                                }
                             } else if (displayName.length > 0) {
                                 qualityLabel = [NSString stringWithFormat:@"[%@]", displayName];
                             } else {
