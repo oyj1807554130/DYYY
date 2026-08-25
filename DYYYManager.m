@@ -2976,7 +2976,7 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                     dispatch_group_enter(webApiGroup);
                     // Step 1: 获取ttwid
                     NSString *ttwidURL = @"https://ttwid.bytedance.com/ttwid/union/register/";
-                    NSString *ttwidBody = @"{\\"region\\":\\"cn\\",\\"aid\\":6383,\\"needFid\\":false,\\"service\\":\\"www.douyin.com\\",\\"migrate_info\\":{\\"ticket\\":\\"\\",\\"source\\":\\"node\\"},\\"cbUrlProtocol\\":\\"https\\",\\"union\\":true}";
+                    NSString *ttwidBody = @"{\"region\":\"cn\",\"aid\":6383,\"needFid\":false,\"service\":\"www.douyin.com\",\"migrate_info\":{\"ticket\":\"\",\"source\":\"node\"},\"cbUrlProtocol\":\"https\",\"union\":true}";
                     NSMutableURLRequest *ttwidReq = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:ttwidURL]];
                     ttwidReq.HTTPMethod = @"POST";
                     ttwidReq.HTTPBody = [ttwidBody dataUsingEncoding:NSUTF8StringEncoding];
