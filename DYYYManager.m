@@ -3501,7 +3501,10 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
     NSString *awemeId = nil;
     @try { awemeId = [awemeModel valueForKey:@"awemeID"]; } @catch (NSException *e) {}
     if (!awemeId || awemeId.length == 0) {
-        dispatch_async(dispatch_get_main_queue(), ^{ [DYYYUtils showToast:@"本地解析: 无法获取awemeId"]; });
+        @try { awemeId = [awemeModel valueForKey:@"awemeId"]; } @catch (NSException *e2) {}
+    }
+    if (!awemeId || awemeId.length == 0) {
+        dispatch_async(dispatch_get_main_queue(), ^{ [DYYYUtils showToast:@"本地解析失败: 无法获取awemeId"]; });
         if (completion) completion(nil);
         return;
     }
@@ -3545,7 +3548,7 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
         dispatch_semaphore_wait(ttwidSem, dispatch_time(DISPATCH_TIME_NOW, 10 * NSEC_PER_SEC));
 
         if (!ttwidStr || ttwidStr.length == 0) {
-            dispatch_async(dispatch_get_main_queue(), ^{ [DYYYUtils showToast:@"本地解析: ttwid注册失败"]; });
+            dispatch_async(dispatch_get_main_queue(), ^{ [DYYYUtils showToast:@"本地解析失败: ttwid注册失败"]; });
             if (completion) completion(nil);
             return;
         }
@@ -3580,9 +3583,63 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
         dispatch_semaphore_wait(apiSem, dispatch_time(DISPATCH_TIME_NOW, 15 * NSEC_PER_SEC));
 
         if (!awemeDetail || ![awemeDetail isKindOfClass:[NSDictionary class]]) {
-            dispatch_async(dispatch_get_main_queue(), ^{ [DYYYUtils showToast:@"本地解析: web API返回空"]; });
-            if (completion) completion(nil);
-            return;
+            // ttwid可能过期，重试一次（同JS逻辑）
+            ttwidStr = nil;
+            dispatch_semaphore_t ttwidSem2 = dispatch_semaphore_create(0);
+            NSURLSessionDataTask *ttwidTask2 = [[NSURLSession sharedSession] dataTaskWithRequest:ttwidReq completionHandler:^(NSData *d2, NSURLResponse *r2, NSError *e2) {
+                @try {
+                    NSHTTPURLResponse *hr2 = (NSHTTPURLResponse *)r2;
+                    NSDictionary *h2 = [hr2 allHeaderFields];
+                    NSString *sc2 = h2[@"Set-Cookie"];
+                    if (sc2.length > 0) {
+                        NSRange r2v = [sc2 rangeOfString:@"ttwid="];
+                        if (r2v.location != NSNotFound) {
+                            NSString *sub2 = [sc2 substringFromIndex:r2v.location + 6];
+                            NSRange semi2 = [sub2 rangeOfString:@";"];
+                            ttwidStr = semi2.location != NSNotFound ? [sub2 substringToIndex:semi2.location] : sub2;
+                        }
+                    }
+                    if (!ttwidStr || ttwidStr.length == 0) {
+                        if (d2.length > 0) {
+                            NSDictionary *j2 = [NSJSONSerialization JSONObjectWithData:d2 options:0 error:nil];
+                            if ([j2 isKindOfClass:[NSDictionary class]]) {
+                                NSString *bt2 = j2[@"ttwid"];
+                                if (bt2.length > 0) ttwidStr = bt2;
+                            }
+                        }
+                    }
+                } @catch (NSException *ex2) {}
+                dispatch_semaphore_signal(ttwidSem2);
+            }];
+            [ttwidTask2 resume];
+            dispatch_semaphore_wait(ttwidSem2, dispatch_time(DISPATCH_TIME_NOW, 10 * NSEC_PER_SEC));
+
+            if (ttwidStr.length > 0) {
+                NSString *retryCookie = [NSString stringWithFormat:@"ttwid=%@", ttwidStr];
+                [apiReq setValue:retryCookie forHTTPHeaderField:@"Cookie"];
+                dispatch_semaphore_t apiSem2 = dispatch_semaphore_create(0);
+                awemeDetail = nil;
+                NSURLSessionDataTask *apiTask2 = [[NSURLSession sharedSession] dataTaskWithRequest:apiReq completionHandler:^(NSData *aD2, NSURLResponse *aR2, NSError *aE2) {
+                    @try {
+                        if (aD2.length > 0) {
+                            NSDictionary *aJ2 = [NSJSONSerialization JSONObjectWithData:aD2 options:0 error:nil];
+                            if ([aJ2 isKindOfClass:[NSDictionary class]]) {
+                                NSInteger sc2 = [aJ2[@"status_code"] integerValue];
+                                if (sc2 == 0) awemeDetail = aJ2[@"aweme_detail"];
+                            }
+                        }
+                    } @catch (NSException *ex3) {}
+                    dispatch_semaphore_signal(apiSem2);
+                }];
+                [apiTask2 resume];
+                dispatch_semaphore_wait(apiSem2, dispatch_time(DISPATCH_TIME_NOW, 15 * NSEC_PER_SEC));
+            }
+
+            if (!awemeDetail || ![awemeDetail isKindOfClass:[NSDictionary class]]) {
+                dispatch_async(dispatch_get_main_queue(), ^{ [DYYYUtils showToast:@"本地解析失败: web API返回空"]; });
+                if (completion) completion(nil);
+                return;
+            }
         }
 
         // Step 3: bit_rate全画质解析（JS规则）

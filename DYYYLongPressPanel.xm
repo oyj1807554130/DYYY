@@ -631,7 +631,7 @@
                   if (localData) {
                       [DYYYManager handleVideoData:localData];
                   } else {
-                      [DYYYUtils showToast:@"本地解析失败"];
+                      ;
                   }
               });
           }];
@@ -1707,7 +1707,7 @@
                   if (localData) {
                       [DYYYManager handleVideoData:localData];
                   } else {
-                      [DYYYUtils showToast:@"本地解析失败"];
+                      ;
                   }
               });
           }];
