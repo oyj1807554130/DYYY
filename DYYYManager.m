@@ -3571,6 +3571,7 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
         }
 
         if (!awemeId || awemeId.length == 0) {
+            dispatch_async(dispatch_get_main_queue(), ^{ [DYYYUtils showToast:[NSString stringWithFormat:@"本地解析: 无法提取awemeId, link=%@", [shareLink substringToIndex:(shareLink.length > 50 ? 50 : shareLink.length)]]]; });
             if (completion) completion(nil);
             return;
         }
@@ -3615,6 +3616,7 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
         dispatch_semaphore_wait(ttwidSem, dispatch_time(DISPATCH_TIME_NOW, 10 * NSEC_PER_SEC));
 
         if (!ttwidStr || ttwidStr.length == 0) {
+            dispatch_async(dispatch_get_main_queue(), ^{ [DYYYUtils showToast:@"本地解析: ttwid注册失败"]; });
             if (completion) completion(nil);
             return;
         }
@@ -3651,6 +3653,7 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
         dispatch_semaphore_wait(apiSem, dispatch_time(DISPATCH_TIME_NOW, 15 * NSEC_PER_SEC));
 
         if (!awemeDetail || ![awemeDetail isKindOfClass:[NSDictionary class]]) {
+            dispatch_async(dispatch_get_main_queue(), ^{ [DYYYUtils showToast:@"本地解析: web API返回空"]; });
             if (completion) completion(nil);
             return;
         }
