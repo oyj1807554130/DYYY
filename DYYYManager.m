@@ -3513,7 +3513,7 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
         dispatch_async(dispatch_get_main_queue(), ^{ [DYYYUtils showToast:[NSString stringWithFormat:@"本地解析(1/3) 获取ttwid... awemeId=%@", awemeId]]; });
         __block NSString *ttwidStr = nil;
         NSString *ttwidURL = @"https://ttwid.bytedance.com/ttwid/union/register/";
-        NSString *ttwidBody = @"{\\\"region\\\":\\\"cn\\\",\\\"aid\\\":6383,\\\"needFid\\\":false,\\\"service\\\":\\\"www.douyin.com\\\",\\\"migrate_info\\\":{\\\"ticket\\\":\\\"\\\",\\\"source\\\":\\\"node\\\"},\\\"cbUrlProtocol\\\":\\\"https\\\",\\\"union\\\":true}";
+        NSString *ttwidBody = @"{\"region\":\"cn\",\"aid\":6383,\"needFid\":false,\"service\":\"www.douyin.com\",\"migrate_info\":{\"ticket\":\"\",\"source\":\"node\"},\"cbUrlProtocol\":\"https\",\"union\":true}";
         NSMutableURLRequest *ttwidReq = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:ttwidURL]];
         ttwidReq.HTTPMethod = @"POST";
         ttwidReq.HTTPBody = [ttwidBody dataUsingEncoding:NSUTF8StringEncoding];
@@ -3672,7 +3672,7 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
             NSString *qCode = nil;
             if ([meta containsString:@"4k"] || [gearName containsString:@"_4_"]) qCode = @"2160p";
             else if ([meta containsString:@"1440p"] || [gearName containsString:@"1440"]) qCode = @"1440p";
-            else if ([meta containsString:@"1080p"] || [gearName containsString:@"1080_1"] || [gearName containsString:@"1080_2"]) qCode = @"1080p";
+            else if ([meta containsString:@"1080p"] || [gearName containsString:@"1080_0"] || [gearName containsString:@"1080_1"] || [gearName containsString:@"1080_2"]) qCode = @"1080p";
             else if ([meta containsString:@"720p"] || [gearName containsString:@"720"]) qCode = @"720p";
             else if ([meta containsString:@"540p"] || [gearName containsString:@"540"]) qCode = @"540p";
             if (!qCode) continue;
@@ -4013,7 +4013,7 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
             NSString *qCode = nil;
             if ([meta containsString:@"4k"] || [gearName containsString:@"_4_"]) qCode = @"2160p";
             else if ([meta containsString:@"1440p"] || [gearName containsString:@"1440"]) qCode = @"1440p";
-            else if ([meta containsString:@"1080p"] || [gearName containsString:@"1080_1"] || [gearName containsString:@"1080_2"]) qCode = @"1080p";
+            else if ([meta containsString:@"1080p"] || [gearName containsString:@"1080_0"] || [gearName containsString:@"1080_1"] || [gearName containsString:@"1080_2"]) qCode = @"1080p";
             else if ([meta containsString:@"720p"] || [gearName containsString:@"720"]) qCode = @"720p";
             else if ([meta containsString:@"540p"] || [gearName containsString:@"540"]) qCode = @"540p";
             if (!qCode) continue;
