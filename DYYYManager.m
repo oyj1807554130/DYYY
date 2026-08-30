@@ -3718,7 +3718,7 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
         }
         if (videoList.count == 0) {
             NSArray *fallbackList = videoObj[@"play_addr"][@"url_list"];
-            if ([fallbackList isKindOfClass:[NSArray class]] && fallbackList.count > 0) videoList addObject:@{@"level": @"[原画【最高画质]]-[30FPS]", @"url": fallbackList[0]};
+            if ([fallbackList isKindOfClass:[NSArray class]] && fallbackList.count > 0) [videoList addObject:@{@"level": @"[原画【最高画质]]-[30FPS]", @"url": fallbackList[0]}];
         }
         if (isImagePost) {
             for (NSDictionary *img in rawImages) {
