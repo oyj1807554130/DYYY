@@ -611,7 +611,7 @@
     }
 
     // 本地解析功能
-    if (DYYYGetBool(@"DYYYLocalParseEnabled") || ![[NSUserDefaults standardUserDefaults] objectForKey:@"DYYYLocalParseEnabled"]) {
+    if (enableApiDownload) {
         AWELongPressPanelBaseViewModel *localParseVM = [[%c(AWELongPressPanelBaseViewModel) alloc] init];
         localParseVM.awemeModel = self.awemeModel;
         localParseVM.actionType = 680;
@@ -1692,7 +1692,7 @@
     }
 
     // 本地解析功能
-    if (DYYYGetBool(@"DYYYLocalParseEnabled") || ![[NSUserDefaults standardUserDefaults] objectForKey:@"DYYYLocalParseEnabled"]) {
+    if (enableApiDownload) {
         AWELongPressPanelBaseViewModel *localParseVM = [[%c(AWELongPressPanelBaseViewModel) alloc] init];
         localParseVM.awemeModel = self.awemeModel;
         localParseVM.actionType = 680;
