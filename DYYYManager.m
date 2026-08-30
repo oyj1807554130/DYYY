@@ -3510,6 +3510,7 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
     }
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         // Step 1: 注册ttwid
+        dispatch_async(dispatch_get_main_queue(), ^{ [DYYYUtils showToast:[NSString stringWithFormat:@"本地解析(1/3) 获取ttwid... awemeId=%@", awemeId]]; });
         __block NSString *ttwidStr = nil;
         NSString *ttwidURL = @"https://ttwid.bytedance.com/ttwid/union/register/";
         NSString *ttwidBody = @"{\\\"region\\\":\\\"cn\\\",\\\"aid\\\":6383,\\\"needFid\\\":false,\\\"service\\\":\\\"www.douyin.com\\\",\\\"migrate_info\\\":{\\\"ticket\\\":\\\"\\\",\\\"source\\\":\\\"node\\\"},\\\"cbUrlProtocol\\\":\\\"https\\\",\\\"union\\\":true}";
@@ -3554,6 +3555,7 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
         }
 
         // Step 2: web API
+        dispatch_async(dispatch_get_main_queue(), ^{ [DYYYUtils showToast:@"本地解析(2/3) 获取视频详情..."]; });
         __block NSDictionary *awemeDetail = nil;
         NSString *apiURL = [NSString stringWithFormat:@"https://www.douyin.com/aweme/v1/web/aweme/detail/?aweme_id=%@&device_platform=webapp&aid=6383&channel=channel_pc_web&update_version_code=170400&pc_client_type=1&version_code=190500&version_name=19.5.0&cookie_enabled=true&screen_width=2560&screen_height=1440&browser_language=zh-CN&browser_platform=Win32&browser_name=Chrome&browser_version=150.0.0.0&browser_online=true&engine_name=Blink&engine_version=150.0.0.0&os_name=Windows&os_version=10&cpu_core_num=12&device_memory=8&platform=PC&downlink=4.75&effective_type=4g&round_trip_time=150", awemeId];
         NSMutableURLRequest *apiReq = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:apiURL]];
@@ -3643,6 +3645,7 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
         }
 
         // Step 3: bit_rate全画质解析（JS规则）
+        dispatch_async(dispatch_get_main_queue(), ^{ [DYYYUtils showToast:@"本地解析(3/3) 解析画质..."]; });
         NSDictionary *videoObj = awemeDetail[@"video"] ?: @{};
         NSDictionary *author = awemeDetail[@"author"] ?: @{};
         NSDictionary *music = awemeDetail[@"music"] ?: @{};
