@@ -3755,7 +3755,7 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                                     if ([host containsString:@"douyinvod.com"] || [host containsString:@"365yg.com"] || [host containsString:@"ixigua.com"] || [host containsString:@"pstatp.com"] || [host containsString:@"snssdk.com"]) {
                                         NSRange webRange = [loc rangeOfString:@"-web."];
                                         if (webRange.location != NSNotFound) {
-                                            loc = [loc stringByReplacingOccurrencesOfString:@"-web." withString:@"." options:nil range:webRange];
+                                            loc = [loc stringByReplacingOccurrencesOfString:@"-web." withString:@"." options:0 range:webRange];
                                         }
                                         cdnURL = loc;
                                         cdnSize = [httpResp expectedContentLength];
