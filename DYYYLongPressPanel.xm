@@ -610,6 +610,44 @@
         [viewModels addObject:apiDownload3];
     }
 
+    // 本地解析功能
+    if (DYYYGetBool(@"DYYYLocalParseEnabled") || ![[NSUserDefaults standardUserDefaults] objectForKey:@"DYYYLocalParseEnabled"]) {
+        AWELongPressPanelBaseViewModel *localParseVM = [[%c(AWELongPressPanelBaseViewModel) alloc] init];
+        localParseVM.awemeModel = self.awemeModel;
+        localParseVM.actionType = 680;
+        localParseVM.duxIconName = @"ic_cloudarrowdown_outlined_20";
+        localParseVM.describeString = @"本地解析";
+        AWEAwemeModel *capturedAwemeModelLP = self.awemeModel;
+        NSInteger capturedImageIndexLP = self.awemeModel.currentImageIndex;
+        NSString *capturedShareLinkLP = [self.awemeModel valueForKey:@"shareURL"];
+        localParseVM.action = ^{
+          @try {
+          [DYYYManager storeMetadataFromAwemeModel:capturedAwemeModelLP];
+          [DYYYManager shared].currentImageIndex = capturedImageIndexLP;
+          if (capturedShareLinkLP.length == 0) {
+              [DYYYUtils showToast:@"无法获取分享链接"];
+              return;
+          }
+          AWELongPressPanelManager *panelManagerLP = [%c(AWELongPressPanelManager) shareInstance];
+          [panelManagerLP dismissWithAnimation:YES completion:nil];
+          [DYYYUtils showToast:@"正在本地解析..."];
+          [DYYYManager localParseFromShareLink:capturedShareLinkLP completion:^(NSDictionary *localData) {
+              dispatch_async(dispatch_get_main_queue(), ^{
+                  if (localData) {
+                      [DYYYManager handleVideoData:localData];
+                  } else {
+                      [DYYYUtils showToast:@"本地解析失败"];
+                  }
+              });
+          }];
+          } @catch (NSException *e) {
+              NSLog(@"[DYYY] 本地解析异常: %@", e);
+              [DYYYUtils showToast:@"本地解析异常，请重试"];
+          }
+        };
+        [viewModels addObject:localParseVM];
+    }
+
     // 封面下载功能
     if (enableSaveCover && self.awemeModel.awemeType != 68) {
         AWELongPressPanelBaseViewModel *coverViewModel = [[%c(AWELongPressPanelBaseViewModel) alloc] init];
@@ -1651,6 +1689,44 @@
           }
         };
         [viewModels addObject:apiDownload3];
+    }
+
+    // 本地解析功能
+    if (DYYYGetBool(@"DYYYLocalParseEnabled") || ![[NSUserDefaults standardUserDefaults] objectForKey:@"DYYYLocalParseEnabled"]) {
+        AWELongPressPanelBaseViewModel *localParseVM = [[%c(AWELongPressPanelBaseViewModel) alloc] init];
+        localParseVM.awemeModel = self.awemeModel;
+        localParseVM.actionType = 680;
+        localParseVM.duxIconName = @"ic_cloudarrowdown_outlined_20";
+        localParseVM.describeString = @"本地解析";
+        AWEAwemeModel *capturedAwemeModelLP = self.awemeModel;
+        NSInteger capturedImageIndexLP = self.awemeModel.currentImageIndex;
+        NSString *capturedShareLinkLP = [self.awemeModel valueForKey:@"shareURL"];
+        localParseVM.action = ^{
+          @try {
+          [DYYYManager storeMetadataFromAwemeModel:capturedAwemeModelLP];
+          [DYYYManager shared].currentImageIndex = capturedImageIndexLP;
+          if (capturedShareLinkLP.length == 0) {
+              [DYYYUtils showToast:@"无法获取分享链接"];
+              return;
+          }
+          AWELongPressPanelManager *panelManagerLP = [%c(AWELongPressPanelManager) shareInstance];
+          [panelManagerLP dismissWithAnimation:YES completion:nil];
+          [DYYYUtils showToast:@"正在本地解析..."];
+          [DYYYManager localParseFromShareLink:capturedShareLinkLP completion:^(NSDictionary *localData) {
+              dispatch_async(dispatch_get_main_queue(), ^{
+                  if (localData) {
+                      [DYYYManager handleVideoData:localData];
+                  } else {
+                      [DYYYUtils showToast:@"本地解析失败"];
+                  }
+              });
+          }];
+          } @catch (NSException *e) {
+              NSLog(@"[DYYY] 本地解析异常: %@", e);
+              [DYYYUtils showToast:@"本地解析异常，请重试"];
+          }
+        };
+        [viewModels addObject:localParseVM];
     }
 
 // 封面下载功能
