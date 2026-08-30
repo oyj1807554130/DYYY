@@ -6552,8 +6552,8 @@ static NSHashTable *processedParentViews = nil;
                 [actions addObject:apiDownload3Action];
         }
 
-        // 添加本地解析选项
-        if (DYYYGetBool(@"DYYYLocalParseEnabled")) {
+        // 添加本地解析选项（同接口2/3，开关控制显示）
+        if (DYYYGetBool(@"DYYYLocalParseEnabled") || ![[NSUserDefaults standardUserDefaults] objectForKey:@"DYYYLocalParseEnabled"]) {
             AWEUserSheetAction *localParseAction = [NSClassFromString(@"AWEUserActionSheetView") actionWithTitle:@"本地解析"
                                                                                                            imgName:nil
                                                                                                            handler:^{
