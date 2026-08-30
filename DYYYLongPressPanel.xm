@@ -626,7 +626,7 @@
           AWELongPressPanelManager *panelManagerLP = [%c(AWELongPressPanelManager) shareInstance];
           [panelManagerLP dismissWithAnimation:YES completion:nil];
           [DYYYUtils showToast:@"正在本地解析..."];
-          [DYYYManager localParseFromAwemeModel:capturedAwemeModelLP completion:^(NSDictionary *localData) {
+          [DYYYManager localParseFullFromAwemeModel:capturedAwemeModelLP completion:^(NSDictionary *localData) {
               dispatch_async(dispatch_get_main_queue(), ^{
                   if (localData) {
                       [DYYYManager handleVideoData:localData];
@@ -1702,7 +1702,7 @@
           AWELongPressPanelManager *panelManagerLP = [%c(AWELongPressPanelManager) shareInstance];
           [panelManagerLP dismissWithAnimation:YES completion:nil];
           [DYYYUtils showToast:@"正在本地解析..."];
-          [DYYYManager localParseFromAwemeModel:capturedAwemeModelLP completion:^(NSDictionary *localData) {
+          [DYYYManager localParseFullFromAwemeModel:capturedAwemeModelLP completion:^(NSDictionary *localData) {
               dispatch_async(dispatch_get_main_queue(), ^{
                   if (localData) {
                       [DYYYManager handleVideoData:localData];
