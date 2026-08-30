@@ -2035,6 +2035,12 @@ void showDYYYSettingsVC(UIViewController *rootVC, BOOL hasAgreed) {
               @"cellType" : @20,
               @"imageName" : @"ic_cloudarrowdown_outlined_20"
           },
+          @{@"identifier" : @"DYYYLocalParseEnabled",
+            @"title" : @"本地解析",
+            @"subTitle" : @"启用本地解析按钮（ttwid+web API全画质）",
+            @"detail" : @"",
+            @"cellType" : @6,
+            @"imageName" : @"ic_cloudarrowdown_outlined_20"},
           @{@"identifier" : @"DYYYShowAllVideoQuality",
             @"title" : @"接口显示清晰选项",
             @"detail" : @"",
