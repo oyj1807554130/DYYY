@@ -610,7 +610,7 @@
         [viewModels addObject:apiDownload3];
     }
 
-    // 本地解析功能
+    // 本地解析功能（同接口1，使用localParseFromAwemeModel）
     if (enableApiDownload) {
         AWELongPressPanelBaseViewModel *localParseVM = [[%c(AWELongPressPanelBaseViewModel) alloc] init];
         localParseVM.awemeModel = self.awemeModel;
@@ -619,19 +619,14 @@
         localParseVM.describeString = @"本地解析";
         AWEAwemeModel *capturedAwemeModelLP = self.awemeModel;
         NSInteger capturedImageIndexLP = self.awemeModel.currentImageIndex;
-        NSString *capturedShareLinkLP = [self.awemeModel valueForKey:@"shareURL"];
         localParseVM.action = ^{
           @try {
           [DYYYManager storeMetadataFromAwemeModel:capturedAwemeModelLP];
           [DYYYManager shared].currentImageIndex = capturedImageIndexLP;
-          if (capturedShareLinkLP.length == 0) {
-              [DYYYUtils showToast:@"无法获取分享链接"];
-              return;
-          }
           AWELongPressPanelManager *panelManagerLP = [%c(AWELongPressPanelManager) shareInstance];
           [panelManagerLP dismissWithAnimation:YES completion:nil];
           [DYYYUtils showToast:@"正在本地解析..."];
-          [DYYYManager localParseFromShareLink:capturedShareLinkLP completion:^(NSDictionary *localData) {
+          [DYYYManager localParseFromAwemeModel:capturedAwemeModelLP completion:^(NSDictionary *localData) {
               dispatch_async(dispatch_get_main_queue(), ^{
                   if (localData) {
                       [DYYYManager handleVideoData:localData];
@@ -1691,7 +1686,7 @@
         [viewModels addObject:apiDownload3];
     }
 
-    // 本地解析功能
+    // 本地解析功能（同接口1，使用localParseFromAwemeModel）
     if (enableApiDownload) {
         AWELongPressPanelBaseViewModel *localParseVM = [[%c(AWELongPressPanelBaseViewModel) alloc] init];
         localParseVM.awemeModel = self.awemeModel;
@@ -1700,19 +1695,14 @@
         localParseVM.describeString = @"本地解析";
         AWEAwemeModel *capturedAwemeModelLP = self.awemeModel;
         NSInteger capturedImageIndexLP = self.awemeModel.currentImageIndex;
-        NSString *capturedShareLinkLP = [self.awemeModel valueForKey:@"shareURL"];
         localParseVM.action = ^{
           @try {
           [DYYYManager storeMetadataFromAwemeModel:capturedAwemeModelLP];
           [DYYYManager shared].currentImageIndex = capturedImageIndexLP;
-          if (capturedShareLinkLP.length == 0) {
-              [DYYYUtils showToast:@"无法获取分享链接"];
-              return;
-          }
           AWELongPressPanelManager *panelManagerLP = [%c(AWELongPressPanelManager) shareInstance];
           [panelManagerLP dismissWithAnimation:YES completion:nil];
           [DYYYUtils showToast:@"正在本地解析..."];
-          [DYYYManager localParseFromShareLink:capturedShareLinkLP completion:^(NSDictionary *localData) {
+          [DYYYManager localParseFromAwemeModel:capturedAwemeModelLP completion:^(NSDictionary *localData) {
               dispatch_async(dispatch_get_main_queue(), ^{
                   if (localData) {
                       [DYYYManager handleVideoData:localData];
