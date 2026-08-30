@@ -6552,6 +6552,30 @@ static NSHashTable *processedParentViews = nil;
                 [actions addObject:apiDownload3Action];
         }
 
+        // 添加本地解析选项
+        if (DYYYGetBool(@"DYYYLocalParseEnabled")) {
+            AWEUserSheetAction *localParseAction = [NSClassFromString(@"AWEUserActionSheetView") actionWithTitle:@"本地解析"
+                                                                                                           imgName:nil
+                                                                                                           handler:^{
+                                                                                                             NSString *shareLink = [awemeModel valueForKey:@"shareURL"];
+                                                                                                             if (shareLink.length == 0) {
+                                                                                                                 [DYYYUtils showToast:@"无法获取分享链接"];
+                                                                                                                 return;
+                                                                                                             }
+                                                                                                             [DYYYUtils showToast:@"正在本地解析..."];
+                                                                                                             [DYYYManager localParseFromShareLink:shareLink completion:^(NSDictionary *localData) {
+                                                                                                                 dispatch_async(dispatch_get_main_queue(), ^{
+                                                                                                                     if (localData) {
+                                                                                                                         [DYYYManager handleVideoData:localData];
+                                                                                                                     } else {
+                                                                                                                         [DYYYUtils showToast:@"本地解析失败"];
+                                                                                                                     }
+                                                                                                                 });
+                                                                                                             }];
+                                                                                                           }];
+                [actions addObject:localParseAction];
+        }
+
         // 添加制作视频功能
         if (DYYYGetBool(@"DYYYDoubleCreateVideo") || ![[NSUserDefaults standardUserDefaults] objectForKey:@"DYYYDoubleCreateVideo"]) {
             if (isImageContent) {

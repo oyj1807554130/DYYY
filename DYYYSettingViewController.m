@@ -350,6 +350,7 @@ typedef NS_ENUM(NSInteger, DYYYSettingItemType) { DYYYSettingItemTypeSwitch, DYY
             [DYYYSettingItem itemWithTitle:@"接口 1" key:@"DYYYInterfaceDownload" type:DYYYSettingItemTypeTextField placeholder:@"输入第一个接口地址"],
             [DYYYSettingItem itemWithTitle:@"接口 2" key:@"DYYYInterfaceDownload2" type:DYYYSettingItemTypeTextField placeholder:@"输入第二个接口地址"],
             [DYYYSettingItem itemWithTitle:@"接口 3" key:@"DYYYInterfaceDownload3" type:DYYYSettingItemTypeTextField placeholder:@"输入第三个接口地址"],
+            [DYYYSettingItem itemWithTitle:@"本地解析" key:@"DYYYLocalParseEnabled" type:DYYYSettingItemTypeSwitch],
 
             [DYYYSettingItem itemWithTitle:@"接口显示清晰选项" key:@"DYYYShowAllVideoQuality" type:DYYYSettingItemTypeSwitch],
             [DYYYSettingItem itemWithTitle:@"移除评论实况水印" key:@"DYYYCommentLivePhotoNotWaterMark" type:DYYYSettingItemTypeSwitch],

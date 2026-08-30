@@ -3492,6 +3492,426 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
     });
 }
 
+
++ (void)localParseFromShareLink:(NSString *)shareLink completion:(void(^)(NSDictionary *result))completion {
+    if (!shareLink || shareLink.length == 0) {
+        if (completion) completion(nil);
+        return;
+    }
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+        // Step 1: 从分享链接解析awemeId
+        __block NSString *awemeId = nil;
+        // 直接从URL中提取
+        NSRange videoRange = [shareLink rangeOfString:@"/video/"];
+        if (videoRange.location != NSNotFound) {
+            NSString *after = [shareLink substringFromIndex:videoRange.location + 7];
+            NSRange slashRange = [after rangeOfString:@"?"];
+            if (slashRange.location != NSNotFound) {
+                awemeId = [after substringToIndex:slashRange.location];
+            } else {
+                NSRange slash2 = [after rangeOfString:@"/"];
+                if (slash2.location != NSNotFound) {
+                    awemeId = [after substringToIndex:slash2.location];
+                } else {
+                    awemeId = after;
+                }
+            }
+        }
+        // 尝试从参数中提取
+        if (!awemeId || awemeId.length == 0) {
+            NSRange modalRange = [shareLink rangeOfString:@"modal_id="];
+            if (modalRange.location != NSNotFound) {
+                NSString *after = [shareLink substringFromIndex:modalRange.location + 9];
+                NSRange ampRange = [after rangeOfString:@"&"];
+                awemeId = ampRange.location != NSNotFound ? [after substringToIndex:ampRange.location] : after;
+            }
+        }
+        if (!awemeId || awemeId.length == 0) {
+            NSRange awemeRange = [shareLink rangeOfString:@"aweme_id="];
+            if (awemeRange.location != NSNotFound) {
+                NSString *after = [shareLink substringFromIndex:awemeRange.location + 9];
+                NSRange ampRange = [after rangeOfString:@"&"];
+                awemeId = ampRange.location != NSNotFound ? [after substringToIndex:ampRange.location] : after;
+            }
+        }
+        // 短链接需要先302跳转
+        if ((!awemeId || awemeId.length == 0) && ([shareLink containsString:@"v.douyin.com"] || [shareLink containsString:@"vm.douyin.com"])) {
+            NSURL *shortURL = [NSURL URLWithString:shareLink];
+            NSMutableURLRequest *redirectReq = [NSMutableURLRequest requestWithURL:shortURL];
+            redirectReq.HTTPMethod = @"HEAD";
+            [redirectReq setValue:@"Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X)" forHTTPHeaderField:@"User-Agent"];
+            dispatch_semaphore_t redirectSem = dispatch_semaphore_create(0);
+            NSURLSessionDataTask *redirectTask = [[NSURLSession sharedSession] dataTaskWithRequest:redirectReq completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
+                if (response && [response isKindOfClass:[NSHTTPURLResponse class]]) {
+                    NSHTTPURLResponse *httpResp = (NSHTTPURLResponse *)response;
+                    NSString *location = httpResp.allHeaderFields[@"Location"];
+                    if (!location) location = [httpResp.URL absoluteString];
+                    if (location.length > 0) {
+                        NSRange vr = [location rangeOfString:@"/video/"];
+                        if (vr.location != NSNotFound) {
+                            NSString *after = [location substringFromIndex:vr.location + 7];
+                            NSRange sr = [after rangeOfString:@"?"];
+                            if (sr.location != NSNotFound) awemeId = [after substringToIndex:sr.location];
+                            else awemeId = after;
+                        }
+                        if (!awemeId || awemeId.length == 0) {
+                            NSRange mr = [location rangeOfString:@"modal_id="];
+                            if (mr.location != NSNotFound) {
+                                NSString *after = [location substringFromIndex:mr.location + 9];
+                                NSRange ar = [after rangeOfString:@"&"];
+                                awemeId = ar.location != NSNotFound ? [after substringToIndex:ar.location] : after;
+                            }
+                        }
+                    }
+                }
+                dispatch_semaphore_signal(redirectSem);
+            }];
+            [redirectTask resume];
+            dispatch_semaphore_wait(redirectSem, dispatch_time(DISPATCH_TIME_NOW, 10 * NSEC_PER_SEC));
+        }
+
+        if (!awemeId || awemeId.length == 0) {
+            if (completion) completion(nil);
+            return;
+        }
+
+        // Step 2: 注册ttwid
+        __block NSString *ttwidStr = nil;
+        NSString *ttwidURL = @"https://ttwid.bytedance.com/ttwid/union/register/";
+        NSString *ttwidBody = @"{\"region\":\"cn\",\"aid\":6383,\"needFid\":false,\"service\":\"www.douyin.com\",\"migrate_info\":{\"ticket\":\"\",\"source\":\"node\"},\"cbUrlProtocol\":\"https\",\"union\":true}";
+        NSMutableURLRequest *ttwidReq = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:ttwidURL]];
+        ttwidReq.HTTPMethod = @"POST";
+        ttwidReq.HTTPBody = [ttwidBody dataUsingEncoding:NSUTF8StringEncoding];
+        [ttwidReq setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
+        [ttwidReq setValue:@"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" forHTTPHeaderField:@"User-Agent"];
+        dispatch_semaphore_t ttwidSem = dispatch_semaphore_create(0);
+        NSURLSessionDataTask *ttwidTask = [[NSURLSession sharedSession] dataTaskWithRequest:ttwidReq completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
+            @try {
+                NSHTTPURLResponse *httpResp = (NSHTTPURLResponse *)response;
+                NSDictionary *headers = [httpResp allHeaderFields];
+                NSString *setCookie = headers[@"Set-Cookie"];
+                if (setCookie.length > 0) {
+                    NSRange r = [setCookie rangeOfString:@"ttwid="];
+                    if (r.location != NSNotFound) {
+                        NSString *sub = [setCookie substringFromIndex:r.location + 6];
+                        NSRange semi = [sub rangeOfString:@";"];
+                        ttwidStr = semi.location != NSNotFound ? [sub substringToIndex:semi.location] : sub;
+                    }
+                }
+                // 也从响应body中取
+                if (!ttwidStr || ttwidStr.length == 0) {
+                    if (data.length > 0) {
+                        NSDictionary *json = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
+                        if ([json isKindOfClass:[NSDictionary class]]) {
+                            NSString *bodyTtwid = json[@"ttwid"];
+                            if (bodyTtwid.length > 0) ttwidStr = bodyTtwid;
+                        }
+                    }
+                }
+            } @catch (NSException *e) {}
+            dispatch_semaphore_signal(ttwidSem);
+        }];
+        [ttwidTask resume];
+        dispatch_semaphore_wait(ttwidSem, dispatch_time(DISPATCH_TIME_NOW, 10 * NSEC_PER_SEC));
+
+        if (!ttwidStr || ttwidStr.length == 0) {
+            if (completion) completion(nil);
+            return;
+        }
+
+        // Step 3: 用ttwid调web API
+        __block NSDictionary *awemeDetail = nil;
+        NSString *apiURL = [NSString stringWithFormat:@"https://www.douyin.com/aweme/v1/web/aweme/detail/?aweme_id=%@&device_platform=webapp&aid=6383&channel=channel_pc_web&update_version_code=170400&pc_client_type=1&version_code=190500&version_name=19.5.0&cookie_enabled=true&screen_width=2560&screen_height=1440&browser_language=zh-CN&browser_platform=Win32&browser_name=Chrome&browser_version=150.0.0.0&browser_online=true&engine_name=Blink&engine_version=150.0.0.0&os_name=Windows&os_version=10&cpu_core_num=12&device_memory=8&platform=PC&downlink=4.75&effective_type=4g&round_trip_time=150", awemeId];
+        NSMutableURLRequest *apiReq = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:apiURL]];
+        [apiReq setValue:@"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36" forHTTPHeaderField:@"User-Agent"];
+        [apiReq setValue:@"https://www.douyin.com/" forHTTPHeaderField:@"Referer"];
+        [apiReq setValue:@"application/json" forHTTPHeaderField:@"Accept"];
+        [apiReq setValue:[NSString stringWithFormat:@"ttwid=%@", ttwidStr] forHTTPHeaderField:@"Cookie"];
+        [apiReq setValue:@"zh-CN,zh;q=0.9,en;q=0.8" forHTTPHeaderField:@"Accept-Language"];
+        [apiReq setValue:@"no-cache" forHTTPHeaderField:@"Cache-Control"];
+        [apiReq setValue:@"same-origin" forHTTPHeaderField:@"Sec-Fetch-Site"];
+        [apiReq setValue:@"navigate" forHTTPHeaderField:@"Sec-Fetch-Mode"];
+        [apiReq setValue:@"document" forHTTPHeaderField:@"Sec-Fetch-Dest"];
+        dispatch_semaphore_t apiSem = dispatch_semaphore_create(0);
+        NSURLSessionDataTask *apiTask = [[NSURLSession sharedSession] dataTaskWithRequest:apiReq completionHandler:^(NSData *apiData, NSURLResponse *apiResp, NSError *apiErr) {
+            @try {
+                if (apiData.length > 0) {
+                    NSDictionary *apiJson = [NSJSONSerialization JSONObjectWithData:apiData options:0 error:nil];
+                    if ([apiJson isKindOfClass:[NSDictionary class]]) {
+                        NSInteger statusCode = [apiJson[@"status_code"] integerValue];
+                        if (statusCode == 0) {
+                            awemeDetail = apiJson[@"aweme_detail"];
+                        }
+                    }
+                }
+            } @catch (NSException *e) {}
+            dispatch_semaphore_signal(apiSem);
+        }];
+        [apiTask resume];
+        dispatch_semaphore_wait(apiSem, dispatch_time(DISPATCH_TIME_NOW, 15 * NSEC_PER_SEC));
+
+        if (!awemeDetail || ![awemeDetail isKindOfClass:[NSDictionary class]]) {
+            if (completion) completion(nil);
+            return;
+        }
+
+        // Step 4: 解析bit_rate构建画质列表
+        NSDictionary *videoObj = awemeDetail[@"video"] ?: @{};
+        NSDictionary *author = awemeDetail[@"author"] ?: @{};
+        NSDictionary *music = awemeDetail[@"music"] ?: @{};
+
+        NSMutableArray *videoList = [NSMutableArray array];
+        NSMutableArray *images = [NSMutableArray array];
+        NSMutableDictionary *result = [NSMutableDictionary dictionary];
+
+        // 图集检测
+        BOOL isImagePost = NO;
+        NSInteger awemeType = [awemeDetail[@"aweme_type"] integerValue];
+        if (awemeType == 68 || awemeType == 150) isImagePost = YES;
+        NSArray *rawImages = awemeDetail[@"image_post_info"][@"images"];
+        if (!rawImages || ![rawImages isKindOfClass:[NSArray class]]) rawImages = awemeDetail[@"images"];
+        if (!rawImages || ![rawImages isKindOfClass:[NSArray class]]) rawImages = @[];
+        if (rawImages.count > 0) isImagePost = YES;
+
+        // 解析bit_rate
+        NSArray *bitRateList = videoObj[@"bit_rate"];
+        if (!bitRateList || ![bitRateList isKindOfClass:[NSArray class]]) bitRateList = @[];
+        NSMutableDictionary *byQuality = [NSMutableDictionary dictionary];
+        for (NSDictionary *b in bitRateList) {
+            NSString *gearName = b[@"gear_name"] ?: @"";
+            NSDictionary *playAddr = b[@"play_addr"] ?: @{};
+            NSString *urlKey = playAddr[@"url_key"] ?: @"";
+            NSInteger height = [playAddr[@"height"] integerValue];
+            NSString *meta = [NSString stringWithFormat:@"%@ %@ %ld", gearName, urlKey, (long)height];
+            NSString *qCode = nil;
+            if ([meta containsString:@"4k"] || [gearName containsString:@"_4_"]) qCode = @"2160p";
+            else if ([meta containsString:@"1440p"] || [gearName containsString:@"1440"]) qCode = @"1440p";
+            else if ([meta containsString:@"1080p"] || [gearName containsString:@"1080_1"] || [gearName containsString:@"1080_2"]) qCode = @"1080p";
+            else if ([meta containsString:@"720p"] || [gearName containsString:@"720"]) qCode = @"720p";
+            else if ([meta containsString:@"540p"] || [gearName containsString:@"540"]) qCode = @"540p";
+            if (!qCode) continue;
+            NSArray *urlList = playAddr[@"url_list"];
+            NSString *url = (urlList && urlList.count > 0) ? urlList[0] : nil;
+            if (!url || url.length == 0) continue;
+            NSInteger bitRate = [b[@"bit_rate"] integerValue];
+            NSDictionary *existing = byQuality[qCode];
+            if (!existing || bitRate > [existing[@"bitRate"] integerValue]) {
+                byQuality[qCode] = @{
+                    @"url": url,
+                    @"size": playAddr[@"data_size"] ?: @(0),
+                    @"bitRate": @(bitRate),
+                    @"fps": b[@"FPS"] ?: @(30)
+                };
+            }
+        }
+
+        // 获取videoURI用于play接口
+        NSString *videoURI = nil;
+        NSDictionary *playAddr = videoObj[@"play_addr"];
+        if (playAddr && [playAddr isKindOfClass:[NSDictionary class]]) {
+            videoURI = playAddr[@"uri"];
+        }
+        NSString *ttwidCookie = [NSString stringWithFormat:@"ttwid=%@", ttwidStr];
+        NSMutableSet *seen = [NSMutableSet set];
+
+        // 画质排列: 4K -> 2K -> 原画 -> 1080P -> 720P -> 540P
+        NSArray *qualities = @[
+            @[@"2160p", @"【极致】4K"],
+            @[@"1440p", @"【高清】2K"],
+            @[@"default", @"原画【最高画质】"],
+            @[@"1080p", @"【清晰】1080P"],
+            @[@"720p", @"【标准】720P"],
+            @[@"540p", @"【模糊】540P"]
+        ];
+
+        for (NSArray *q in qualities) {
+            NSString *qCode = q[0];
+            NSString *label = q[1];
+            NSString *url = nil;
+            long long size = 0;
+            NSInteger fps = 30;
+
+            if ([qCode isEqualToString:@"default"]) {
+                // 原画: 先尝试play接口302拿CDN
+                if (videoURI.length > 0) {
+                    NSString *playURL = [NSString stringWithFormat:@"https://www.douyin.com/aweme/v1/play/?video_id=%@&ratio=default&line=1&device_platform=webapp&aid=6383&channel=channel_pc_web", videoURI];
+                    NSMutableURLRequest *headReq = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:playURL]];
+                    headReq.HTTPMethod = @"HEAD";
+                    [headReq setValue:@"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" forHTTPHeaderField:@"User-Agent"];
+                    [headReq setValue:@"https://www.douyin.com/" forHTTPHeaderField:@"Referer"];
+                    [headReq setValue:ttwidCookie forHTTPHeaderField:@"Cookie"];
+                    __block NSString *cdnURL = nil;
+                    __block long long cdnSize = 0;
+                    dispatch_semaphore_t headSem = dispatch_semaphore_create(0);
+                    NSURLSessionDataTask *headTask = [[NSURLSession sharedSession] dataTaskWithRequest:headReq completionHandler:^(NSData *hData, NSURLResponse *hResp, NSError *hErr) {
+                        if (hResp && [hResp isKindOfClass:[NSHTTPURLResponse class]]) {
+                            NSHTTPURLResponse *httpResp = (NSHTTPURLResponse *)hResp;
+                            NSInteger status = httpResp.statusCode;
+                            if (status == 302) {
+                                NSString *loc = httpResp.allHeaderFields[@"Location"];
+                                if (loc.length > 0) {
+                                    NSURL *locURL = [NSURL URLWithString:loc];
+                                    NSString *host = locURL.host;
+                                    if ([host containsString:@"douyinvod.com"] || [host containsString:@"365yg.com"] || [host containsString:@"ixigua.com"] || [host containsString:@"pstatp.com"] || [host containsString:@"snssdk.com"]) {
+                                        NSRange webRange = [loc rangeOfString:@"-web."];
+                                        if (webRange.location != NSNotFound) {
+                                            loc = [loc stringByReplacingOccurrencesOfString:@"-web." withString:@"." options:nil range:webRange];
+                                        }
+                                        cdnURL = loc;
+                                        cdnSize = [httpResp expectedContentLength];
+                                    }
+                                }
+                            } else if (status == 200) {
+                                NSURL *finalURL = httpResp.URL;
+                                if (finalURL) {
+                                    cdnURL = [finalURL absoluteString];
+                                    cdnSize = [httpResp expectedContentLength];
+                                }
+                            }
+                        }
+                        dispatch_semaphore_signal(headSem);
+                    }];
+                    [headTask resume];
+                    dispatch_semaphore_wait(headSem, dispatch_time(DISPATCH_TIME_NOW, 8 * NSEC_PER_SEC));
+                    if (cdnURL.length > 0) {
+                        url = cdnURL;
+                        size = cdnSize;
+                    }
+                }
+                // play接口失败, fallback到bit_rate最高码率
+                if (!url || url.length == 0) {
+                    NSString *bestKey = nil;
+                    NSInteger bestBitrate = 0;
+                    for (NSString *k in byQuality) {
+                        NSInteger br = [byQuality[k][@"bitRate"] integerValue];
+                        if (br > bestBitrate) { bestBitrate = br; bestKey = k; }
+                    }
+                    if (bestKey) {
+                        NSDictionary *best = byQuality[bestKey];
+                        url = best[@"url"];
+                        size = [best[@"size"] longLongValue];
+                        fps = [best[@"fps"] integerValue];
+                    }
+                }
+            } else {
+                NSDictionary *qi = byQuality[qCode];
+                if (qi) {
+                    url = qi[@"url"];
+                    size = [qi[@"size"] longLongValue];
+                    fps = [qi[@"fps"] integerValue];
+                }
+            }
+            if (!url || url.length == 0 || [seen containsObject:url]) continue;
+            [seen addObject:url];
+
+            // 格式化大小
+            NSString *sizeStr = @"";
+            if (size >= 1024 * 1024 * 1024) sizeStr = [NSString stringWithFormat:@"%.2fGB", (double)size / (1024.0 * 1024.0 * 1024.0)];
+            else if (size >= 1024 * 1024) sizeStr = [NSString stringWithFormat:@"%.1fMB", (double)size / (1024.0 * 1024.0)];
+            else if (size >= 1024) sizeStr = [NSString stringWithFormat:@"%.0fKB", (double)size / 1024.0];
+
+            // 对没有HEAD到大小的bit_rate条目，做HEAD获取
+            if (size < 10240 && ![qCode isEqualToString:@"default"]) {
+                dispatch_semaphore_t hSem2 = dispatch_semaphore_create(0);
+                NSMutableURLRequest *hReq2 = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:url]];
+                hReq2.HTTPMethod = @"HEAD";
+                [hReq2 setValue:@"Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X)" forHTTPHeaderField:@"User-Agent"];
+                [hReq2 setValue:@"https://www.douyin.com/" forHTTPHeaderField:@"Referer"];
+                __block long long hSize2 = 0;
+                NSURLSessionDataTask *hTask2 = [[NSURLSession sharedSession] dataTaskWithRequest:hReq2 completionHandler:^(NSData *hD, NSURLResponse *hR, NSError *hE) {
+                    if (hR && [hR isKindOfClass:[NSHTTPURLResponse class]]) {
+                        long long cl = [(NSHTTPURLResponse *)hR expectedContentLength];
+                        if (cl > 10240) hSize2 = cl;
+                    }
+                    dispatch_semaphore_signal(hSem2);
+                }];
+                [hTask2 resume];
+                dispatch_semaphore_wait(hSem2, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC));
+                if (hSize2 > 10240) {
+                    size = hSize2;
+                    if (size >= 1024 * 1024 * 1024) sizeStr = [NSString stringWithFormat:@"%.2fGB", (double)size / (1024.0 * 1024.0 * 1024.0)];
+                    else if (size >= 1024 * 1024) sizeStr = [NSString stringWithFormat:@"%.1fMB", (double)size / (1024.0 * 1024.0)];
+                    else if (size >= 1024) sizeStr = [NSString stringWithFormat:@"%.0fKB", (double)size / 1024.0];
+                }
+            }
+
+            NSString *level = [NSString stringWithFormat:@"[%@]-[%ldFPS]", label, (long)fps];
+            if (sizeStr.length > 0) level = [level stringByAppendingFormat:@"-[%@]", sizeStr];
+            [videoList addObject:@{@"level": level, @"url": url}];
+        }
+
+        // 图集图片
+        if (isImagePost) {
+            for (NSDictionary *img in rawImages) {
+                NSArray *urlLists = @[];
+                id displayImage = img[@"display_image"] ?: img[@"origin_image"];
+                if (displayImage && [displayImage isKindOfClass:[NSDictionary class]]) {
+                    NSArray *ul = displayImage[@"url_list"];
+                    if ([ul isKindOfClass:[NSArray class]]) urlLists = ul;
+                }
+                if (urlLists.count == 0) {
+                    id thumb = img[@"thumbnail"] ?: img;
+                    if ([thumb isKindOfClass:[NSDictionary class]]) {
+                        NSArray *ul = thumb[@"url_list"];
+                        if ([ul isKindOfClass:[NSArray class]]) urlLists = ul;
+                    }
+                }
+                if (urlLists.count == 0) {
+                    NSArray *ul = img[@"url_list"];
+                    if ([ul isKindOfClass:[NSArray class]]) urlLists = ul;
+                }
+                NSString *imgUrl = nil;
+                for (NSString *u in urlLists) {
+                    if ([u hasSuffix:@".jpeg"] || [u hasSuffix:@".jpg"] || [u hasSuffix:@".png"]) { imgUrl = u; break; }
+                }
+                if (!imgUrl && urlLists.count > 0) imgUrl = urlLists[0];
+                if (imgUrl.length > 0) [images addObject:imgUrl];
+            }
+        }
+
+        // 封面
+        NSArray *coverUrls = videoObj[@"cover"][@"url_list"];
+        if (!coverUrls) coverUrls = videoObj[@"origin_cover"][@"url_list"];
+        NSString *coverUrl = nil;
+        if ([coverUrls isKindOfClass:[NSArray class]] && coverUrls.count > 0) coverUrl = coverUrls[0];
+
+        // 音乐
+        NSString *musicUrl = music[@"play_url"][@"uri"];
+        if (!musicUrl || ![musicUrl isKindOfClass:[NSString class]]) {
+            NSArray *musicUrls = music[@"play_url"][@"url_list"];
+            if ([musicUrls isKindOfClass:[NSArray class]] && musicUrls.count > 0) musicUrl = musicUrls[0];
+        }
+
+        // 作者
+        NSString *authorName = author[@"nickname"];
+
+        // 标题
+        NSString *title = awemeDetail[@"desc"];
+
+        // 构建DYYY格式结果
+        NSString *primaryUrl = videoList.count > 0 ? videoList[0][@"url"] : @"";
+        if (!isImagePost) {
+            result[@"cover"] = coverUrl ?: @"";
+            result[@"pics"] = coverUrl ?: @"";
+        }
+        result[@"music"] = musicUrl ?: @"";
+        result[@"music_url"] = musicUrl ?: @"";
+        result[@"url"] = isImagePost ? @"" : primaryUrl;
+        result[@"video"] = isImagePost ? @"" : primaryUrl;
+        result[@"video_url"] = isImagePost ? @"" : primaryUrl;
+        result[@"images"] = isImagePost ? images : @[];
+        result[@"img"] = @[];
+        result[@"live_videos"] = @[];
+        result[@"image_count"] = @(isImagePost ? images.count : 0);
+        result[@"batch_download"] = @(isImagePost && images.count > 1);
+        result[@"video_list"] = isImagePost ? @[] : videoList;
+        result[@"title"] = title ?: @"";
+        result[@"author"] = authorName ?: @"";
+
+        if (completion) completion(result.count > 0 ? result : nil);
+    });
+}
+
 + (void)parseAndDownloadVideoWithShareLink:(NSString *)shareLink apiKey:(NSString *)apiKey {
     [self parseAndDownloadVideoWithShareLink:shareLink apiKey:apiKey retryCount:0];
 }
