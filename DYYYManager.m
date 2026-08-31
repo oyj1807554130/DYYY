@@ -3831,7 +3831,18 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
         result[@"live_videos"] = isImagePost ? liveVideoURLs : @[];
         result[@"image_count"] = @(isImagePost ? images.count : 0);
         result[@"batch_download"] = @(isImagePost && images.count > 1);
-        result[@"video_list"] = videoList;
+        // 图集帖只保留实况条目，无实况的图集video_list为空（走图片保存分支）
+        if (isImagePost) {
+            NSMutableArray *liveOnlyList = [NSMutableArray array];
+            for (id item in videoList) {
+                if ([item isKindOfClass:[NSDictionary class]] && [((NSDictionary *)item)[@"level"] containsString:@"实况"]) {
+                    [liveOnlyList addObject:item];
+                }
+            }
+            result[@"video_list"] = liveOnlyList;
+        } else {
+            result[@"video_list"] = videoList;
+        }
         result[@"title"] = awemeDetail[@"desc"] ?: @"";
         result[@"author"] = author[@"nickname"] ?: @"";
         if (completion) completion(result.count > 0 ? result : nil);
