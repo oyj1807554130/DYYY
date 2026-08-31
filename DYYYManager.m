@@ -3025,6 +3025,14 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                                     ttwidStr = semi.location != NSNotFound ? [sub substringToIndex:semi.location] : sub;
                                 }
                             }
+                            // 降级：注册失败时从app Cookie存储取ttwid
+                            if (!ttwidStr || ttwidStr.length == 0) {
+                                NSHTTPCookieStorage *cs1 = [NSHTTPCookieStorage sharedHTTPCookieStorage];
+                                NSArray *ck1 = [cs1 cookiesForURL:[NSURL URLWithString:@"https://www.douyin.com/"]];
+                                for (NSHTTPCookie *c1 in ck1) {
+                                    if ([[c1 name] isEqualToString:@"ttwid"]) { ttwidStr = [c1 value]; break; }
+                                }
+                            }
                             // Step 2: 用ttwid调web API
                             if (ttwidStr.length > 0) {
                                 // 存储ttwid供后续CDN下载使用
@@ -3539,46 +3547,57 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
         return;
     }
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-        // Step 1: 注册ttwid
+        // Step 1: 获取ttwid（优先从app Cookie存储取，降级走注册接口）
         __block NSString *ttwidStr = nil;
-        NSString *ttwidURL = @"https://ttwid.bytedance.com/ttwid/union/register/";
-        NSString *ttwidBody = @"{\"region\":\"cn\",\"aid\":6383,\"needFid\":false,\"service\":\"www.douyin.com\",\"migrate_info\":{\"ticket\":\"\",\"source\":\"node\"},\"cbUrlProtocol\":\"https\",\"union\":true}";
-        NSMutableURLRequest *ttwidReq = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:ttwidURL]];
-        ttwidReq.HTTPMethod = @"POST";
-        ttwidReq.HTTPBody = [ttwidBody dataUsingEncoding:NSUTF8StringEncoding];
-        [ttwidReq setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
-        [ttwidReq setValue:@"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36" forHTTPHeaderField:@"User-Agent"];
-        dispatch_semaphore_t ttwidSem = dispatch_semaphore_create(0);
-        NSURLSessionDataTask *ttwidTask = [[NSURLSession sharedSession] dataTaskWithRequest:ttwidReq completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
-            @try {
-                NSHTTPURLResponse *httpResp = (NSHTTPURLResponse *)response;
-                NSDictionary *headers = [httpResp allHeaderFields];
-                NSString *setCookie = headers[@"Set-Cookie"];
-                if (setCookie.length > 0) {
-                    NSRange r = [setCookie rangeOfString:@"ttwid="];
-                    if (r.location != NSNotFound) {
-                        NSString *sub = [setCookie substringFromIndex:r.location + 6];
-                        NSRange semi = [sub rangeOfString:@";"];
-                        ttwidStr = semi.location != NSNotFound ? [sub substringToIndex:semi.location] : sub;
-                    }
-                }
-                if (!ttwidStr || ttwidStr.length == 0) {
-                    if (data.length > 0) {
-                        NSDictionary *json = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
-                        if ([json isKindOfClass:[NSDictionary class]]) {
-                            NSString *bodyTtwid = json[@"ttwid"];
-                            if (bodyTtwid.length > 0) ttwidStr = bodyTtwid;
+        // 优先从app的NSHTTPCookieStorage取ttwid（app运行时一定有）
+        NSHTTPCookieStorage *cookieStore = [NSHTTPCookieStorage sharedHTTPCookieStorage];
+        NSArray *appCookies = [cookieStore cookiesForURL:[NSURL URLWithString:@"https://www.douyin.com/"]];
+        for (NSHTTPCookie *c in appCookies) {
+            if ([[c name] isEqualToString:@"ttwid"]) {
+                ttwidStr = [c value];
+                break;
+            }
+        }
+        // 降级：从注册接口获取
+        if (!ttwidStr || ttwidStr.length == 0) {
+            NSString *ttwidURL = @"https://ttwid.bytedance.com/ttwid/union/register/";
+            NSString *ttwidBody = @"{\"region\":\"cn\",\"aid\":6383,\"needFid\":false,\"service\":\"www.douyin.com\",\"migrate_info\":{\"ticket\":\"\",\"source\":\"node\"},\"cbUrlProtocol\":\"https\",\"union\":true}";
+            NSMutableURLRequest *ttwidReq = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:ttwidURL]];
+            ttwidReq.HTTPMethod = @"POST";
+            ttwidReq.HTTPBody = [ttwidBody dataUsingEncoding:NSUTF8StringEncoding];
+            [ttwidReq setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
+            [ttwidReq setValue:@"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36" forHTTPHeaderField:@"User-Agent"];
+            dispatch_semaphore_t ttwidSem = dispatch_semaphore_create(0);
+            NSURLSessionDataTask *ttwidTask = [[NSURLSession sharedSession] dataTaskWithRequest:ttwidReq completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
+                @try {
+                    NSHTTPURLResponse *httpResp = (NSHTTPURLResponse *)response;
+                    NSDictionary *headers = [httpResp allHeaderFields];
+                    NSString *setCookie = headers[@"Set-Cookie"];
+                    if (setCookie.length > 0) {
+                        NSRange r = [setCookie rangeOfString:@"ttwid="];
+                        if (r.location != NSNotFound) {
+                            NSString *sub = [setCookie substringFromIndex:r.location + 6];
+                            NSRange semi = [sub rangeOfString:@";"];
+                            ttwidStr = semi.location != NSNotFound ? [sub substringToIndex:semi.location] : sub;
                         }
                     }
-                }
-            } @catch (NSException *e) {}
-            dispatch_semaphore_signal(ttwidSem);
-        }];
-        [ttwidTask resume];
-        dispatch_semaphore_wait(ttwidSem, dispatch_time(DISPATCH_TIME_NOW, 10 * NSEC_PER_SEC));
-
+                    if (!ttwidStr || ttwidStr.length == 0) {
+                        if (data.length > 0) {
+                            NSDictionary *json = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
+                            if ([json isKindOfClass:[NSDictionary class]]) {
+                                NSString *bodyTtwid = json[@"ttwid"];
+                                if (bodyTtwid.length > 0) ttwidStr = bodyTtwid;
+                            }
+                        }
+                    }
+                } @catch (NSException *e) {}
+                dispatch_semaphore_signal(ttwidSem);
+            }];
+            [ttwidTask resume];
+            dispatch_semaphore_wait(ttwidSem, dispatch_time(DISPATCH_TIME_NOW, 10 * NSEC_PER_SEC));
+        }
         if (!ttwidStr || ttwidStr.length == 0) {
-            dispatch_async(dispatch_get_main_queue(), ^{ [DYYYUtils showToast:@"本地解析失败: ttwid注册失败"]; });
+            dispatch_async(dispatch_get_main_queue(), ^{ [DYYYUtils showToast:@"本地解析失败: 无法获取ttwid"]; });
             if (completion) completion(nil);
             return;
         }
@@ -3957,50 +3976,62 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
             return;
         }
 
-        // Step 2: 注册ttwid
+        // Step 2: 获取ttwid（优先从app Cookie存储取，降级走注册接口）
         __block NSString *ttwidStr = nil;
-        NSString *ttwidURL = @"https://ttwid.bytedance.com/ttwid/union/register/";
-        NSString *ttwidBody = @"{\"region\":\"cn\",\"aid\":6383,\"needFid\":false,\"service\":\"www.douyin.com\",\"migrate_info\":{\"ticket\":\"\",\"source\":\"node\"},\"cbUrlProtocol\":\"https\",\"union\":true}";
-        NSMutableURLRequest *ttwidReq = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:ttwidURL]];
-        ttwidReq.HTTPMethod = @"POST";
-        ttwidReq.HTTPBody = [ttwidBody dataUsingEncoding:NSUTF8StringEncoding];
-        [ttwidReq setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
-        [ttwidReq setValue:@"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" forHTTPHeaderField:@"User-Agent"];
-        dispatch_semaphore_t ttwidSem = dispatch_semaphore_create(0);
-        NSURLSessionDataTask *ttwidTask = [[NSURLSession sharedSession] dataTaskWithRequest:ttwidReq completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
-            @try {
-                NSHTTPURLResponse *httpResp = (NSHTTPURLResponse *)response;
-                NSDictionary *headers = [httpResp allHeaderFields];
-                NSString *setCookie = headers[@"Set-Cookie"];
-                if (setCookie.length > 0) {
-                    NSRange r = [setCookie rangeOfString:@"ttwid="];
-                    if (r.location != NSNotFound) {
-                        NSString *sub = [setCookie substringFromIndex:r.location + 6];
-                        NSRange semi = [sub rangeOfString:@";"];
-                        ttwidStr = semi.location != NSNotFound ? [sub substringToIndex:semi.location] : sub;
-                    }
-                }
-                // 也从响应body中取
-                if (!ttwidStr || ttwidStr.length == 0) {
-                    if (data.length > 0) {
-                        NSDictionary *json = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
-                        if ([json isKindOfClass:[NSDictionary class]]) {
-                            NSString *bodyTtwid = json[@"ttwid"];
-                            if (bodyTtwid.length > 0) ttwidStr = bodyTtwid;
+        // 优先从app的NSHTTPCookieStorage取ttwid（app运行时一定有）
+        NSHTTPCookieStorage *shareCookieStore = [NSHTTPCookieStorage sharedHTTPCookieStorage];
+        NSArray *shareCookies = [shareCookieStore cookiesForURL:[NSURL URLWithString:@"https://www.douyin.com/"]];
+        for (NSHTTPCookie *sc in shareCookies) {
+            if ([[sc name] isEqualToString:@"ttwid"]) {
+                ttwidStr = [sc value];
+                break;
+            }
+        }
+        // 降级：从注册接口获取
+        if (!ttwidStr || ttwidStr.length == 0) {
+            NSString *ttwidURL = @"https://ttwid.bytedance.com/ttwid/union/register/";
+            NSString *ttwidBody = @"{\"region\":\"cn\",\"aid\":6383,\"needFid\":false,\"service\":\"www.douyin.com\",\"migrate_info\":{\"ticket\":\"\",\"source\":\"node\"},\"cbUrlProtocol\":\"https\",\"union\":true}";
+            NSMutableURLRequest *ttwidReq = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:ttwidURL]];
+            ttwidReq.HTTPMethod = @"POST";
+            ttwidReq.HTTPBody = [ttwidBody dataUsingEncoding:NSUTF8StringEncoding];
+            [ttwidReq setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
+            [ttwidReq setValue:@"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" forHTTPHeaderField:@"User-Agent"];
+            dispatch_semaphore_t ttwidSem = dispatch_semaphore_create(0);
+            NSURLSessionDataTask *ttwidTask = [[NSURLSession sharedSession] dataTaskWithRequest:ttwidReq completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
+                @try {
+                    NSHTTPURLResponse *httpResp = (NSHTTPURLResponse *)response;
+                    NSDictionary *headers = [httpResp allHeaderFields];
+                    NSString *setCookie = headers[@"Set-Cookie"];
+                    if (setCookie.length > 0) {
+                        NSRange r = [setCookie rangeOfString:@"ttwid="];
+                        if (r.location != NSNotFound) {
+                            NSString *sub = [setCookie substringFromIndex:r.location + 6];
+                            NSRange semi = [sub rangeOfString:@";"];
+                            ttwidStr = semi.location != NSNotFound ? [sub substringToIndex:semi.location] : sub;
                         }
                     }
-                }
-            } @catch (NSException *e) {}
-            dispatch_semaphore_signal(ttwidSem);
-        }];
-        [ttwidTask resume];
-        dispatch_semaphore_wait(ttwidSem, dispatch_time(DISPATCH_TIME_NOW, 10 * NSEC_PER_SEC));
-
+                    // 也从响应body中取
+                    if (!ttwidStr || ttwidStr.length == 0) {
+                        if (data.length > 0) {
+                            NSDictionary *json = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
+                            if ([json isKindOfClass:[NSDictionary class]]) {
+                                NSString *bodyTtwid = json[@"ttwid"];
+                                if (bodyTtwid.length > 0) ttwidStr = bodyTtwid;
+                            }
+                        }
+                    }
+                } @catch (NSException *e) {}
+                dispatch_semaphore_signal(ttwidSem);
+            }];
+            [ttwidTask resume];
+            dispatch_semaphore_wait(ttwidSem, dispatch_time(DISPATCH_TIME_NOW, 10 * NSEC_PER_SEC));
+        }
         if (!ttwidStr || ttwidStr.length == 0) {
-            dispatch_async(dispatch_get_main_queue(), ^{ [DYYYUtils showToast:@"本地解析: ttwid注册失败"]; });
+            dispatch_async(dispatch_get_main_queue(), ^{ [DYYYUtils showToast:@"本地解析: 无法获取ttwid"]; });
             if (completion) completion(nil);
             return;
         }
+        [DYYYManager shared].localParseTtwid = ttwidStr;
 
         // Step 3: 用ttwid调web API
         __block NSDictionary *awemeDetail = nil;
