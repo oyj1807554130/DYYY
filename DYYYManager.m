@@ -864,7 +864,8 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
       [imageRequest setValue:@"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36" forHTTPHeaderField:@"User-Agent"];
       [imageRequest setValue:@"https://www.douyin.com/" forHTTPHeaderField:@"Referer"];
       NSString *lpTtwid1 = [DYYYManager shared].localParseTtwid;
-      if (lpTtwid1.length > 0) {
+      NSString *imgUrlHost = imageURL.host ?: @"";
+      if (lpTtwid1.length > 0 && [imgUrlHost containsString:@"douyinvod"]) {
           [imageRequest setValue:[NSString stringWithFormat:@"ttwid=%@", lpTtwid1] forHTTPHeaderField:@"Cookie"];
       }
       NSURLSessionDataTask *imageTask = [session dataTaskWithRequest:imageRequest
@@ -895,7 +896,8 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
       [videoRequest setValue:@"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36" forHTTPHeaderField:@"User-Agent"];
       [videoRequest setValue:@"https://www.douyin.com/" forHTTPHeaderField:@"Referer"];
       NSString *lpTtwid2 = [DYYYManager shared].localParseTtwid;
-      if (lpTtwid2.length > 0) {
+      NSString *vidUrlHost = videoURL.host ?: @"";
+      if (lpTtwid2.length > 0 && [vidUrlHost containsString:@"douyinvod"]) {
           [videoRequest setValue:[NSString stringWithFormat:@"ttwid=%@", lpTtwid2] forHTTPHeaderField:@"Cookie"];
       }
       NSURLSessionDataTask *videoTask = [session dataTaskWithRequest:videoRequest
@@ -1106,9 +1108,10 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
       NSMutableURLRequest *downloadReq = [NSMutableURLRequest requestWithURL:url];
       [downloadReq setValue:@"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36" forHTTPHeaderField:@"User-Agent"];
       [downloadReq setValue:@"https://www.douyin.com/" forHTTPHeaderField:@"Referer"];
-      // 本地解析CDN URL需要ttwid Cookie认证
+      // 本地解析CDN URL需要ttwid Cookie认证（仅web API返回的douyinvod直链需要）
       NSString *lpTtwid = [DYYYManager shared].localParseTtwid;
-      if (lpTtwid.length > 0) {
+      NSString *urlHost = url.host ?: @"";
+      if (lpTtwid.length > 0 && [urlHost containsString:@"douyinvod"]) {
           [downloadReq setValue:[NSString stringWithFormat:@"ttwid=%@", lpTtwid] forHTTPHeaderField:@"Cookie"];
       }
       NSURLSessionDownloadTask *downloadTask = [session downloadTaskWithRequest:downloadReq];
@@ -2217,7 +2220,8 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
         [batchImgReq setValue:@"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36" forHTTPHeaderField:@"User-Agent"];
         [batchImgReq setValue:@"https://www.douyin.com/" forHTTPHeaderField:@"Referer"];
         NSString *btTtwid1 = [DYYYManager shared].localParseTtwid;
-        if (btTtwid1.length > 0) {
+        NSString *batchImgHost = imageURL.host ?: @"";
+        if (btTtwid1.length > 0 && [batchImgHost containsString:@"douyinvod"]) {
             [batchImgReq setValue:[NSString stringWithFormat:@"ttwid=%@", btTtwid1] forHTTPHeaderField:@"Cookie"];
         }
         NSURLSessionDataTask *imgTask = [session dataTaskWithRequest:batchImgReq completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
@@ -2235,7 +2239,8 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
         [batchVidReq setValue:@"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36" forHTTPHeaderField:@"User-Agent"];
         [batchVidReq setValue:@"https://www.douyin.com/" forHTTPHeaderField:@"Referer"];
         NSString *btTtwid2 = [DYYYManager shared].localParseTtwid;
-        if (btTtwid2.length > 0) {
+        NSString *batchVidHost = videoURL.host ?: @"";
+        if (btTtwid2.length > 0 && [batchVidHost containsString:@"douyinvod"]) {
             [batchVidReq setValue:[NSString stringWithFormat:@"ttwid=%@", btTtwid2] forHTTPHeaderField:@"Cookie"];
         }
         NSURLSessionDataTask *vidTask = [session2 dataTaskWithRequest:batchVidReq completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
@@ -5377,6 +5382,7 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
         [req setValue:@"https://www.douyin.com/" forHTTPHeaderField:@"Referer"];
         NSString *cdTtwid = [DYYYManager shared].localParseTtwid;
         if (cdTtwid.length > 0) {
+            // play接口请求需要ttwid认证
             [req setValue:[NSString stringWithFormat:@"ttwid=%@", cdTtwid] forHTTPHeaderField:@"Cookie"];
         }
         NSURLSessionConfiguration *config = [NSURLSessionConfiguration defaultSessionConfiguration];
