@@ -1104,18 +1104,10 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
       configuration.timeoutIntervalForResource = 600.0; // 整个资源下载允许600s，大视频可能超过100MB
       NSURLSession *session = [NSURLSession sessionWithConfiguration:configuration delegate:[DYYYManager shared] delegateQueue:[NSOperationQueue mainQueue]];
 
-      // 创建下载任务 - CDN直链(douyinvod.com)加ttwid Cookie认证，app内部URL不加
+      // 创建下载任务 - 加User-Agent/Referer防止CDN拒绝连接
       NSMutableURLRequest *downloadReq = [NSMutableURLRequest requestWithURL:url];
-      NSString *reqHost = url.host;
-      if ([reqHost containsString:@"douyinvod.com"] || [reqHost containsString:@"365yg.com"] || [reqHost containsString:@"ixigua.com"] || [reqHost containsString:@"pstatp.com"]) {
-          // CDN直链需要UA+Referer+ttwid Cookie认证，与#699一致
-          [downloadReq setValue:@"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36" forHTTPHeaderField:@"User-Agent"];
-          [downloadReq setValue:@"https://www.douyin.com/" forHTTPHeaderField:@"Referer"];
-          NSString *cdTtwid = [DYYYManager shared].localParseTtwid;
-          if (cdTtwid.length > 0) {
-              [downloadReq setValue:[NSString stringWithFormat:@"ttwid=%@", cdTtwid] forHTTPHeaderField:@"Cookie"];
-          }
-      }
+      [downloadReq setValue:@"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36" forHTTPHeaderField:@"User-Agent"];
+      [downloadReq setValue:@"https://www.douyin.com/" forHTTPHeaderField:@"Referer"];
       NSURLSessionDownloadTask *downloadTask = [session downloadTaskWithRequest:downloadReq];
       downloadTask.taskDescription = downloadID;
 
