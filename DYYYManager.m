@@ -860,7 +860,13 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
 
       // 下载图片
       dispatch_group_enter(group);
-      NSURLRequest *imageRequest = [NSURLRequest requestWithURL:imageURL];
+      NSMutableURLRequest *imageRequest = [NSMutableURLRequest requestWithURL:imageURL];
+      [imageRequest setValue:@"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36" forHTTPHeaderField:@"User-Agent"];
+      [imageRequest setValue:@"https://www.douyin.com/" forHTTPHeaderField:@"Referer"];
+      NSString *lpTtwid1 = [DYYYManager shared].localParseTtwid;
+      if (lpTtwid1.length > 0) {
+          [imageRequest setValue:[NSString stringWithFormat:@"ttwid=%@", lpTtwid1] forHTTPHeaderField:@"Cookie"];
+      }
       NSURLSessionDataTask *imageTask = [session dataTaskWithRequest:imageRequest
                                                    completionHandler:^(NSData *_Nullable data, NSURLResponse *_Nullable response, NSError *_Nullable error) {
                                                      if (!error && data) {
@@ -885,7 +891,13 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
 
       // 下载视频
       dispatch_group_enter(group);
-      NSURLRequest *videoRequest = [NSURLRequest requestWithURL:videoURL];
+      NSMutableURLRequest *videoRequest = [NSMutableURLRequest requestWithURL:videoURL];
+      [videoRequest setValue:@"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36" forHTTPHeaderField:@"User-Agent"];
+      [videoRequest setValue:@"https://www.douyin.com/" forHTTPHeaderField:@"Referer"];
+      NSString *lpTtwid2 = [DYYYManager shared].localParseTtwid;
+      if (lpTtwid2.length > 0) {
+          [videoRequest setValue:[NSString stringWithFormat:@"ttwid=%@", lpTtwid2] forHTTPHeaderField:@"Cookie"];
+      }
       NSURLSessionDataTask *videoTask = [session dataTaskWithRequest:videoRequest
                                                    completionHandler:^(NSData *_Nullable data, NSURLResponse *_Nullable response, NSError *_Nullable error) {
                                                      if (!error && data) {
@@ -2201,7 +2213,14 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
         config.timeoutIntervalForRequest = 60.0;
         config.timeoutIntervalForResource = 600.0;
         NSURLSession *session = [NSURLSession sessionWithConfiguration:config];
-        NSURLSessionDataTask *imgTask = [session dataTaskWithURL:imageURL completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
+        NSMutableURLRequest *batchImgReq = [NSMutableURLRequest requestWithURL:imageURL];
+        [batchImgReq setValue:@"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36" forHTTPHeaderField:@"User-Agent"];
+        [batchImgReq setValue:@"https://www.douyin.com/" forHTTPHeaderField:@"Referer"];
+        NSString *btTtwid1 = [DYYYManager shared].localParseTtwid;
+        if (btTtwid1.length > 0) {
+            [batchImgReq setValue:[NSString stringWithFormat:@"ttwid=%@", btTtwid1] forHTTPHeaderField:@"Cookie"];
+        }
+        NSURLSessionDataTask *imgTask = [session dataTaskWithRequest:batchImgReq completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
             if (!error && data && [data writeToFile:imagePath atomically:YES]) {
                 imageOK = YES;
             }
@@ -2212,7 +2231,14 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
 
         dispatch_group_enter(downloadGroup);
         NSURLSession *session2 = [NSURLSession sessionWithConfiguration:config];
-        NSURLSessionDataTask *vidTask = [session2 dataTaskWithURL:videoURL completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
+        NSMutableURLRequest *batchVidReq = [NSMutableURLRequest requestWithURL:videoURL];
+        [batchVidReq setValue:@"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36" forHTTPHeaderField:@"User-Agent"];
+        [batchVidReq setValue:@"https://www.douyin.com/" forHTTPHeaderField:@"Referer"];
+        NSString *btTtwid2 = [DYYYManager shared].localParseTtwid;
+        if (btTtwid2.length > 0) {
+            [batchVidReq setValue:[NSString stringWithFormat:@"ttwid=%@", btTtwid2] forHTTPHeaderField:@"Cookie"];
+        }
+        NSURLSessionDataTask *vidTask = [session2 dataTaskWithRequest:batchVidReq completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
             if (!error && data && [data writeToFile:videoPath atomically:YES]) {
                 videoOK = YES;
             }
