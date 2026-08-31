@@ -3030,6 +3030,8 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                             }
                             // Step 2: 用ttwid调web API
                             if (ttwidStr.length > 0) {
+                                // 存储ttwid供后续CDN下载使用
+                                [DYYYManager shared].localParseTtwid = ttwidStr;
                                 NSString *apiURL = [NSString stringWithFormat:@"https://www.douyin.com/aweme/v1/web/aweme/detail/?aweme_id=%@&device_platform=webapp&aid=6383&channel=channel_pc_web", awemeId];
                                 NSMutableURLRequest *apiReq = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:apiURL]];
                                 [apiReq setValue:@"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36" forHTTPHeaderField:@"User-Agent"];
