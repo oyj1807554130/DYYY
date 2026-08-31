@@ -1104,17 +1104,8 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
       configuration.timeoutIntervalForResource = 600.0; // 整个资源下载允许600s，大视频可能超过100MB
       NSURLSession *session = [NSURLSession sessionWithConfiguration:configuration delegate:[DYYYManager shared] delegateQueue:[NSOperationQueue mainQueue]];
 
-      // 创建下载任务 - CDN直链需要UA/Referer/Cookie，app内部URL不加任何自定义header
+      // 创建下载任务 - 不加自定义header，各调用方自行处理认证
       NSMutableURLRequest *downloadReq = [NSMutableURLRequest requestWithURL:url];
-      NSString *urlHost = url.host ?: @"";
-      if ([urlHost containsString:@"douyinvod"]) {
-          [downloadReq setValue:@"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36" forHTTPHeaderField:@"User-Agent"];
-          [downloadReq setValue:@"https://www.douyin.com/" forHTTPHeaderField:@"Referer"];
-          NSString *lpTtwid = [DYYYManager shared].localParseTtwid;
-          if (lpTtwid.length > 0) {
-              [downloadReq setValue:[NSString stringWithFormat:@"ttwid=%@", lpTtwid] forHTTPHeaderField:@"Cookie"];
-          }
-      }
       NSURLSessionDownloadTask *downloadTask = [session downloadTaskWithRequest:downloadReq];
       downloadTask.taskDescription = downloadID;
 
