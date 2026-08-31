@@ -456,7 +456,7 @@
                           // 检查当前图片是否为实况
                           NSInteger curIdx = capturedImageIndex;
                           if (curIdx <= 0 || curIdx > highQualityImageURLs.count) curIdx = 1;
-                          BOOL isCurLivePhoto = (curIdx > 0 && curIdx <= livePhotoVideoURLs.count && livePhotoVideoURLs[curIdx - 1].length > 0);
+                          BOOL isCurLivePhoto = (curIdx > 0 && curIdx <= livePhotoVideoURLs.count && [(NSString *)livePhotoVideoURLs[curIdx - 1] length] > 0);
                           // 弹出选择菜单
                           AWEUserActionSheetView *imgSheet1 = [[NSClassFromString(@"AWEUserActionSheetView") alloc] init];
                           NSMutableArray *imgActs1 = [NSMutableArray array];
@@ -521,7 +521,7 @@
                               NSMutableArray *lps1 = [NSMutableArray array];
                               for (NSInteger j = 0; j < highQualityImageURLs.count; j++) {
                                   NSURL *imgUrl = [NSURL URLWithString:highQualityImageURLs[j]];
-                                  if (j < livePhotoVideoURLs.count && livePhotoVideoURLs[j].length > 0) {
+                                  if (j < livePhotoVideoURLs.count && [(NSString *)livePhotoVideoURLs[j] length] > 0) {
                                       NSURL *vidUrl = [NSURL URLWithString:livePhotoVideoURLs[j]];
                                       if (imgUrl && vidUrl) {
                                           [lps1 addObject:@{@"imageURL": imgUrl.absoluteString, @"videoURL": vidUrl.absoluteString}];
@@ -1556,7 +1556,7 @@
                           // 检查当前图片是否为实况
                           NSInteger curIdx = capturedImageIndex;
                           if (curIdx <= 0 || curIdx > highQualityImageURLs.count) curIdx = 1;
-                          BOOL isCurLivePhoto = (curIdx > 0 && curIdx <= livePhotoVideoURLs.count && livePhotoVideoURLs[curIdx - 1].length > 0);
+                          BOOL isCurLivePhoto = (curIdx > 0 && curIdx <= livePhotoVideoURLs.count && [(NSString *)livePhotoVideoURLs[curIdx - 1] length] > 0);
                           // 弹出选择菜单
                           AWEUserActionSheetView *imgSheet1 = [[NSClassFromString(@"AWEUserActionSheetView") alloc] init];
                           NSMutableArray *imgActs1 = [NSMutableArray array];
@@ -1621,7 +1621,7 @@
                               NSMutableArray *lps1 = [NSMutableArray array];
                               for (NSInteger j = 0; j < highQualityImageURLs.count; j++) {
                                   NSURL *imgUrl = [NSURL URLWithString:highQualityImageURLs[j]];
-                                  if (j < livePhotoVideoURLs.count && livePhotoVideoURLs[j].length > 0) {
+                                  if (j < livePhotoVideoURLs.count && [(NSString *)livePhotoVideoURLs[j] length] > 0) {
                                       NSURL *vidUrl = [NSURL URLWithString:livePhotoVideoURLs[j]];
                                       if (imgUrl && vidUrl) {
                                           [lps1 addObject:@{@"imageURL": imgUrl.absoluteString, @"videoURL": vidUrl.absoluteString}];
