@@ -1108,6 +1108,9 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
       NSMutableURLRequest *downloadReq = [NSMutableURLRequest requestWithURL:url];
       NSString *reqHost = url.host;
       if ([reqHost containsString:@"douyinvod.com"] || [reqHost containsString:@"365yg.com"] || [reqHost containsString:@"ixigua.com"] || [reqHost containsString:@"pstatp.com"]) {
+          // CDN直链需要UA+Referer+ttwid Cookie认证，与#699一致
+          [downloadReq setValue:@"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36" forHTTPHeaderField:@"User-Agent"];
+          [downloadReq setValue:@"https://www.douyin.com/" forHTTPHeaderField:@"Referer"];
           NSString *cdTtwid = [DYYYManager shared].localParseTtwid;
           if (cdTtwid.length > 0) {
               [downloadReq setValue:[NSString stringWithFormat:@"ttwid=%@", cdTtwid] forHTTPHeaderField:@"Cookie"];
