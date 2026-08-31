@@ -3851,7 +3851,7 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
         if (isImagePost) {
             for (NSDictionary *img in rawImages) {
                 NSArray *urlLists = @[];
-                id displayImage = img[@"display_image"] ?: img[@"origin_image"];
+                id displayImage = img[@"origin_image"] ?: img[@"display_image"];
                 if (displayImage && [displayImage isKindOfClass:[NSDictionary class]]) { NSArray *ul = displayImage[@"url_list"]; if ([ul isKindOfClass:[NSArray class]]) urlLists = ul; }
                 if (urlLists.count == 0) { id thumb = img[@"thumbnail"] ?: img; if ([thumb isKindOfClass:[NSDictionary class]]) { NSArray *ul = thumb[@"url_list"]; if ([ul isKindOfClass:[NSArray class]]) urlLists = ul; } }
                 if (urlLists.count == 0) { NSArray *ul = img[@"url_list"]; if ([ul isKindOfClass:[NSArray class]]) urlLists = ul; }
@@ -4278,7 +4278,7 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
         if (isImagePost) {
             for (NSDictionary *img in rawImages) {
                 NSArray *urlLists = @[];
-                id displayImage = img[@"display_image"] ?: img[@"origin_image"];
+                id displayImage = img[@"origin_image"] ?: img[@"display_image"];
                 if (displayImage && [displayImage isKindOfClass:[NSDictionary class]]) {
                     NSArray *ul = displayImage[@"url_list"];
                     if ([ul isKindOfClass:[NSArray class]]) urlLists = ul;
