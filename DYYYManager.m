@@ -3634,38 +3634,57 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
         dispatch_semaphore_wait(apiSem, dispatch_time(DISPATCH_TIME_NOW, 15 * NSEC_PER_SEC));
 
         if (!awemeDetail || ![awemeDetail isKindOfClass:[NSDictionary class]]) {
-            // ttwid可能过期，重试一次（同JS逻辑）
+            // ttwid可能过期，重试一次
             ttwidStr = nil;
-            dispatch_semaphore_t ttwidSem2 = dispatch_semaphore_create(0);
-            NSURLSessionDataTask *ttwidTask2 = [[NSURLSession sharedSession] dataTaskWithRequest:ttwidReq completionHandler:^(NSData *d2, NSURLResponse *r2, NSError *e2) {
-                @try {
-                    NSHTTPURLResponse *hr2 = (NSHTTPURLResponse *)r2;
-                    NSDictionary *h2 = [hr2 allHeaderFields];
-                    NSString *sc2 = h2[@"Set-Cookie"];
-                    if (sc2.length > 0) {
-                        NSRange r2v = [sc2 rangeOfString:@"ttwid="];
-                        if (r2v.location != NSNotFound) {
-                            NSString *sub2 = [sc2 substringFromIndex:r2v.location + 6];
-                            NSRange semi2 = [sub2 rangeOfString:@";"];
-                            ttwidStr = semi2.location != NSNotFound ? [sub2 substringToIndex:semi2.location] : sub2;
-                        }
-                    }
-                    if (!ttwidStr || ttwidStr.length == 0) {
-                        if (d2.length > 0) {
-                            NSDictionary *j2 = [NSJSONSerialization JSONObjectWithData:d2 options:0 error:nil];
-                            if ([j2 isKindOfClass:[NSDictionary class]]) {
-                                NSString *bt2 = j2[@"ttwid"];
-                                if (bt2.length > 0) ttwidStr = bt2;
+            // 先从app Cookie存储取ttwid
+            NSHTTPCookieStorage *retryCookieStore = [NSHTTPCookieStorage sharedHTTPCookieStorage];
+            NSArray *retryCookies = [retryCookieStore cookiesForURL:[NSURL URLWithString:@"https://www.douyin.com/"]];
+            for (NSHTTPCookie *rc in retryCookies) {
+                if ([[rc name] isEqualToString:@"ttwid"]) {
+                    ttwidStr = [rc value];
+                    break;
+                }
+            }
+            // 降级：重新注册
+            if (!ttwidStr || ttwidStr.length == 0) {
+                NSString *ttwidURL2 = @"https://ttwid.bytedance.com/ttwid/union/register/";
+                NSString *ttwidBody2 = @"{\"region\":\"cn\",\"aid\":6383,\"needFid\":false,\"service\":\"www.douyin.com\",\"migrate_info\":{\"ticket\":\"\",\"source\":\"node\"},\"cbUrlProtocol\":\"https\",\"union\":true}";
+                NSMutableURLRequest *ttwidReq2 = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:ttwidURL2]];
+                ttwidReq2.HTTPMethod = @"POST";
+                ttwidReq2.HTTPBody = [ttwidBody2 dataUsingEncoding:NSUTF8StringEncoding];
+                [ttwidReq2 setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
+                [ttwidReq2 setValue:@"Mozilla/5.0" forHTTPHeaderField:@"User-Agent"];
+                dispatch_semaphore_t ttwidSem2 = dispatch_semaphore_create(0);
+                NSURLSessionDataTask *ttwidTask2 = [[NSURLSession sharedSession] dataTaskWithRequest:ttwidReq2 completionHandler:^(NSData *d2, NSURLResponse *r2, NSError *e2) {
+                    @try {
+                        NSHTTPURLResponse *hr2 = (NSHTTPURLResponse *)r2;
+                        NSDictionary *h2 = [hr2 allHeaderFields];
+                        NSString *sc2 = h2[@"Set-Cookie"];
+                        if (sc2.length > 0) {
+                            NSRange r2v = [sc2 rangeOfString:@"ttwid="];
+                            if (r2v.location != NSNotFound) {
+                                NSString *sub2 = [sc2 substringFromIndex:r2v.location + 6];
+                                NSRange semi2 = [sub2 rangeOfString:@";"];
+                                ttwidStr = semi2.location != NSNotFound ? [sub2 substringToIndex:semi2.location] : sub2;
                             }
                         }
-                    }
-                } @catch (NSException *ex2) {}
-                dispatch_semaphore_signal(ttwidSem2);
-            }];
-            [ttwidTask2 resume];
-            dispatch_semaphore_wait(ttwidSem2, dispatch_time(DISPATCH_TIME_NOW, 10 * NSEC_PER_SEC));
-
+                        if (!ttwidStr || ttwidStr.length == 0) {
+                            if (d2.length > 0) {
+                                NSDictionary *j2 = [NSJSONSerialization JSONObjectWithData:d2 options:0 error:nil];
+                                if ([j2 isKindOfClass:[NSDictionary class]]) {
+                                    NSString *bt2 = j2[@"ttwid"];
+                                    if (bt2.length > 0) ttwidStr = bt2;
+                                }
+                            }
+                        }
+                    } @catch (NSException *ex2) {}
+                    dispatch_semaphore_signal(ttwidSem2);
+                }];
+                [ttwidTask2 resume];
+                dispatch_semaphore_wait(ttwidSem2, dispatch_time(DISPATCH_TIME_NOW, 10 * NSEC_PER_SEC));
+            }
             if (ttwidStr.length > 0) {
+                [DYYYManager shared].localParseTtwid = ttwidStr;
                 NSString *retryCookie = [NSString stringWithFormat:@"ttwid=%@", ttwidStr];
                 [apiReq setValue:retryCookie forHTTPHeaderField:@"Cookie"];
                 dispatch_semaphore_t apiSem2 = dispatch_semaphore_create(0);
