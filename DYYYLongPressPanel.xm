@@ -393,197 +393,139 @@
           [DYYYManager shared].currentImageIndex = capturedImageIndex;
           BOOL isImg1 = (capturedAwemeModel.awemeType == 68 || capturedAwemeModel.albumImages.count > 0);
           if (isImg1) {
-              // 图集：先调web API获取最高质量图片URL，再弹出选择菜单
+              // 图集：弹出选择菜单
               AWELongPressPanelManager *pm1 = [%c(AWELongPressPanelManager) shareInstance];
               [pm1 dismissWithAnimation:YES completion:^{
-                  [DYYYUtils showToast:@"正在获取高质量图片..."];
-                  [DYYYManager localParseFullFromAwemeModel:capturedAwemeModel completion:^(NSDictionary *localData) {
-                      dispatch_async(dispatch_get_main_queue(), ^{
-                          // 从web API结果提取高质量图片URL和实况视频URL
-                          NSArray *webImages = localData[@"images"];
-                          NSArray *webVideoList = localData[@"video_list"];
-                          NSMutableArray *highQualityImageURLs = [NSMutableArray array];
-                          NSMutableArray *livePhotoVideoURLs = [NSMutableArray array];
-                          if (webImages && [webImages isKindOfClass:[NSArray class]]) {
-                              for (NSString *imgUrl in webImages) {
-                                  if ([imgUrl isKindOfClass:[NSString class]] && imgUrl.length > 0) {
-                                      [highQualityImageURLs addObject:imgUrl];
+                  AWEUserActionSheetView *imgSheet1 = [[NSClassFromString(@"AWEUserActionSheetView") alloc] init];
+                  NSMutableArray *imgActs1 = [NSMutableArray array];
+                  AWEImageAlbumImageModel *curI1ForTitle = nil;
+                  if (capturedAwemeModel.currentImageIndex > 0 && capturedAwemeModel.currentImageIndex <= capturedAwemeModel.albumImages.count) {
+                      curI1ForTitle = capturedAwemeModel.albumImages[capturedAwemeModel.currentImageIndex - 1];
+                  } else {
+                      curI1ForTitle = capturedAwemeModel.albumImages.firstObject;
+                  }
+                  NSString *curSaveTitle1 = (curI1ForTitle && curI1ForTitle.clipVideo != nil) ? @"保存当前实况" : @"保存当前图片";
+                  AWEUserSheetAction *saveCur1 = [NSClassFromString(@"AWEUserSheetAction") actionWithTitle:curSaveTitle1 imgName:nil handler:^{
+                      AWEImageAlbumImageModel *curI1 = nil;
+                      if (capturedAwemeModel.currentImageIndex > 0 && capturedAwemeModel.currentImageIndex <= capturedAwemeModel.albumImages.count) {
+                          curI1 = capturedAwemeModel.albumImages[capturedAwemeModel.currentImageIndex - 1];
+                      } else {
+                          curI1 = capturedAwemeModel.albumImages.firstObject;
+                      }
+                      if (curI1) {
+                          NSURL *d1 = nil;
+                          {
+                              id originUrlModel1 = [curI1 valueForKey:@"originUrl"];
+                              if (originUrlModel1 && [originUrlModel1 respondsToSelector:@selector(originURLList)]) {
+                                  NSArray *originList1 = [originUrlModel1 originURLList];
+                                  if ([originList1 isKindOfClass:[NSArray class]] && originList1.count > 0) {
+                                      d1 = [DYYYUtils originalImageURLFromURLList:originList1];
                                   }
                               }
                           }
-                          // 提取实况视频URL（优先用app内部URL，自带签名不需要cookie认证，分辨率更高）
-                          NSArray *appAlbumImages = [capturedAwemeModel valueForKey:@"albumImages"];
-                          if (appAlbumImages && [appAlbumImages isKindOfClass:[NSArray class]]) {
-                              for (id imgModel in appAlbumImages) {
-                                  @try {
-                                      id clipVideo = [imgModel valueForKey:@"clipVideo"];
-                                      if (clipVideo) {
-                                          id playURL = [clipVideo valueForKey:@"playURL"];
-                                          if (playURL) {
-                                              NSString *vUrl = nil;
-                                              NSArray *originList = [playURL valueForKey:@"originURLList"];
-                                              if ([originList isKindOfClass:[NSArray class]] && originList.count > 0) {
-                                                  vUrl = originList.firstObject;
-                                              }
-                                              if (!vUrl) {
-                                                  NSArray *urlList = [playURL valueForKey:@"urlList"];
-                                                  if ([urlList isKindOfClass:[NSArray class]] && urlList.count > 0) {
-                                                      vUrl = urlList.firstObject;
-                                                  }
-                                              }
-                                              if (vUrl.length > 0) {
-                                                  [livePhotoVideoURLs addObject:vUrl];
-                                              } else {
-                                                  [livePhotoVideoURLs addObject:@""];
-                                              }
-                                          } else {
-                                              [livePhotoVideoURLs addObject:@""];
-                                          }
-                                      } else {
-                                          [livePhotoVideoURLs addObject:@""];
-                                      }
-                                  } @catch (NSException *e) {
-                                      [livePhotoVideoURLs addObject:@""];
-                                  }
+                          if (!d1) {
+                              for (NSString *us in curI1.urlList) {
+                                  NSURL *u1 = [NSURL URLWithString:us];
+                                  if (![[u1.path.lowercaseString pathExtension] isEqualToString:@"image"]) { d1 = u1; break; }
                               }
+                              if (!d1 && curI1.urlList.count > 0) d1 = [DYYYUtils originalImageURLFromURLList:curI1.urlList];
                           }
-                          // 如果web API没拿到图片，降级用app内存URL
-                          if (highQualityImageURLs.count == 0) {
-                              NSArray *albumImages = [capturedAwemeModel valueForKey:@"albumImages"];
-                              if (albumImages && [albumImages isKindOfClass:[NSArray class]]) {
-                                  for (id imgModel in albumImages) {
-                                      @try {
-                                          NSString *imgURL = nil;
-                                          {
-                                              id originUrlModel = [imgModel valueForKey:@"originUrl"];
-                                              if (originUrlModel && [originUrlModel respondsToSelector:@selector(originURLList)]) {
-                                                  NSArray *originList = [originUrlModel originURLList];
-                                                  if ([originList isKindOfClass:[NSArray class]] && originList.count > 0) {
-                                                      imgURL = originList.firstObject;
-                                                  }
-                                              }
-                                          }
-                                          if (!imgURL) {
-                                              NSArray *urlList = [imgModel valueForKey:@"urlList"];
-                                              if ([urlList isKindOfClass:[NSArray class]] && urlList.count > 0) {
-                                                  for (NSString *u in urlList) {
-                                                      if (![u hasSuffix:@".image"]) { imgURL = u; break; }
-                                                  }
-                                                  if (!imgURL) imgURL = urlList.firstObject;
-                                              }
-                                          }
-                                          if (imgURL.length > 0) [highQualityImageURLs addObject:imgURL];
-                                      } @catch (NSException *e) {}
-                                  }
-                              }
+                          if (curI1.clipVideo != nil && d1 != nil) {
+                              NSURL *v1 = [curI1.clipVideo.playURL getDYYYSrcURLDownload];
+                              if (v1) [DYYYManager downloadLivePhoto:d1 videoURL:v1 completion:^{}];
+                              else [DYYYManager downloadMedia:d1 mediaType:MediaTypeImage audio:nil completion:^(BOOL s) {}];
+                          } else if (d1 != nil) {
+                              [DYYYManager downloadMedia:d1 mediaType:MediaTypeImage audio:nil completion:^(BOOL s) {}];
+                          } else {
+                              [DYYYUtils showToast:@"没有找到合适格式的图片"];
                           }
-                          // 检查当前图片是否为实况
-                          NSInteger curIdx = capturedImageIndex;
-                          if (curIdx <= 0 || curIdx > highQualityImageURLs.count) curIdx = 1;
-                          BOOL isCurLivePhoto = (curIdx > 0 && curIdx <= livePhotoVideoURLs.count && [(NSString *)livePhotoVideoURLs[curIdx - 1] length] > 0);
-                          // 弹出选择菜单
-                          AWEUserActionSheetView *imgSheet1 = [[NSClassFromString(@"AWEUserActionSheetView") alloc] init];
-                          NSMutableArray *imgActs1 = [NSMutableArray array];
-                          // 1. 保存实况（仅当前图片为实况时显示）
-                          if (isCurLivePhoto) {
-                              AWEUserSheetAction *saveLive1 = [NSClassFromString(@"AWEUserSheetAction") actionWithTitle:@"保存实况" imgName:nil handler:^{
-                                  NSInteger ci = curIdx - 1;
-                                  if (ci >= 0 && ci < highQualityImageURLs.count && ci < livePhotoVideoURLs.count) {
-                                      NSURL *imgUrl = [NSURL URLWithString:highQualityImageURLs[ci]];
-                                      NSURL *vidUrl = [NSURL URLWithString:livePhotoVideoURLs[ci]];
-                                      if (imgUrl && vidUrl) {
-                                          [DYYYManager downloadLivePhoto:imgUrl videoURL:vidUrl completion:^{}];
-                                      } else if (imgUrl) {
-                                          [DYYYManager downloadMedia:imgUrl mediaType:MediaTypeImage audio:nil completion:^(BOOL s) {}];
-                                      } else {
-                                          [DYYYUtils showToast:@"没有找到实况数据"];
-                                      }
-                                  } else {
-                                      [DYYYUtils showToast:@"没有找到当前实况"];
-                                  }
-                              }];
-                              [imgActs1 addObject:saveLive1];
-                          }
-                          // 2. 保存视频（仅当前图片为实况时显示）
-                          if (isCurLivePhoto) {
-                              AWEUserSheetAction *saveVideo1 = [NSClassFromString(@"AWEUserSheetAction") actionWithTitle:@"保存视频" imgName:nil handler:^{
-                                  NSInteger ci = curIdx - 1;
-                                  if (ci >= 0 && ci < livePhotoVideoURLs.count) {
-                                      NSURL *vidUrl = [NSURL URLWithString:livePhotoVideoURLs[ci]];
-                                      if (vidUrl) {
-                                          [DYYYUtils showToast:@"正在下载实况视频..."];
-                                          [DYYYManager downloadMedia:vidUrl mediaType:MediaTypeVideo audio:nil completion:^(BOOL s) {
-                                              if (!s) [DYYYUtils showToast:@"实况视频下载失败"];
-                                          }];
-                                      } else {
-                                          [DYYYUtils showToast:@"无法获取实况视频地址"];
-                                      }
-                                  } else {
-                                      [DYYYUtils showToast:@"当前没有实况"];
-                                  }
-                              }];
-                              [imgActs1 addObject:saveVideo1];
-                          }
-                          // 3. 保存当前图片
-                          AWEUserSheetAction *saveCurImg1 = [NSClassFromString(@"AWEUserSheetAction") actionWithTitle:@"保存当前图片" imgName:nil handler:^{
-                              NSInteger ci = curIdx - 1;
-                              if (ci >= 0 && ci < highQualityImageURLs.count) {
-                                  NSURL *imgUrl = [NSURL URLWithString:highQualityImageURLs[ci]];
-                                  if (imgUrl) {
-                                      [DYYYManager downloadMedia:imgUrl mediaType:MediaTypeImage audio:nil completion:^(BOOL s) {}];
-                                  } else {
-                                      [DYYYUtils showToast:@"没有找到合适格式的图片"];
-                                  }
-                              } else {
-                                  [DYYYUtils showToast:@"没有找到当前图片"];
-                              }
-                          }];
-                          [imgActs1 addObject:saveCurImg1];
-                          // 4. 保存全部图片
-                          AWEUserSheetAction *saveAll1 = [NSClassFromString(@"AWEUserSheetAction") actionWithTitle:@"保存全部图片" imgName:nil handler:^{
-                              NSMutableArray *iurls1 = [NSMutableArray array];
-                              NSMutableArray *lps1 = [NSMutableArray array];
-                              for (NSInteger j = 0; j < highQualityImageURLs.count; j++) {
-                                  NSURL *imgUrl = [NSURL URLWithString:highQualityImageURLs[j]];
-                                  if (j < livePhotoVideoURLs.count && [(NSString *)livePhotoVideoURLs[j] length] > 0) {
-                                      NSURL *vidUrl = [NSURL URLWithString:livePhotoVideoURLs[j]];
-                                      if (imgUrl && vidUrl) {
-                                          [lps1 addObject:@{@"imageURL": imgUrl.absoluteString, @"videoURL": vidUrl.absoluteString}];
-                                      } else if (imgUrl) {
-                                          [iurls1 addObject:imgUrl.absoluteString];
-                                      }
-                                  } else if (imgUrl) {
-                                      [iurls1 addObject:imgUrl.absoluteString];
-                                  }
-                              }
-                              if (lps1.count > 0) [DYYYManager downloadAllLivePhotosWithProgress:lps1 progress:nil completion:^(NSInteger s, NSInteger t) {}];
-                              else if (iurls1.count > 0) [DYYYManager downloadAllImages:iurls1];
-                              else [DYYYUtils showToast:@"没有找到合适格式的图片"];
-                          }];
-                          [imgActs1 addObject:saveAll1];
-                          [imgSheet1 setActions:imgActs1];
-                          [imgSheet1 show];
-                      });
+                      } else {
+                          [DYYYUtils showToast:@"没有找到当前图片"];
+                      }
                   }];
-              }];} else {
+                  [imgActs1 addObject:saveCur1];
+                  BOOL hasAnyLivePhoto1 = NO;
+                  for (AWEImageAlbumImageModel *m in capturedAwemeModel.albumImages) {
+                      if (m.clipVideo != nil) { hasAnyLivePhoto1 = YES; break; }
+                  }
+                  NSString *allSaveTitle1 = hasAnyLivePhoto1 ? @"保存全部（含实况）" : @"保存全部图片";
+                  AWEUserSheetAction *saveAll1 = [NSClassFromString(@"AWEUserSheetAction") actionWithTitle:allSaveTitle1 imgName:nil handler:^{
+                      NSMutableArray *iurls1 = [NSMutableArray array];
+                      NSMutableArray *lps1 = [NSMutableArray array];
+                      for (AWEImageAlbumImageModel *imgM in capturedAwemeModel.albumImages) {
+                          if (imgM.urlList.count > 0) {
+                              NSURL *d1 = nil;
+                              {
+                                  id originUrlModel1 = [imgM valueForKey:@"originUrl"];
+                                  if (originUrlModel1 && [originUrlModel1 respondsToSelector:@selector(originURLList)]) {
+                                      NSArray *originList1 = [originUrlModel1 originURLList];
+                                      if ([originList1 isKindOfClass:[NSArray class]] && originList1.count > 0) {
+                                          d1 = [DYYYUtils originalImageURLFromURLList:originList1];
+                                      }
+                                  }
+                              }
+                              if (!d1) {
+                                  for (NSString *us in imgM.urlList) {
+                                      NSURL *u1 = [NSURL URLWithString:us];
+                                      if (![[u1.path.lowercaseString pathExtension] isEqualToString:@"image"]) { d1 = u1; break; }
+                                  }
+                                  if (!d1 && imgM.urlList.count > 0) d1 = [DYYYUtils originalImageURLFromURLList:imgM.urlList];
+                              }
+                              if (imgM.clipVideo != nil && d1 != nil) {
+                                  NSURL *v1 = [imgM.clipVideo.playURL getDYYYSrcURLDownload];
+                                  if (v1) [lps1 addObject:@{@"imageURL": d1.absoluteString, @"videoURL": v1.absoluteString}];
+                                  else [iurls1 addObject:d1.absoluteString];
+                              } else if (d1 != nil) {
+                                  [iurls1 addObject:d1.absoluteString];
+                              }
+                          }
+                      }
+                      if (lps1.count > 0) [DYYYManager downloadAllLivePhotosWithProgress:lps1 progress:nil completion:^(NSInteger s, NSInteger t) {}];
+                      else if (iurls1.count > 0) [DYYYManager downloadAllImages:iurls1];
+                      else [DYYYUtils showToast:@"没有找到合适格式的图片"];
+                  }];
+                  [imgActs1 addObject:saveAll1];
+                  // 保存当前实况为视频
+                  if (curI1ForTitle && curI1ForTitle.clipVideo != nil) {
+                      AWEUserSheetAction *saveCurLiveAsVideo1 = [NSClassFromString(@"AWEUserSheetAction") actionWithTitle:@"保存当前实况为视频" imgName:nil handler:^{
+                          AWEImageAlbumImageModel *curI1 = nil;
+                          if (capturedAwemeModel.currentImageIndex > 0 && capturedAwemeModel.currentImageIndex <= capturedAwemeModel.albumImages.count) {
+                              curI1 = capturedAwemeModel.albumImages[capturedAwemeModel.currentImageIndex - 1];
+                          } else {
+                              curI1 = capturedAwemeModel.albumImages.firstObject;
+                          }
+                          if (curI1 && curI1.clipVideo != nil) {
+                              NSURL *v1 = [curI1.clipVideo.playURL getDYYYSrcURLDownload];
+                              if (!v1 && curI1.clipVideo.playURL.originURLList.count > 0) {
+                                  v1 = [NSURL URLWithString:curI1.clipVideo.playURL.originURLList.firstObject];
+                              }
+                              if (v1) {
+                                  [DYYYUtils showToast:@"正在下载实况视频..."];
+                                  [DYYYManager downloadMedia:v1 mediaType:MediaTypeVideo audio:nil completion:^(BOOL s) {
+                                      if (!s) [DYYYUtils showToast:@"实况视频下载失败"];
+                                  }];
+                              } else {
+                                  [DYYYUtils showToast:@"无法获取实况视频地址"];
+                              }
+                          } else {
+                              [DYYYUtils showToast:@"当前没有实况"];
+                          }
+                      }];
+                      [imgActs1 addObject:saveCurLiveAsVideo1];
+                  }
+                  [imgSheet1 setActions:imgActs1];
+                  [imgSheet1 show];
+              }];
+           } else {
                AWELongPressPanelManager *panelManager = [%c(AWELongPressPanelManager) shareInstance];
                [panelManager dismissWithAnimation:YES completion:nil];
                [DYYYUtils showToast:@"正在解析画质..."];
-               [DYYYManager localParseFullFromAwemeModel:capturedAwemeModel completion:^(NSDictionary *localData) {
+               [DYYYManager localParseFromAwemeModel:capturedAwemeModel completion:^(NSDictionary *localData) {
                    dispatch_async(dispatch_get_main_queue(), ^{
                        if (localData) {
                            [DYYYManager handleVideoData:localData];
                        } else {
-                           // web API失败，降级用app内部URL解析
-                           [DYYYManager localParseFromAwemeModel:capturedAwemeModel completion:^(NSDictionary *fallbackData) {
-                               dispatch_async(dispatch_get_main_queue(), ^{
-                                   if (fallbackData) {
-                                       [DYYYManager handleVideoData:fallbackData];
-                                   } else {
-                                       [DYYYUtils showToast:@"本地解析失败，视频数据为空"];
-                                   }
-                               });
-                           }];
+                           [DYYYUtils showToast:@"本地解析失败，视频数据为空"];
                        }
                    });
                }];
@@ -668,7 +610,7 @@
         [viewModels addObject:apiDownload3];
     }
 
-    // 本地解析功能（同接口1，使用localParseFromAwemeModel）
+    // 本地解析功能（独立于接口1，使用localParseFullFromAwemeModel）
     if (enableApiDownload) {
         AWELongPressPanelBaseViewModel *localParseVM = [[%c(AWELongPressPanelBaseViewModel) alloc] init];
         localParseVM.awemeModel = self.awemeModel;
@@ -1526,197 +1468,139 @@
           [DYYYManager shared].currentImageIndex = capturedImageIndex;
           BOOL isImg1 = (capturedAwemeModel.awemeType == 68 || capturedAwemeModel.albumImages.count > 0);
           if (isImg1) {
-              // 图集：先调web API获取最高质量图片URL，再弹出选择菜单
+              // 图集：弹出选择菜单
               AWELongPressPanelManager *pm1 = [%c(AWELongPressPanelManager) shareInstance];
               [pm1 dismissWithAnimation:YES completion:^{
-                  [DYYYUtils showToast:@"正在获取高质量图片..."];
-                  [DYYYManager localParseFullFromAwemeModel:capturedAwemeModel completion:^(NSDictionary *localData) {
-                      dispatch_async(dispatch_get_main_queue(), ^{
-                          // 从web API结果提取高质量图片URL和实况视频URL
-                          NSArray *webImages = localData[@"images"];
-                          NSArray *webVideoList = localData[@"video_list"];
-                          NSMutableArray *highQualityImageURLs = [NSMutableArray array];
-                          NSMutableArray *livePhotoVideoURLs = [NSMutableArray array];
-                          if (webImages && [webImages isKindOfClass:[NSArray class]]) {
-                              for (NSString *imgUrl in webImages) {
-                                  if ([imgUrl isKindOfClass:[NSString class]] && imgUrl.length > 0) {
-                                      [highQualityImageURLs addObject:imgUrl];
+                  AWEUserActionSheetView *imgSheet1 = [[NSClassFromString(@"AWEUserActionSheetView") alloc] init];
+                  NSMutableArray *imgActs1 = [NSMutableArray array];
+                  AWEImageAlbumImageModel *curI1ForTitle = nil;
+                  if (capturedAwemeModel.currentImageIndex > 0 && capturedAwemeModel.currentImageIndex <= capturedAwemeModel.albumImages.count) {
+                      curI1ForTitle = capturedAwemeModel.albumImages[capturedAwemeModel.currentImageIndex - 1];
+                  } else {
+                      curI1ForTitle = capturedAwemeModel.albumImages.firstObject;
+                  }
+                  NSString *curSaveTitle1 = (curI1ForTitle && curI1ForTitle.clipVideo != nil) ? @"保存当前实况" : @"保存当前图片";
+                  AWEUserSheetAction *saveCur1 = [NSClassFromString(@"AWEUserSheetAction") actionWithTitle:curSaveTitle1 imgName:nil handler:^{
+                      AWEImageAlbumImageModel *curI1 = nil;
+                      if (capturedAwemeModel.currentImageIndex > 0 && capturedAwemeModel.currentImageIndex <= capturedAwemeModel.albumImages.count) {
+                          curI1 = capturedAwemeModel.albumImages[capturedAwemeModel.currentImageIndex - 1];
+                      } else {
+                          curI1 = capturedAwemeModel.albumImages.firstObject;
+                      }
+                      if (curI1) {
+                          NSURL *d1 = nil;
+                          {
+                              id originUrlModel1 = [curI1 valueForKey:@"originUrl"];
+                              if (originUrlModel1 && [originUrlModel1 respondsToSelector:@selector(originURLList)]) {
+                                  NSArray *originList1 = [originUrlModel1 originURLList];
+                                  if ([originList1 isKindOfClass:[NSArray class]] && originList1.count > 0) {
+                                      d1 = [DYYYUtils originalImageURLFromURLList:originList1];
                                   }
                               }
                           }
-                          // 提取实况视频URL（优先用app内部URL，自带签名不需要cookie认证，分辨率更高）
-                          NSArray *appAlbumImages = [capturedAwemeModel valueForKey:@"albumImages"];
-                          if (appAlbumImages && [appAlbumImages isKindOfClass:[NSArray class]]) {
-                              for (id imgModel in appAlbumImages) {
-                                  @try {
-                                      id clipVideo = [imgModel valueForKey:@"clipVideo"];
-                                      if (clipVideo) {
-                                          id playURL = [clipVideo valueForKey:@"playURL"];
-                                          if (playURL) {
-                                              NSString *vUrl = nil;
-                                              NSArray *originList = [playURL valueForKey:@"originURLList"];
-                                              if ([originList isKindOfClass:[NSArray class]] && originList.count > 0) {
-                                                  vUrl = originList.firstObject;
-                                              }
-                                              if (!vUrl) {
-                                                  NSArray *urlList = [playURL valueForKey:@"urlList"];
-                                                  if ([urlList isKindOfClass:[NSArray class]] && urlList.count > 0) {
-                                                      vUrl = urlList.firstObject;
-                                                  }
-                                              }
-                                              if (vUrl.length > 0) {
-                                                  [livePhotoVideoURLs addObject:vUrl];
-                                              } else {
-                                                  [livePhotoVideoURLs addObject:@""];
-                                              }
-                                          } else {
-                                              [livePhotoVideoURLs addObject:@""];
-                                          }
-                                      } else {
-                                          [livePhotoVideoURLs addObject:@""];
-                                      }
-                                  } @catch (NSException *e) {
-                                      [livePhotoVideoURLs addObject:@""];
-                                  }
+                          if (!d1) {
+                              for (NSString *us in curI1.urlList) {
+                                  NSURL *u1 = [NSURL URLWithString:us];
+                                  if (![[u1.path.lowercaseString pathExtension] isEqualToString:@"image"]) { d1 = u1; break; }
                               }
+                              if (!d1 && curI1.urlList.count > 0) d1 = [DYYYUtils originalImageURLFromURLList:curI1.urlList];
                           }
-                          // 如果web API没拿到图片，降级用app内存URL
-                          if (highQualityImageURLs.count == 0) {
-                              NSArray *albumImages = [capturedAwemeModel valueForKey:@"albumImages"];
-                              if (albumImages && [albumImages isKindOfClass:[NSArray class]]) {
-                                  for (id imgModel in albumImages) {
-                                      @try {
-                                          NSString *imgURL = nil;
-                                          {
-                                              id originUrlModel = [imgModel valueForKey:@"originUrl"];
-                                              if (originUrlModel && [originUrlModel respondsToSelector:@selector(originURLList)]) {
-                                                  NSArray *originList = [originUrlModel originURLList];
-                                                  if ([originList isKindOfClass:[NSArray class]] && originList.count > 0) {
-                                                      imgURL = originList.firstObject;
-                                                  }
-                                              }
-                                          }
-                                          if (!imgURL) {
-                                              NSArray *urlList = [imgModel valueForKey:@"urlList"];
-                                              if ([urlList isKindOfClass:[NSArray class]] && urlList.count > 0) {
-                                                  for (NSString *u in urlList) {
-                                                      if (![u hasSuffix:@".image"]) { imgURL = u; break; }
-                                                  }
-                                                  if (!imgURL) imgURL = urlList.firstObject;
-                                              }
-                                          }
-                                          if (imgURL.length > 0) [highQualityImageURLs addObject:imgURL];
-                                      } @catch (NSException *e) {}
-                                  }
-                              }
+                          if (curI1.clipVideo != nil && d1 != nil) {
+                              NSURL *v1 = [curI1.clipVideo.playURL getDYYYSrcURLDownload];
+                              if (v1) [DYYYManager downloadLivePhoto:d1 videoURL:v1 completion:^{}];
+                              else [DYYYManager downloadMedia:d1 mediaType:MediaTypeImage audio:nil completion:^(BOOL s) {}];
+                          } else if (d1 != nil) {
+                              [DYYYManager downloadMedia:d1 mediaType:MediaTypeImage audio:nil completion:^(BOOL s) {}];
+                          } else {
+                              [DYYYUtils showToast:@"没有找到合适格式的图片"];
                           }
-                          // 检查当前图片是否为实况
-                          NSInteger curIdx = capturedImageIndex;
-                          if (curIdx <= 0 || curIdx > highQualityImageURLs.count) curIdx = 1;
-                          BOOL isCurLivePhoto = (curIdx > 0 && curIdx <= livePhotoVideoURLs.count && [(NSString *)livePhotoVideoURLs[curIdx - 1] length] > 0);
-                          // 弹出选择菜单
-                          AWEUserActionSheetView *imgSheet1 = [[NSClassFromString(@"AWEUserActionSheetView") alloc] init];
-                          NSMutableArray *imgActs1 = [NSMutableArray array];
-                          // 1. 保存实况（仅当前图片为实况时显示）
-                          if (isCurLivePhoto) {
-                              AWEUserSheetAction *saveLive1 = [NSClassFromString(@"AWEUserSheetAction") actionWithTitle:@"保存实况" imgName:nil handler:^{
-                                  NSInteger ci = curIdx - 1;
-                                  if (ci >= 0 && ci < highQualityImageURLs.count && ci < livePhotoVideoURLs.count) {
-                                      NSURL *imgUrl = [NSURL URLWithString:highQualityImageURLs[ci]];
-                                      NSURL *vidUrl = [NSURL URLWithString:livePhotoVideoURLs[ci]];
-                                      if (imgUrl && vidUrl) {
-                                          [DYYYManager downloadLivePhoto:imgUrl videoURL:vidUrl completion:^{}];
-                                      } else if (imgUrl) {
-                                          [DYYYManager downloadMedia:imgUrl mediaType:MediaTypeImage audio:nil completion:^(BOOL s) {}];
-                                      } else {
-                                          [DYYYUtils showToast:@"没有找到实况数据"];
-                                      }
-                                  } else {
-                                      [DYYYUtils showToast:@"没有找到当前实况"];
-                                  }
-                              }];
-                              [imgActs1 addObject:saveLive1];
-                          }
-                          // 2. 保存视频（仅当前图片为实况时显示）
-                          if (isCurLivePhoto) {
-                              AWEUserSheetAction *saveVideo1 = [NSClassFromString(@"AWEUserSheetAction") actionWithTitle:@"保存视频" imgName:nil handler:^{
-                                  NSInteger ci = curIdx - 1;
-                                  if (ci >= 0 && ci < livePhotoVideoURLs.count) {
-                                      NSURL *vidUrl = [NSURL URLWithString:livePhotoVideoURLs[ci]];
-                                      if (vidUrl) {
-                                          [DYYYUtils showToast:@"正在下载实况视频..."];
-                                          [DYYYManager downloadMedia:vidUrl mediaType:MediaTypeVideo audio:nil completion:^(BOOL s) {
-                                              if (!s) [DYYYUtils showToast:@"实况视频下载失败"];
-                                          }];
-                                      } else {
-                                          [DYYYUtils showToast:@"无法获取实况视频地址"];
-                                      }
-                                  } else {
-                                      [DYYYUtils showToast:@"当前没有实况"];
-                                  }
-                              }];
-                              [imgActs1 addObject:saveVideo1];
-                          }
-                          // 3. 保存当前图片
-                          AWEUserSheetAction *saveCurImg1 = [NSClassFromString(@"AWEUserSheetAction") actionWithTitle:@"保存当前图片" imgName:nil handler:^{
-                              NSInteger ci = curIdx - 1;
-                              if (ci >= 0 && ci < highQualityImageURLs.count) {
-                                  NSURL *imgUrl = [NSURL URLWithString:highQualityImageURLs[ci]];
-                                  if (imgUrl) {
-                                      [DYYYManager downloadMedia:imgUrl mediaType:MediaTypeImage audio:nil completion:^(BOOL s) {}];
-                                  } else {
-                                      [DYYYUtils showToast:@"没有找到合适格式的图片"];
-                                  }
-                              } else {
-                                  [DYYYUtils showToast:@"没有找到当前图片"];
-                              }
-                          }];
-                          [imgActs1 addObject:saveCurImg1];
-                          // 4. 保存全部图片
-                          AWEUserSheetAction *saveAll1 = [NSClassFromString(@"AWEUserSheetAction") actionWithTitle:@"保存全部图片" imgName:nil handler:^{
-                              NSMutableArray *iurls1 = [NSMutableArray array];
-                              NSMutableArray *lps1 = [NSMutableArray array];
-                              for (NSInteger j = 0; j < highQualityImageURLs.count; j++) {
-                                  NSURL *imgUrl = [NSURL URLWithString:highQualityImageURLs[j]];
-                                  if (j < livePhotoVideoURLs.count && [(NSString *)livePhotoVideoURLs[j] length] > 0) {
-                                      NSURL *vidUrl = [NSURL URLWithString:livePhotoVideoURLs[j]];
-                                      if (imgUrl && vidUrl) {
-                                          [lps1 addObject:@{@"imageURL": imgUrl.absoluteString, @"videoURL": vidUrl.absoluteString}];
-                                      } else if (imgUrl) {
-                                          [iurls1 addObject:imgUrl.absoluteString];
-                                      }
-                                  } else if (imgUrl) {
-                                      [iurls1 addObject:imgUrl.absoluteString];
-                                  }
-                              }
-                              if (lps1.count > 0) [DYYYManager downloadAllLivePhotosWithProgress:lps1 progress:nil completion:^(NSInteger s, NSInteger t) {}];
-                              else if (iurls1.count > 0) [DYYYManager downloadAllImages:iurls1];
-                              else [DYYYUtils showToast:@"没有找到合适格式的图片"];
-                          }];
-                          [imgActs1 addObject:saveAll1];
-                          [imgSheet1 setActions:imgActs1];
-                          [imgSheet1 show];
-                      });
+                      } else {
+                          [DYYYUtils showToast:@"没有找到当前图片"];
+                      }
                   }];
-              }];} else {
+                  [imgActs1 addObject:saveCur1];
+                  BOOL hasAnyLivePhoto1 = NO;
+                  for (AWEImageAlbumImageModel *m in capturedAwemeModel.albumImages) {
+                      if (m.clipVideo != nil) { hasAnyLivePhoto1 = YES; break; }
+                  }
+                  NSString *allSaveTitle1 = hasAnyLivePhoto1 ? @"保存全部（含实况）" : @"保存全部图片";
+                  AWEUserSheetAction *saveAll1 = [NSClassFromString(@"AWEUserSheetAction") actionWithTitle:allSaveTitle1 imgName:nil handler:^{
+                      NSMutableArray *iurls1 = [NSMutableArray array];
+                      NSMutableArray *lps1 = [NSMutableArray array];
+                      for (AWEImageAlbumImageModel *imgM in capturedAwemeModel.albumImages) {
+                          if (imgM.urlList.count > 0) {
+                              NSURL *d1 = nil;
+                              {
+                                  id originUrlModel1 = [imgM valueForKey:@"originUrl"];
+                                  if (originUrlModel1 && [originUrlModel1 respondsToSelector:@selector(originURLList)]) {
+                                      NSArray *originList1 = [originUrlModel1 originURLList];
+                                      if ([originList1 isKindOfClass:[NSArray class]] && originList1.count > 0) {
+                                          d1 = [DYYYUtils originalImageURLFromURLList:originList1];
+                                      }
+                                  }
+                              }
+                              if (!d1) {
+                                  for (NSString *us in imgM.urlList) {
+                                      NSURL *u1 = [NSURL URLWithString:us];
+                                      if (![[u1.path.lowercaseString pathExtension] isEqualToString:@"image"]) { d1 = u1; break; }
+                                  }
+                                  if (!d1 && imgM.urlList.count > 0) d1 = [DYYYUtils originalImageURLFromURLList:imgM.urlList];
+                              }
+                              if (imgM.clipVideo != nil && d1 != nil) {
+                                  NSURL *v1 = [imgM.clipVideo.playURL getDYYYSrcURLDownload];
+                                  if (v1) [lps1 addObject:@{@"imageURL": d1.absoluteString, @"videoURL": v1.absoluteString}];
+                                  else [iurls1 addObject:d1.absoluteString];
+                              } else if (d1 != nil) {
+                                  [iurls1 addObject:d1.absoluteString];
+                              }
+                          }
+                      }
+                      if (lps1.count > 0) [DYYYManager downloadAllLivePhotosWithProgress:lps1 progress:nil completion:^(NSInteger s, NSInteger t) {}];
+                      else if (iurls1.count > 0) [DYYYManager downloadAllImages:iurls1];
+                      else [DYYYUtils showToast:@"没有找到合适格式的图片"];
+                  }];
+                  [imgActs1 addObject:saveAll1];
+                  // 保存当前实况为视频
+                  if (curI1ForTitle && curI1ForTitle.clipVideo != nil) {
+                      AWEUserSheetAction *saveCurLiveAsVideo1 = [NSClassFromString(@"AWEUserSheetAction") actionWithTitle:@"保存当前实况为视频" imgName:nil handler:^{
+                          AWEImageAlbumImageModel *curI1 = nil;
+                          if (capturedAwemeModel.currentImageIndex > 0 && capturedAwemeModel.currentImageIndex <= capturedAwemeModel.albumImages.count) {
+                              curI1 = capturedAwemeModel.albumImages[capturedAwemeModel.currentImageIndex - 1];
+                          } else {
+                              curI1 = capturedAwemeModel.albumImages.firstObject;
+                          }
+                          if (curI1 && curI1.clipVideo != nil) {
+                              NSURL *v1 = [curI1.clipVideo.playURL getDYYYSrcURLDownload];
+                              if (!v1 && curI1.clipVideo.playURL.originURLList.count > 0) {
+                                  v1 = [NSURL URLWithString:curI1.clipVideo.playURL.originURLList.firstObject];
+                              }
+                              if (v1) {
+                                  [DYYYUtils showToast:@"正在下载实况视频..."];
+                                  [DYYYManager downloadMedia:v1 mediaType:MediaTypeVideo audio:nil completion:^(BOOL s) {
+                                      if (!s) [DYYYUtils showToast:@"实况视频下载失败"];
+                                  }];
+                              } else {
+                                  [DYYYUtils showToast:@"无法获取实况视频地址"];
+                              }
+                          } else {
+                              [DYYYUtils showToast:@"当前没有实况"];
+                          }
+                      }];
+                      [imgActs1 addObject:saveCurLiveAsVideo1];
+                  }
+                  [imgSheet1 setActions:imgActs1];
+                  [imgSheet1 show];
+              }];
+           } else {
                AWELongPressPanelManager *panelManager = [%c(AWELongPressPanelManager) shareInstance];
                [panelManager dismissWithAnimation:YES completion:nil];
                [DYYYUtils showToast:@"正在解析画质..."];
-               [DYYYManager localParseFullFromAwemeModel:capturedAwemeModel completion:^(NSDictionary *localData) {
+               [DYYYManager localParseFromAwemeModel:capturedAwemeModel completion:^(NSDictionary *localData) {
                    dispatch_async(dispatch_get_main_queue(), ^{
                        if (localData) {
                            [DYYYManager handleVideoData:localData];
                        } else {
-                           // web API失败，降级用app内部URL解析
-                           [DYYYManager localParseFromAwemeModel:capturedAwemeModel completion:^(NSDictionary *fallbackData) {
-                               dispatch_async(dispatch_get_main_queue(), ^{
-                                   if (fallbackData) {
-                                       [DYYYManager handleVideoData:fallbackData];
-                                   } else {
-                                       [DYYYUtils showToast:@"本地解析失败，视频数据为空"];
-                                   }
-                               });
-                           }];
+                           [DYYYUtils showToast:@"本地解析失败，视频数据为空"];
                        }
                    });
                }];
@@ -1802,7 +1686,7 @@
         [viewModels addObject:apiDownload3];
     }
 
-    // 本地解析功能（同接口1，使用localParseFromAwemeModel）
+    // 本地解析功能（独立于接口1，使用localParseFullFromAwemeModel）
     if (enableApiDownload) {
         AWELongPressPanelBaseViewModel *localParseVM = [[%c(AWELongPressPanelBaseViewModel) alloc] init];
         localParseVM.awemeModel = self.awemeModel;
