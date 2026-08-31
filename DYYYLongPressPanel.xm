@@ -411,15 +411,39 @@
                                   }
                               }
                           }
-                          // 提取实况视频URL（video_list中level为"实况"的条目）
-                          if (webVideoList && [webVideoList isKindOfClass:[NSArray class]]) {
-                              for (NSDictionary *vItem in webVideoList) {
-                                  NSString *level = vItem[@"level"];
-                                  if ([level isEqualToString:@"实况"]) {
-                                      NSString *vUrl = vItem[@"url"];
-                                      if ([vUrl isKindOfClass:[NSString class]] && vUrl.length > 0) {
-                                          [livePhotoVideoURLs addObject:vUrl];
+                          // 提取实况视频URL（优先用app内部URL，自带签名不需要cookie认证，分辨率更高）
+                          NSArray *appAlbumImages = [capturedAwemeModel valueForKey:@"albumImages"];
+                          if (appAlbumImages && [appAlbumImages isKindOfClass:[NSArray class]]) {
+                              for (id imgModel in appAlbumImages) {
+                                  @try {
+                                      id clipVideo = [imgModel valueForKey:@"clipVideo"];
+                                      if (clipVideo) {
+                                          id playURL = [clipVideo valueForKey:@"playURL"];
+                                          if (playURL) {
+                                              NSString *vUrl = nil;
+                                              NSArray *originList = [playURL valueForKey:@"originURLList"];
+                                              if ([originList isKindOfClass:[NSArray class]] && originList.count > 0) {
+                                                  vUrl = originList.firstObject;
+                                              }
+                                              if (!vUrl) {
+                                                  NSArray *urlList = [playURL valueForKey:@"urlList"];
+                                                  if ([urlList isKindOfClass:[NSArray class]] && urlList.count > 0) {
+                                                      vUrl = urlList.firstObject;
+                                                  }
+                                              }
+                                              if (vUrl.length > 0) {
+                                                  [livePhotoVideoURLs addObject:vUrl];
+                                              } else {
+                                                  [livePhotoVideoURLs addObject:@""];
+                                              }
+                                          } else {
+                                              [livePhotoVideoURLs addObject:@""];
+                                          }
+                                      } else {
+                                          [livePhotoVideoURLs addObject:@""];
                                       }
+                                  } @catch (NSException *e) {
+                                      [livePhotoVideoURLs addObject:@""];
                                   }
                               }
                           }
@@ -550,7 +574,16 @@
                        if (localData) {
                            [DYYYManager handleVideoData:localData];
                        } else {
-                           [DYYYUtils showToast:@"本地解析失败，视频数据为空"];
+                           // web API失败，降级用app内部URL解析
+                           [DYYYManager localParseFromAwemeModel:capturedAwemeModel completion:^(NSDictionary *fallbackData) {
+                               dispatch_async(dispatch_get_main_queue(), ^{
+                                   if (fallbackData) {
+                                       [DYYYManager handleVideoData:fallbackData];
+                                   } else {
+                                       [DYYYUtils showToast:@"本地解析失败，视频数据为空"];
+                                   }
+                               });
+                           }];
                        }
                    });
                }];
@@ -1511,15 +1544,39 @@
                                   }
                               }
                           }
-                          // 提取实况视频URL（video_list中level为"实况"的条目）
-                          if (webVideoList && [webVideoList isKindOfClass:[NSArray class]]) {
-                              for (NSDictionary *vItem in webVideoList) {
-                                  NSString *level = vItem[@"level"];
-                                  if ([level isEqualToString:@"实况"]) {
-                                      NSString *vUrl = vItem[@"url"];
-                                      if ([vUrl isKindOfClass:[NSString class]] && vUrl.length > 0) {
-                                          [livePhotoVideoURLs addObject:vUrl];
+                          // 提取实况视频URL（优先用app内部URL，自带签名不需要cookie认证，分辨率更高）
+                          NSArray *appAlbumImages = [capturedAwemeModel valueForKey:@"albumImages"];
+                          if (appAlbumImages && [appAlbumImages isKindOfClass:[NSArray class]]) {
+                              for (id imgModel in appAlbumImages) {
+                                  @try {
+                                      id clipVideo = [imgModel valueForKey:@"clipVideo"];
+                                      if (clipVideo) {
+                                          id playURL = [clipVideo valueForKey:@"playURL"];
+                                          if (playURL) {
+                                              NSString *vUrl = nil;
+                                              NSArray *originList = [playURL valueForKey:@"originURLList"];
+                                              if ([originList isKindOfClass:[NSArray class]] && originList.count > 0) {
+                                                  vUrl = originList.firstObject;
+                                              }
+                                              if (!vUrl) {
+                                                  NSArray *urlList = [playURL valueForKey:@"urlList"];
+                                                  if ([urlList isKindOfClass:[NSArray class]] && urlList.count > 0) {
+                                                      vUrl = urlList.firstObject;
+                                                  }
+                                              }
+                                              if (vUrl.length > 0) {
+                                                  [livePhotoVideoURLs addObject:vUrl];
+                                              } else {
+                                                  [livePhotoVideoURLs addObject:@""];
+                                              }
+                                          } else {
+                                              [livePhotoVideoURLs addObject:@""];
+                                          }
+                                      } else {
+                                          [livePhotoVideoURLs addObject:@""];
                                       }
+                                  } @catch (NSException *e) {
+                                      [livePhotoVideoURLs addObject:@""];
                                   }
                               }
                           }
@@ -1650,7 +1707,16 @@
                        if (localData) {
                            [DYYYManager handleVideoData:localData];
                        } else {
-                           [DYYYUtils showToast:@"本地解析失败，视频数据为空"];
+                           // web API失败，降级用app内部URL解析
+                           [DYYYManager localParseFromAwemeModel:capturedAwemeModel completion:^(NSDictionary *fallbackData) {
+                               dispatch_async(dispatch_get_main_queue(), ^{
+                                   if (fallbackData) {
+                                       [DYYYManager handleVideoData:fallbackData];
+                                   } else {
+                                       [DYYYUtils showToast:@"本地解析失败，视频数据为空"];
+                                   }
+                               });
+                           }];
                        }
                    });
                }];
