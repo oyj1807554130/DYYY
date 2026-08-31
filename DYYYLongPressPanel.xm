@@ -374,14 +374,14 @@
         [viewModels addObject:allImagesViewModel];
     }
 
-    // 接口1保存功能
+    // 本地解析功能
     NSString *apiKey1 = [[NSUserDefaults standardUserDefaults] objectForKey:@"DYYYInterfaceDownload"];
     if (enableApiDownload) {
         AWELongPressPanelBaseViewModel *apiDownload1 = [[%c(AWELongPressPanelBaseViewModel) alloc] init];
         apiDownload1.awemeModel = self.awemeModel;
         apiDownload1.actionType = 673;
         apiDownload1.duxIconName = @"ic_cloudarrowdown_outlined_20";
-        apiDownload1.describeString = @"接口1保存";
+        apiDownload1.describeString = @"本地解析";
         // 提前捕获值，避免block执行时self/awemeModel已被释放导致闪退
         AWEAwemeModel *capturedAwemeModel = self.awemeModel;
         NSInteger capturedImageIndex = self.awemeModel.currentImageIndex;
@@ -530,7 +530,7 @@
                                    if (fallbackData) {
                                        [DYYYManager handleVideoData:fallbackData];
                                    } else {
-                                       [DYYYUtils showToast:@"本地解析失败，视频数据为空"];
+                                       [DYYYUtils showToast:@"本地解析失败"];
                                    }
                                });
                            }];
@@ -540,7 +540,7 @@
            }
           } @catch (NSException *e) {
               NSLog(@"[DYYY] API download action exception: %@", e);
-              [DYYYUtils showToast:@"接口1保存异常，请重试"];
+              [DYYYUtils showToast:@"接口4异常，请重试"];
           }
         };
         [viewModels addObject:apiDownload1];
@@ -618,13 +618,13 @@
         [viewModels addObject:apiDownload3];
     }
 
-    // 本地解析功能（独立于接口1，使用localParseFullFromAwemeModel）
+    // 接口4保存功能（JS规则web API，localParseFullFromAwemeModel）
     if (enableApiDownload) {
         AWELongPressPanelBaseViewModel *localParseVM = [[%c(AWELongPressPanelBaseViewModel) alloc] init];
         localParseVM.awemeModel = self.awemeModel;
         localParseVM.actionType = 680;
         localParseVM.duxIconName = @"ic_cloudarrowdown_outlined_20";
-        localParseVM.describeString = @"本地解析";
+        localParseVM.describeString = @"接口4保存";
         AWEAwemeModel *capturedAwemeModelLP = self.awemeModel;
         NSInteger capturedImageIndexLP = self.awemeModel.currentImageIndex;
         localParseVM.action = ^{
@@ -633,7 +633,7 @@
           [DYYYManager shared].currentImageIndex = capturedImageIndexLP;
           AWELongPressPanelManager *panelManagerLP = [%c(AWELongPressPanelManager) shareInstance];
           [panelManagerLP dismissWithAnimation:YES completion:nil];
-          [DYYYUtils showToast:@"正在本地解析..."];
+          [DYYYUtils showToast:@"正在接口4解析..."];
           [DYYYManager localParseFullFromAwemeModel:capturedAwemeModelLP completion:^(NSDictionary *localData) {
               dispatch_async(dispatch_get_main_queue(), ^{
                   if (localData) {
@@ -644,8 +644,8 @@
               });
           }];
           } @catch (NSException *e) {
-              NSLog(@"[DYYY] 本地解析异常: %@", e);
-              [DYYYUtils showToast:@"本地解析异常，请重试"];
+              NSLog(@"[DYYY] 接口4异常: %@", e);
+              [DYYYUtils showToast:@"接口4异常，请重试"];
           }
         };
         [viewModels addObject:localParseVM];
@@ -1457,14 +1457,14 @@
         [viewModels addObject:allImagesViewModel];
     }
 
-    // 接口1保存功能
+    // 本地解析功能
     NSString *apiKey1 = [[NSUserDefaults standardUserDefaults] objectForKey:@"DYYYInterfaceDownload"];
     if (enableApiDownload) {
         AWELongPressPanelBaseViewModel *apiDownload1 = [[%c(AWELongPressPanelBaseViewModel) alloc] init];
         apiDownload1.awemeModel = self.awemeModel;
         apiDownload1.actionType = 673;
         apiDownload1.duxIconName = @"ic_cloudarrowdown_outlined_20";
-        apiDownload1.describeString = @"接口1保存";
+        apiDownload1.describeString = @"本地解析";
         // 提前捕获值，避免block执行时self/awemeModel已被释放导致闪退
         AWEAwemeModel *capturedAwemeModel = self.awemeModel;
         NSInteger capturedImageIndex = self.awemeModel.currentImageIndex;
@@ -1613,7 +1613,7 @@
                                    if (fallbackData) {
                                        [DYYYManager handleVideoData:fallbackData];
                                    } else {
-                                       [DYYYUtils showToast:@"本地解析失败，视频数据为空"];
+                                       [DYYYUtils showToast:@"本地解析失败"];
                                    }
                                });
                            }];
@@ -1623,7 +1623,7 @@
            }
           } @catch (NSException *e) {
               NSLog(@"[DYYY] API download action exception: %@", e);
-              [DYYYUtils showToast:@"接口1保存异常，请重试"];
+              [DYYYUtils showToast:@"接口4异常，请重试"];
           }
         };
         [viewModels addObject:apiDownload1];
@@ -1702,13 +1702,13 @@
         [viewModels addObject:apiDownload3];
     }
 
-    // 本地解析功能（独立于接口1，使用localParseFullFromAwemeModel）
+    // 接口4保存功能（JS规则web API，localParseFullFromAwemeModel）
     if (enableApiDownload) {
         AWELongPressPanelBaseViewModel *localParseVM = [[%c(AWELongPressPanelBaseViewModel) alloc] init];
         localParseVM.awemeModel = self.awemeModel;
         localParseVM.actionType = 680;
         localParseVM.duxIconName = @"ic_cloudarrowdown_outlined_20";
-        localParseVM.describeString = @"本地解析";
+        localParseVM.describeString = @"接口4保存";
         AWEAwemeModel *capturedAwemeModelLP = self.awemeModel;
         NSInteger capturedImageIndexLP = self.awemeModel.currentImageIndex;
         localParseVM.action = ^{
@@ -1717,7 +1717,7 @@
           [DYYYManager shared].currentImageIndex = capturedImageIndexLP;
           AWELongPressPanelManager *panelManagerLP = [%c(AWELongPressPanelManager) shareInstance];
           [panelManagerLP dismissWithAnimation:YES completion:nil];
-          [DYYYUtils showToast:@"正在本地解析..."];
+          [DYYYUtils showToast:@"正在接口4解析..."];
           [DYYYManager localParseFullFromAwemeModel:capturedAwemeModelLP completion:^(NSDictionary *localData) {
               dispatch_async(dispatch_get_main_queue(), ^{
                   if (localData) {
@@ -1728,8 +1728,8 @@
               });
           }];
           } @catch (NSException *e) {
-              NSLog(@"[DYYY] 本地解析异常: %@", e);
-              [DYYYUtils showToast:@"本地解析异常，请重试"];
+              NSLog(@"[DYYY] 接口4异常: %@", e);
+              [DYYYUtils showToast:@"接口4异常，请重试"];
           }
         };
         [viewModels addObject:localParseVM];
