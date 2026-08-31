@@ -520,12 +520,20 @@
                AWELongPressPanelManager *panelManager = [%c(AWELongPressPanelManager) shareInstance];
                [panelManager dismissWithAnimation:YES completion:nil];
                [DYYYUtils showToast:@"正在解析画质..."];
-               [DYYYManager localParseFromAwemeModel:capturedAwemeModel completion:^(NSDictionary *localData) {
+               [DYYYManager localParseFullFromAwemeModel:capturedAwemeModel completion:^(NSDictionary *localData) {
                    dispatch_async(dispatch_get_main_queue(), ^{
                        if (localData) {
                            [DYYYManager handleVideoData:localData];
                        } else {
-                           [DYYYUtils showToast:@"本地解析失败，视频数据为空"];
+                           [DYYYManager localParseFromAwemeModel:capturedAwemeModel completion:^(NSDictionary *fallbackData) {
+                               dispatch_async(dispatch_get_main_queue(), ^{
+                                   if (fallbackData) {
+                                       [DYYYManager handleVideoData:fallbackData];
+                                   } else {
+                                       [DYYYUtils showToast:@"本地解析失败，视频数据为空"];
+                                   }
+                               });
+                           }];
                        }
                    });
                }];
@@ -1595,12 +1603,20 @@
                AWELongPressPanelManager *panelManager = [%c(AWELongPressPanelManager) shareInstance];
                [panelManager dismissWithAnimation:YES completion:nil];
                [DYYYUtils showToast:@"正在解析画质..."];
-               [DYYYManager localParseFromAwemeModel:capturedAwemeModel completion:^(NSDictionary *localData) {
+               [DYYYManager localParseFullFromAwemeModel:capturedAwemeModel completion:^(NSDictionary *localData) {
                    dispatch_async(dispatch_get_main_queue(), ^{
                        if (localData) {
                            [DYYYManager handleVideoData:localData];
                        } else {
-                           [DYYYUtils showToast:@"本地解析失败，视频数据为空"];
+                           [DYYYManager localParseFromAwemeModel:capturedAwemeModel completion:^(NSDictionary *fallbackData) {
+                               dispatch_async(dispatch_get_main_queue(), ^{
+                                   if (fallbackData) {
+                                       [DYYYManager handleVideoData:fallbackData];
+                                   } else {
+                                       [DYYYUtils showToast:@"本地解析失败，视频数据为空"];
+                                   }
+                               });
+                           }];
                        }
                    });
                }];
