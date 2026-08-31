@@ -25,6 +25,8 @@
 
 // 当前用户浏览的图片索引（用于接口保存实况照片时定位当前实况）
 @property(nonatomic, assign) NSInteger currentImageIndex;
+// 本地解析获取的ttwid，供CDN下载时Cookie认证使用
+@property(nonatomic, copy) NSString *localParseTtwid;
 
 /**
  * 获取单例实例

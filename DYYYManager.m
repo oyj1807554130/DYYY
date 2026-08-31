@@ -1094,6 +1094,11 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
       NSMutableURLRequest *downloadReq = [NSMutableURLRequest requestWithURL:url];
       [downloadReq setValue:@"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36" forHTTPHeaderField:@"User-Agent"];
       [downloadReq setValue:@"https://www.douyin.com/" forHTTPHeaderField:@"Referer"];
+      // 本地解析CDN URL需要ttwid Cookie认证
+      NSString *lpTtwid = [DYYYManager shared].localParseTtwid;
+      if (lpTtwid.length > 0) {
+          [downloadReq setValue:[NSString stringWithFormat:@"ttwid=%@", lpTtwid] forHTTPHeaderField:@"Cookie"];
+      }
       NSURLSessionDownloadTask *downloadTask = [session downloadTaskWithRequest:downloadReq];
       downloadTask.taskDescription = downloadID;
 
@@ -3552,6 +3557,8 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
             if (completion) completion(nil);
             return;
         }
+        // 存储ttwid供后续CDN下载使用
+        [DYYYManager shared].localParseTtwid = ttwidStr;
 
         // Step 2: web API
         __block NSDictionary *awemeDetail = nil;
@@ -3777,6 +3784,7 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
             NSArray *fallbackList = videoObj[@"play_addr"][@"url_list"];
             if ([fallbackList isKindOfClass:[NSArray class]] && fallbackList.count > 0) [videoList addObject:@{@"level": @"[原画【最高画质]]-[30FPS]", @"url": fallbackList[0]}];
         }
+        NSMutableArray *liveVideoURLs = [NSMutableArray array];
         if (isImagePost) {
             for (NSDictionary *img in rawImages) {
                 NSArray *urlLists = @[];
@@ -3787,7 +3795,23 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                 NSString *imgUrl = nil;
                 for (NSString *u in urlLists) { if ([u hasSuffix:@".jpeg"] || [u hasSuffix:@".jpg"] || [u hasSuffix:@".png"]) { imgUrl = u; break; } }
                 if (!imgUrl && urlLists.count > 0) imgUrl = urlLists[0];
-                if (imgUrl.length > 0) [images addObject:imgUrl];
+                // 提取实况视频URL（同JS: img.video.play_addr.url_list[0]）
+                NSDictionary *imgVideo = img[@"video"];
+                NSString *liveVideoUrl = nil;
+                if (imgVideo && [imgVideo isKindOfClass:[NSDictionary class]]) {
+                    NSDictionary *playAddr = imgVideo[@"play_addr"];
+                    if (playAddr && [playAddr isKindOfClass:[NSDictionary class]]) {
+                        NSArray *lvUrls = playAddr[@"url_list"];
+                        if ([lvUrls isKindOfClass:[NSArray class]] && lvUrls.count > 0) liveVideoUrl = lvUrls[0];
+                    }
+                }
+                if (liveVideoUrl.length > 0 && imgUrl.length > 0) {
+                    [videoList addObject:@{@"level": @"实况", @"url": liveVideoUrl}];
+                    [liveVideoURLs addObject:liveVideoUrl];
+                    [images addObject:imgUrl];
+                } else if (imgUrl.length > 0) {
+                    [images addObject:imgUrl];
+                }
             }
         }
         NSArray *coverUrls = videoObj[@"cover"][@"url_list"];
@@ -3804,10 +3828,10 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
         result[@"video_url"] = isImagePost ? @"" : primaryUrl;
         result[@"images"] = isImagePost ? images : @[];
         result[@"img"] = @[];
-        result[@"live_videos"] = @[];
+        result[@"live_videos"] = isImagePost ? liveVideoURLs : @[];
         result[@"image_count"] = @(isImagePost ? images.count : 0);
         result[@"batch_download"] = @(isImagePost && images.count > 1);
-        result[@"video_list"] = isImagePost ? @[] : videoList;
+        result[@"video_list"] = videoList;
         result[@"title"] = awemeDetail[@"desc"] ?: @"";
         result[@"author"] = author[@"nickname"] ?: @"";
         if (completion) completion(result.count > 0 ? result : nil);
@@ -4843,6 +4867,40 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                 [actions addObject:audioAction];
             }
             
+            // 选项5：保存当前图片（实况帖也可以只存图片）
+            NSInteger savedImgIndex = [DYYYManager shared].currentImageIndex;
+            NSMutableArray *allImages = [NSMutableArray array];
+            for (id imgObj in images) {
+                if ([imgObj isKindOfClass:[NSString class]] && [(NSString *)imgObj length] > 0) {
+                    [allImages addObject:imgObj];
+                }
+            }
+            if (allImages.count > 0) {
+                NSString *currentImgTitle = allImages.count > 1 ? @"保存当前图片" : @"保存图片";
+                AWEUserSheetAction *currentImgAction = [NSClassFromString(@"AWEUserSheetAction") actionWithTitle:currentImgTitle
+                                                                                    imgName:nil
+                                                                                    handler:^{
+                                                                                        NSInteger idx = savedImgIndex > 0 ? savedImgIndex - 1 : 0;
+                                                                                        if (idx < allImages.count) {
+                                                                                            NSURL *imgUrl = [NSURL URLWithString:allImages[idx]];
+                                                                                            [DYYYManager downloadMedia:imgUrl mediaType:MediaTypeImage audio:nil completion:^(BOOL success) {
+                                                                                                if (!success) { [DYYYUtils showToast:@"图片下载失败"]; }
+                                                                                            }];
+                                                                                        } else {
+                                                                                            [DYYYUtils showToast:@"无法定位当前图片"];
+                                                                                        }
+                                                                                    }];
+                [actions addObject:currentImgAction];
+            }
+            if (allImages.count > 1) {
+                AWEUserSheetAction *allImgAction = [NSClassFromString(@"AWEUserSheetAction") actionWithTitle:@"保存全部图片"
+                                                                                    imgName:nil
+                                                                                    handler:^{
+                                                                                        [DYYYManager downloadAllImages:allImages];
+                                                                                    }];
+                [actions addObject:allImgAction];
+            }
+            
             if (actions.count > 0) {
                 [DYYYManager addDisclaimerHeaderToActionSheet:actionSheet];
                 [actionSheet setActions:actions];
@@ -5278,6 +5336,10 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
         req.HTTPMethod = @"HEAD";
         [req setValue:@"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36" forHTTPHeaderField:@"User-Agent"];
         [req setValue:@"https://www.douyin.com/" forHTTPHeaderField:@"Referer"];
+        NSString *cdTtwid = [DYYYManager shared].localParseTtwid;
+        if (cdTtwid.length > 0) {
+            [req setValue:[NSString stringWithFormat:@"ttwid=%@", cdTtwid] forHTTPHeaderField:@"Cookie"];
+        }
         NSURLSessionConfiguration *config = [NSURLSessionConfiguration defaultSessionConfiguration];
         config.timeoutIntervalForRequest = 15.0;
         config.requestCachePolicy = NSURLRequestReloadIgnoringLocalCacheData;
