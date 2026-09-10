@@ -721,7 +721,11 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                             return;
                         }
                     }
-                    [DYYYUtils showToast:@"保存失败"];
+                    NSString *errMsg = [NSString stringWithFormat:@"保存失败(%ld)", (long)error.code];
+                    if (error.localizedDescription.length > 0) {
+                        errMsg = [NSString stringWithFormat:@"保存失败:%ld %@", (long)error.code, error.localizedDescription];
+                    }
+                    [DYYYUtils showToast:errMsg];
                 }
                 if (tempCaptionURL && tempCaptionURL != fileURL) {
                     [[NSFileManager defaultManager] removeItemAtURL:tempCaptionURL error:nil];
@@ -1007,11 +1011,11 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
     config.timeoutIntervalForRequest = 60.0;
     config.timeoutIntervalForResource = 600.0;
     NSURLSession *session = [NSURLSession sessionWithConfiguration:config];
-    NSURLRequest *request = [NSURLRequest requestWithURL:url];
+    NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:url];
     NSURLSessionDownloadTask *task = [session downloadTaskWithRequest:request completionHandler:^(NSURL *location, NSURLResponse *response, NSError *error) {
         if (error || !location) {
             dispatch_async(dispatch_get_main_queue(), ^{
-                [DYYYUtils showToast:@"实况视频下载失败"];
+                [DYYYUtils showToast:[NSString stringWithFormat:@"实况视频下载失败:%ld", (long)error.code]];
                 [session invalidateAndCancel];
                 if (completion) completion(NO);
             });
@@ -1026,17 +1030,46 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
         [[NSFileManager defaultManager] moveItemAtURL:location toURL:destURL error:&moveErr];
         if (moveErr) {
             dispatch_async(dispatch_get_main_queue(), ^{
-                [DYYYUtils showToast:@"实况视频保存失败"];
+                [DYYYUtils showToast:@"实况视频临时文件移动失败"];
                 [session invalidateAndCancel];
                 if (completion) completion(NO);
             });
             return;
         }
-        [self saveMedia:destURL mediaType:MediaTypeVideo completion:^(BOOL saveOK) {
-            [[NSFileManager defaultManager] removeItemAtURL:destURL error:nil];
-            [session invalidateAndCancel];
-            if (completion) completion(saveOK);
-        }];
+        // 诊断：检查文件大小和格式
+        NSDictionary *fileAttr = [[NSFileManager defaultManager] attributesOfItemAtPath:destURL.path error:nil];
+        unsigned long long fileSize = [fileAttr fileSize];
+        // 检查文件头是否为MP4(ftyp)
+        NSFileHandle *fh = [NSFileHandle fileHandleForReadingAtPath:destURL.path];
+        NSData *headerData = [fh readDataOfLength:12];
+        [fh closeFile];
+        NSString *headerHex = @"";
+        if (headerData.length >= 8) {
+            const unsigned char *bytes = (const unsigned char *)[headerData bytes];
+            headerHex = [NSString stringWithFormat:@"%02X%02X%02X%02X_%02X%02X%02X%02X", bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7]];
+        }
+        BOOL isMP4 = (headerData.length >= 8 && [headerData subdataWithRange:NSMakeRange(4, 4)] isEqualToData:[NSData dataWithBytes:"ftyp" length:4]);
+        NSLog(@"[DYYY-Raw] 下载完成: size=%llu, header=%@, isMP4=%d, url=%@", fileSize, headerHex, isMP4, url);
+        if (!isMP4 || fileSize < 1024) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [DYYYUtils showToast:[NSString stringWithFormat:@"视频格式异常(%@) 大小:%lluB", headerHex, fileSize]];
+                [[NSFileManager defaultManager] removeItemAtURL:destURL error:nil];
+                [session invalidateAndCancel];
+                if (completion) completion(NO);
+            });
+            return;
+        }
+        // 在主队列调用saveMedia，与delegate-based下载流程一致
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [self saveMedia:destURL mediaType:MediaTypeVideo completion:^(BOOL saveOK) {
+                if (!saveOK) {
+                    NSLog(@"[DYYY-Raw] saveMedia失败, file=%@ size=%llu", destURL, fileSize);
+                }
+                [[NSFileManager defaultManager] removeItemAtURL:destURL error:nil];
+                [session invalidateAndCancel];
+                if (completion) completion(saveOK);
+            }];
+        });
     }];
     [task resume];
 }
