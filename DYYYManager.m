@@ -3708,7 +3708,6 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
             }
 
             if (!awemeDetail || ![awemeDetail isKindOfClass:[NSDictionary class]]) {
-                dispatch_async(dispatch_get_main_queue(), ^{ [DYYYUtils showToast:@"本地解析失败: web API返回空"]; });
                 if (completion) completion(nil);
                 return;
             }
