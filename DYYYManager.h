@@ -159,6 +159,7 @@
  */
 + (void)localParseFromAwemeModel:(id)awemeModel completion:(void(^)(NSDictionary *result))completion;
 + (void)localParseFullFromAwemeModel:(id)awemeModel completion:(void(^)(NSDictionary *result))completion;
++ (NSString *)getDouyinFullCookieString;
 + (void)localParseFromShareLink:(NSString *)shareLink completion:(void(^)(NSDictionary *result))completion;
 + (void)handleVideoData:(NSDictionary *)dataDict;
 + (void)resolveAndDownloadVideo:(NSURL *)url audio:(NSURL *)audioURL completion:(void (^)(BOOL success))completion;

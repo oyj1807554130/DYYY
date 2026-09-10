@@ -3532,6 +3532,76 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
     });
 }
 
+// 从app Cookie存储获取抖音完整Cookie字符串（ttwid+msToken+sessionid等）
++ (NSString *)getDouyinFullCookieString {
+    NSHTTPCookieStorage *store = [NSHTTPCookieStorage sharedHTTPCookieStorage];
+    NSArray *cookies = [store cookiesForURL:[NSURL URLWithString:@"https://www.douyin.com/"]];
+    // 需要的关键cookie名
+    NSArray *neededKeys = @[@"ttwid", @"msToken", @"sessionid", @"sessionid_ss", @"sid_tt", @"sid_guard", @"passport_csrf_token", @"s_v_web_id", @"odin_tt", @"is_id"];
+    NSMutableDictionary *cookieDict = [NSMutableDictionary dictionary];
+    for (NSHTTPCookie *c in cookies) {
+        NSString *name = [c name];
+        for (NSString *key in neededKeys) {
+            if ([name isEqualToString:key]) {
+                cookieDict[key] = [c value];
+                break;
+            }
+        }
+    }
+    // 如果没有ttwid，尝试注册
+    if (!cookieDict[@"ttwid"] || [cookieDict[@"ttwid"] length] == 0) {
+        __block NSString *regTtwid = nil;
+        NSString *ttwidURL = @"https://ttwid.bytedance.com/ttwid/union/register/";
+        NSString *ttwidBody = @"{\"region\":\"cn\",\"aid\":6383,\"needFid\":false,\"service\":\"www.douyin.com\",\"migrate_info\":{\"ticket\":\"\",\"source\":\"node\"},\"cbUrlProtocol\":\"https\",\"union\":true}";
+        NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:ttwidURL]];
+        req.HTTPMethod = @"POST";
+        req.HTTPBody = [ttwidBody dataUsingEncoding:NSUTF8StringEncoding];
+        [req setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
+        [req setValue:@"Mozilla/5.0" forHTTPHeaderField:@"User-Agent"];
+        dispatch_semaphore_t sem = dispatch_semaphore_create(0);
+        NSURLSessionDataTask *task = [[NSURLSession sharedSession] dataTaskWithRequest:req completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
+            @try {
+                NSHTTPURLResponse *hr = (NSHTTPURLResponse *)response;
+                NSString *sc = [hr allHeaderFields][@"Set-Cookie"];
+                if (sc.length > 0) {
+                    NSRange r = [sc rangeOfString:@"ttwid="];
+                    if (r.location != NSNotFound) {
+                        NSString *sub = [sc substringFromIndex:r.location + 6];
+                        NSRange semi = [sub rangeOfString:@";"];
+                        regTtwid = semi.location != NSNotFound ? [sub substringToIndex:semi.location] : sub;
+                    }
+                }
+                if (!regTtwid || regTtwid.length == 0) {
+                    if (data.length > 0) {
+                        NSDictionary *j = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
+                        if ([j isKindOfClass:[NSDictionary class]]) {
+                            NSString *bt = j[@"ttwid"];
+                            if (bt.length > 0) regTtwid = bt;
+                        }
+                    }
+                }
+            } @catch (NSException *e) {}
+            dispatch_semaphore_signal(sem);
+        }];
+        [task resume];
+        dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, 10 * NSEC_PER_SEC));
+        if (regTtwid.length > 0) cookieDict[@"ttwid"] = regTtwid;
+    }
+    // 存ttwid到localParseTtwid
+    if (cookieDict[@"ttwid"].length > 0) {
+        [DYYYManager shared].localParseTtwid = cookieDict[@"ttwid"];
+    }
+    // 拼接cookie字符串
+    NSMutableArray *parts = [NSMutableArray array];
+    for (NSString *key in neededKeys) {
+        NSString *val = cookieDict[key];
+        if (val && val.length > 0) {
+            [parts addObject:[NSString stringWithFormat:@"%@=%@", key, val]];
+        }
+    }
+    return [parts componentsJoinedByString:@"; "];
+}
+
 // 本地解析全画质：从awemeModel取awemeId，走ttwid+web API+bit_rate全画质（JS规则）
 + (void)localParseFullFromAwemeModel:(id)awemeModel completion:(void(^)(NSDictionary *result))completion {
     if (!awemeModel || !completion) {
@@ -3608,17 +3678,12 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
 
         // Step 2: web API
         __block NSDictionary *awemeDetail = nil;
-        NSString *apiURL = [NSString stringWithFormat:@"https://www.douyin.com/aweme/v1/web/aweme/detail/?aweme_id=%@&device_platform=webapp&aid=6383&channel=channel_pc_web&update_version_code=170400&pc_client_type=1&version_code=190500&version_name=19.5.0&cookie_enabled=true&screen_width=2560&screen_height=1440&browser_language=zh-CN&browser_platform=Win32&browser_name=Chrome&browser_version=150.0.0.0&browser_online=true&engine_name=Blink&engine_version=150.0.0.0&os_name=Windows&os_version=10&cpu_core_num=12&device_memory=8&platform=PC&downlink=4.75&effective_type=4g&round_trip_time=150", awemeId];
+        NSString *apiURL = [NSString stringWithFormat:@"https://www.douyin.com/aweme/v1/web/aweme/detail/?aweme_id=%@&device_platform=webapp&aid=6383&channel=channel_pc_web", awemeId];
         NSMutableURLRequest *apiReq = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:apiURL]];
-        [apiReq setValue:@"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36" forHTTPHeaderField:@"User-Agent"];
+        [apiReq setValue:@"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36" forHTTPHeaderField:@"User-Agent"];
         [apiReq setValue:@"https://www.douyin.com/" forHTTPHeaderField:@"Referer"];
         [apiReq setValue:@"application/json" forHTTPHeaderField:@"Accept"];
         [apiReq setValue:[NSString stringWithFormat:@"ttwid=%@", ttwidStr] forHTTPHeaderField:@"Cookie"];
-        [apiReq setValue:@"zh-CN,zh;q=0.9,en;q=0.8" forHTTPHeaderField:@"Accept-Language"];
-        [apiReq setValue:@"no-cache" forHTTPHeaderField:@"Cache-Control"];
-        [apiReq setValue:@"same-origin" forHTTPHeaderField:@"Sec-Fetch-Site"];
-        [apiReq setValue:@"navigate" forHTTPHeaderField:@"Sec-Fetch-Mode"];
-        [apiReq setValue:@"document" forHTTPHeaderField:@"Sec-Fetch-Dest"];
         dispatch_semaphore_t apiSem = dispatch_semaphore_create(0);
         NSURLSessionDataTask *apiTask = [[NSURLSession sharedSession] dataTaskWithRequest:apiReq completionHandler:^(NSData *apiData, NSURLResponse *apiResp, NSError *apiErr) {
             @try {
@@ -4055,17 +4120,12 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
 
         // Step 3: 用ttwid调web API
         __block NSDictionary *awemeDetail = nil;
-        NSString *apiURL = [NSString stringWithFormat:@"https://www.douyin.com/aweme/v1/web/aweme/detail/?aweme_id=%@&device_platform=webapp&aid=6383&channel=channel_pc_web&update_version_code=170400&pc_client_type=1&version_code=190500&version_name=19.5.0&cookie_enabled=true&screen_width=2560&screen_height=1440&browser_language=zh-CN&browser_platform=Win32&browser_name=Chrome&browser_version=150.0.0.0&browser_online=true&engine_name=Blink&engine_version=150.0.0.0&os_name=Windows&os_version=10&cpu_core_num=12&device_memory=8&platform=PC&downlink=4.75&effective_type=4g&round_trip_time=150", awemeId];
+        NSString *apiURL = [NSString stringWithFormat:@"https://www.douyin.com/aweme/v1/web/aweme/detail/?aweme_id=%@&device_platform=webapp&aid=6383&channel=channel_pc_web", awemeId];
         NSMutableURLRequest *apiReq = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:apiURL]];
-        [apiReq setValue:@"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36" forHTTPHeaderField:@"User-Agent"];
+        [apiReq setValue:@"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36" forHTTPHeaderField:@"User-Agent"];
         [apiReq setValue:@"https://www.douyin.com/" forHTTPHeaderField:@"Referer"];
         [apiReq setValue:@"application/json" forHTTPHeaderField:@"Accept"];
         [apiReq setValue:[NSString stringWithFormat:@"ttwid=%@", ttwidStr] forHTTPHeaderField:@"Cookie"];
-        [apiReq setValue:@"zh-CN,zh;q=0.9,en;q=0.8" forHTTPHeaderField:@"Accept-Language"];
-        [apiReq setValue:@"no-cache" forHTTPHeaderField:@"Cache-Control"];
-        [apiReq setValue:@"same-origin" forHTTPHeaderField:@"Sec-Fetch-Site"];
-        [apiReq setValue:@"navigate" forHTTPHeaderField:@"Sec-Fetch-Mode"];
-        [apiReq setValue:@"document" forHTTPHeaderField:@"Sec-Fetch-Dest"];
         dispatch_semaphore_t apiSem = dispatch_semaphore_create(0);
         NSURLSessionDataTask *apiTask = [[NSURLSession sharedSession] dataTaskWithRequest:apiReq completionHandler:^(NSData *apiData, NSURLResponse *apiResp, NSError *apiErr) {
             @try {
