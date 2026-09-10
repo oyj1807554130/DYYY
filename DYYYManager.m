@@ -3588,8 +3588,9 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
         if (regTtwid.length > 0) cookieDict[@"ttwid"] = regTtwid;
     }
     // 存ttwid到localParseTtwid
-    if (cookieDict[@"ttwid"].length > 0) {
-        [DYYYManager shared].localParseTtwid = cookieDict[@"ttwid"];
+    NSString *fullTtwid = cookieDict[@"ttwid"];
+    if (fullTtwid.length > 0) {
+        [DYYYManager shared].localParseTtwid = fullTtwid;
     }
     // 拼接cookie字符串
     NSMutableArray *parts = [NSMutableArray array];
