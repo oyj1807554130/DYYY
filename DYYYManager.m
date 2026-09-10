@@ -1048,7 +1048,8 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
             const unsigned char *bytes = (const unsigned char *)[headerData bytes];
             headerHex = [NSString stringWithFormat:@"%02X%02X%02X%02X_%02X%02X%02X%02X", bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7]];
         }
-        BOOL isMP4 = (headerData.length >= 8 && [headerData subdataWithRange:NSMakeRange(4, 4)] isEqualToData:[NSData dataWithBytes:"ftyp" length:4]);
+        const char *hdr = (const char *)[headerData bytes];
+        BOOL isMP4 = (headerData.length >= 8 && hdr[4] == 'f' && hdr[5] == 't' && hdr[6] == 'y' && hdr[7] == 'p');
         NSLog(@"[DYYY-Raw] 下载完成: size=%llu, header=%@, isMP4=%d, url=%@", fileSize, headerHex, isMP4, url);
         if (!isMP4 || fileSize < 1024) {
             dispatch_async(dispatch_get_main_queue(), ^{
