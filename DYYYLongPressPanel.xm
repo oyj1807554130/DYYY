@@ -500,9 +500,8 @@
                                   v1 = [NSURL URLWithString:curI1.clipVideo.playURL.originURLList.firstObject];
                               }
                               if (v1) {
-                                  [DYYYUtils showToast:@"正在下载实况视频..."];
-                                  [DYYYManager downloadMedia:v1 mediaType:MediaTypeVideo audio:nil completion:^(BOOL s) {
-                                      if (!s) [DYYYUtils showToast:@"实况视频下载失败"];
+                                  [DYYYManager downloadAndSaveVideoRaw:v1 completion:^(BOOL s) {
+                                      if (!s) [DYYYUtils showToast:@"实况视频保存失败"];
                                   }];
                               } else {
                                   [DYYYUtils showToast:@"无法获取实况视频地址"];
@@ -1583,9 +1582,8 @@
                                   v1 = [NSURL URLWithString:curI1.clipVideo.playURL.originURLList.firstObject];
                               }
                               if (v1) {
-                                  [DYYYUtils showToast:@"正在下载实况视频..."];
-                                  [DYYYManager downloadMedia:v1 mediaType:MediaTypeVideo audio:nil completion:^(BOOL s) {
-                                      if (!s) [DYYYUtils showToast:@"实况视频下载失败"];
+                                  [DYYYManager downloadAndSaveVideoRaw:v1 completion:^(BOOL s) {
+                                      if (!s) [DYYYUtils showToast:@"实况视频保存失败"];
                                   }];
                               } else {
                                   [DYYYUtils showToast:@"无法获取实况视频地址"];

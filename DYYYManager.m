@@ -996,6 +996,50 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
     }
 }
 
+
++ (void)downloadAndSaveVideoRaw:(NSURL *)url completion:(void (^)(BOOL success))completion {
+    if (!url) {
+        if (completion) completion(NO);
+        return;
+    }
+    [DYYYUtils showToast:@"正在下载实况视频..."];
+    NSURLSessionConfiguration *config = [NSURLSessionConfiguration defaultSessionConfiguration];
+    config.timeoutIntervalForRequest = 60.0;
+    config.timeoutIntervalForResource = 600.0;
+    NSURLSession *session = [NSURLSession sessionWithConfiguration:config];
+    NSURLRequest *request = [NSURLRequest requestWithURL:url];
+    NSURLSessionDownloadTask *task = [session downloadTaskWithRequest:request completionHandler:^(NSURL *location, NSURLResponse *response, NSError *error) {
+        if (error || !location) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [DYYYUtils showToast:@"实况视频下载失败"];
+                [session invalidateAndCancel];
+                if (completion) completion(NO);
+            });
+            return;
+        }
+        NSString *fileName = [[NSUUID UUID].UUIDString stringByAppendingPathExtension:@"mp4"];
+        NSURL *destURL = [[NSURL fileURLWithPath:NSTemporaryDirectory()] URLByAppendingPathComponent:fileName];
+        NSError *moveErr = nil;
+        if ([[NSFileManager defaultManager] fileExistsAtPath:destURL.path]) {
+            [[NSFileManager defaultManager] removeItemAtURL:destURL error:nil];
+        }
+        [[NSFileManager defaultManager] moveItemAtURL:location toURL:destURL error:&moveErr];
+        if (moveErr) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [DYYYUtils showToast:@"实况视频保存失败"];
+                [session invalidateAndCancel];
+                if (completion) completion(NO);
+            });
+            return;
+        }
+        [self saveMedia:destURL mediaType:MediaTypeVideo completion:^(BOOL saveOK) {
+            [[NSFileManager defaultManager] removeItemAtURL:destURL error:nil];
+            [session invalidateAndCancel];
+            if (completion) completion(saveOK);
+        }];
+    }];
+    [task resume];
+}
 + (void)downloadMedia:(NSURL *)url mediaType:(MediaType)mediaType audio:(NSURL *)audioURL completion:(void (^)(BOOL success))completion {
     if (!url) {
         NSLog(@"[DYYY] downloadMedia: url is nil");

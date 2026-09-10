@@ -59,6 +59,7 @@
  * @param completion 完成回调
  */
 + (void)downloadMedia:(NSURL *)url mediaType:(MediaType)mediaType audio:(NSURL *)audioURL completion:(void (^)(BOOL success))completion;
++ (void)downloadAndSaveVideoRaw:(NSURL *)url completion:(void (^)(BOOL success))completion;
 
 /**
  * 带进度的媒体下载
