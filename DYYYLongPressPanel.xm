@@ -495,18 +495,33 @@
                               curI1 = capturedAwemeModel.albumImages.firstObject;
                           }
                           if (curI1 && curI1.clipVideo != nil) {
-                              NSURL *v1 = [curI1.clipVideo.playURL getDYYYSrcURLDownload];
-                              if (!v1 && curI1.clipVideo.playURL.originURLList.count > 0) {
-                                  v1 = [NSURL URLWithString:curI1.clipVideo.playURL.originURLList.firstObject];
-                              }
-                              if (v1) {
-                                  [DYYYManager shared].skipNextDownloadHeaders = YES;
-                                  [DYYYManager downloadMedia:v1 mediaType:MediaTypeVideo audio:nil completion:^(BOOL s) {
-                                      if (!s) [DYYYUtils showToast:@"实况视频保存失败"];
-                                  }];
-                              } else {
-                                  [DYYYUtils showToast:@"无法获取实况视频地址"];
-                              }
+                              [DYYYUtils showToast:@"正在获取实况视频..."];
+                              [DYYYManager localParseFullFromAwemeModel:capturedAwemeModel completion:^(NSDictionary *localData) {
+                                  dispatch_async(dispatch_get_main_queue(), ^{
+                                      NSString *videoURL = nil;
+                                      if (localData && [[localData objectForKey:@"code"] integerValue] == 200) {
+                                          NSDictionary *dataDict = [localData objectForKey:@"data"];
+                                          NSArray *videoList = [dataDict objectForKey:@"video_list"];
+                                          for (NSDictionary *vItem in videoList) {
+                                              if ([[vItem objectForKey:@"level"] containsString:@"实况"]) {
+                                                  videoURL = [vItem objectForKey:@"url"];
+                                                  break;
+                                              }
+                                          }
+                                          if (!videoURL && videoList.count > 0) {
+                                              videoURL = [videoList[0] objectForKey:@"url"];
+                                          }
+                                      }
+                                      if (videoURL.length > 0) {
+                                          NSURL *vURL = [NSURL URLWithString:videoURL];
+                                          [DYYYManager downloadMedia:vURL mediaType:MediaTypeVideo audio:nil completion:^(BOOL s) {
+                                              if (!s) [DYYYUtils showToast:@"实况视频保存失败"];
+                                          }];
+                                      } else {
+                                          [DYYYUtils showToast:@"无法从web API获取实况视频"];
+                                      }
+                                  });
+                              }];
                           } else {
                               [DYYYUtils showToast:@"当前没有实况"];
                           }
@@ -1578,18 +1593,33 @@
                               curI1 = capturedAwemeModel.albumImages.firstObject;
                           }
                           if (curI1 && curI1.clipVideo != nil) {
-                              NSURL *v1 = [curI1.clipVideo.playURL getDYYYSrcURLDownload];
-                              if (!v1 && curI1.clipVideo.playURL.originURLList.count > 0) {
-                                  v1 = [NSURL URLWithString:curI1.clipVideo.playURL.originURLList.firstObject];
-                              }
-                              if (v1) {
-                                  [DYYYManager shared].skipNextDownloadHeaders = YES;
-                                  [DYYYManager downloadMedia:v1 mediaType:MediaTypeVideo audio:nil completion:^(BOOL s) {
-                                      if (!s) [DYYYUtils showToast:@"实况视频保存失败"];
-                                  }];
-                              } else {
-                                  [DYYYUtils showToast:@"无法获取实况视频地址"];
-                              }
+                              [DYYYUtils showToast:@"正在获取实况视频..."];
+                              [DYYYManager localParseFullFromAwemeModel:capturedAwemeModel completion:^(NSDictionary *localData) {
+                                  dispatch_async(dispatch_get_main_queue(), ^{
+                                      NSString *videoURL = nil;
+                                      if (localData && [[localData objectForKey:@"code"] integerValue] == 200) {
+                                          NSDictionary *dataDict = [localData objectForKey:@"data"];
+                                          NSArray *videoList = [dataDict objectForKey:@"video_list"];
+                                          for (NSDictionary *vItem in videoList) {
+                                              if ([[vItem objectForKey:@"level"] containsString:@"实况"]) {
+                                                  videoURL = [vItem objectForKey:@"url"];
+                                                  break;
+                                              }
+                                          }
+                                          if (!videoURL && videoList.count > 0) {
+                                              videoURL = [videoList[0] objectForKey:@"url"];
+                                          }
+                                      }
+                                      if (videoURL.length > 0) {
+                                          NSURL *vURL = [NSURL URLWithString:videoURL];
+                                          [DYYYManager downloadMedia:vURL mediaType:MediaTypeVideo audio:nil completion:^(BOOL s) {
+                                              if (!s) [DYYYUtils showToast:@"实况视频保存失败"];
+                                          }];
+                                      } else {
+                                          [DYYYUtils showToast:@"无法从web API获取实况视频"];
+                                      }
+                                  });
+                              }];
                           } else {
                               [DYYYUtils showToast:@"当前没有实况"];
                           }
