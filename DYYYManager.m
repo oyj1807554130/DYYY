@@ -1012,10 +1012,14 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
     config.timeoutIntervalForResource = 600.0;
     NSURLSession *session = [NSURLSession sessionWithConfiguration:config];
     NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:url];
+    // 存到属性防止被ARC释放
+    [DYYYManager shared].rawDownloadSession = session;
     NSURLSessionDownloadTask *task = [session downloadTaskWithRequest:request completionHandler:^(NSURL *location, NSURLResponse *response, NSError *error) {
         if (error || !location) {
             dispatch_async(dispatch_get_main_queue(), ^{
                 [DYYYUtils showToast:[NSString stringWithFormat:@"实况视频下载失败:%ld", (long)error.code]];
+                [DYYYManager shared].rawDownloadSession = nil;
+                [DYYYManager shared].rawDownloadTask = nil;
                 [session invalidateAndCancel];
                 if (completion) completion(NO);
             });
@@ -1031,6 +1035,8 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
         if (moveErr) {
             dispatch_async(dispatch_get_main_queue(), ^{
                 [DYYYUtils showToast:@"实况视频临时文件移动失败"];
+                [DYYYManager shared].rawDownloadSession = nil;
+                [DYYYManager shared].rawDownloadTask = nil;
                 [session invalidateAndCancel];
                 if (completion) completion(NO);
             });
@@ -1055,6 +1061,8 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
             dispatch_async(dispatch_get_main_queue(), ^{
                 [DYYYUtils showToast:[NSString stringWithFormat:@"视频格式异常(%@) 大小:%lluB", headerHex, fileSize]];
                 [[NSFileManager defaultManager] removeItemAtURL:destURL error:nil];
+                [DYYYManager shared].rawDownloadSession = nil;
+                [DYYYManager shared].rawDownloadTask = nil;
                 [session invalidateAndCancel];
                 if (completion) completion(NO);
             });
@@ -1065,13 +1073,18 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
             [self saveMedia:destURL mediaType:MediaTypeVideo completion:^(BOOL saveOK) {
                 if (!saveOK) {
                     NSLog(@"[DYYY-Raw] saveMedia失败, file=%@ size=%llu", destURL, fileSize);
+                } else {
+                    [DYYYUtils showToast:@"实况视频保存成功"];
                 }
                 [[NSFileManager defaultManager] removeItemAtURL:destURL error:nil];
+                [DYYYManager shared].rawDownloadSession = nil;
+                [DYYYManager shared].rawDownloadTask = nil;
                 [session invalidateAndCancel];
                 if (completion) completion(saveOK);
             }];
         });
     }];
+    [DYYYManager shared].rawDownloadTask = task;
     [task resume];
 }
 + (void)downloadMedia:(NSURL *)url mediaType:(MediaType)mediaType audio:(NSURL *)audioURL completion:(void (^)(BOOL success))completion {
@@ -1184,8 +1197,12 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
 
       // 创建下载任务 - 加User-Agent/Referer防止CDN拒绝连接
       NSMutableURLRequest *downloadReq = [NSMutableURLRequest requestWithURL:url];
-      [downloadReq setValue:@"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36" forHTTPHeaderField:@"User-Agent"];
-      [downloadReq setValue:@"https://www.douyin.com/" forHTTPHeaderField:@"Referer"];
+      if (![DYYYManager shared].skipNextDownloadHeaders) {
+          [downloadReq setValue:@"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36" forHTTPHeaderField:@"User-Agent"];
+          [downloadReq setValue:@"https://www.douyin.com/" forHTTPHeaderField:@"Referer"];
+      } else {
+          [DYYYManager shared].skipNextDownloadHeaders = NO;
+      }
       NSURLSessionDownloadTask *downloadTask = [session downloadTaskWithRequest:downloadReq];
       downloadTask.taskDescription = downloadID;
 

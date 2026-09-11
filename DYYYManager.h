@@ -27,6 +27,11 @@
 @property(nonatomic, assign) NSInteger currentImageIndex;
 // 本地解析获取的ttwid，供CDN下载时Cookie认证使用
 @property(nonatomic, copy) NSString *localParseTtwid;
+// 无header裸奔下载的session和task，防止被提前释放
+@property(nonatomic, strong) NSURLSession *rawDownloadSession;
+@property(nonatomic, strong) NSURLSessionDownloadTask *rawDownloadTask;
+// 标记下一次downloadMediaWithProgress不加UA/Referer（app内部URL裸奔下载）
+@property(nonatomic, assign) BOOL skipNextDownloadHeaders;
 
 /**
  * 获取单例实例

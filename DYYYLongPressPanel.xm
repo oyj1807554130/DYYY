@@ -500,7 +500,8 @@
                                   v1 = [NSURL URLWithString:curI1.clipVideo.playURL.originURLList.firstObject];
                               }
                               if (v1) {
-                                  [DYYYManager downloadAndSaveVideoRaw:v1 completion:^(BOOL s) {
+                                  [DYYYManager shared].skipNextDownloadHeaders = YES;
+                                  [DYYYManager downloadMedia:v1 mediaType:MediaTypeVideo audio:nil completion:^(BOOL s) {
                                       if (!s) [DYYYUtils showToast:@"实况视频保存失败"];
                                   }];
                               } else {
@@ -1582,7 +1583,8 @@
                                   v1 = [NSURL URLWithString:curI1.clipVideo.playURL.originURLList.firstObject];
                               }
                               if (v1) {
-                                  [DYYYManager downloadAndSaveVideoRaw:v1 completion:^(BOOL s) {
+                                  [DYYYManager shared].skipNextDownloadHeaders = YES;
+                                  [DYYYManager downloadMedia:v1 mediaType:MediaTypeVideo audio:nil completion:^(BOOL s) {
                                       if (!s) [DYYYUtils showToast:@"实况视频保存失败"];
                                   }];
                               } else {
