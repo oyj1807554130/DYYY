@@ -3715,18 +3715,17 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
         return;
     }
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-        // Step 1: 获取ttwid（优先从app Cookie存储取，降级走注册接口）
-        __block NSString *ttwidStr = nil;
-        // 优先从app的NSHTTPCookieStorage取ttwid（app运行时一定有）
+        // Step 1: 构建完整Cookie（从app Cookie存储取douyin.com全部cookie，对齐JS规则）
         NSHTTPCookieStorage *cookieStore = [NSHTTPCookieStorage sharedHTTPCookieStorage];
         NSArray *appCookies = [cookieStore cookiesForURL:[NSURL URLWithString:@"https://www.douyin.com/"]];
+        NSMutableString *fullCookieStr = [NSMutableString string];
+        __block NSString *ttwidStr = nil;
         for (NSHTTPCookie *c in appCookies) {
-            if ([[c name] isEqualToString:@"ttwid"]) {
-                ttwidStr = [c value];
-                break;
-            }
+            if (fullCookieStr.length > 0) [fullCookieStr appendString:@"; "];
+            [fullCookieStr appendFormat:@"%@=%@", [c name], [c value]];
+            if ([[c name] isEqualToString:@"ttwid"]) ttwidStr = [c value];
         }
-        // 降级：从注册接口获取
+        // 降级：如果没有ttwid，从注册接口获取并追加到cookie
         if (!ttwidStr || ttwidStr.length == 0) {
             NSString *ttwidURL = @"https://ttwid.bytedance.com/ttwid/union/register/";
             NSString *ttwidBody = @"{\"region\":\"cn\",\"aid\":6383,\"needFid\":false,\"service\":\"www.douyin.com\",\"migrate_info\":{\"ticket\":\"\",\"source\":\"node\"},\"cbUrlProtocol\":\"https\",\"union\":true}";
@@ -3763,23 +3762,38 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
             }];
             [ttwidTask resume];
             dispatch_semaphore_wait(ttwidSem, dispatch_time(DISPATCH_TIME_NOW, 10 * NSEC_PER_SEC));
+            if (ttwidStr && ttwidStr.length > 0) {
+                if (fullCookieStr.length > 0) [fullCookieStr appendString:@"; "];
+                [fullCookieStr appendFormat:@"ttwid=%@", ttwidStr];
+            }
         }
-        if (!ttwidStr || ttwidStr.length == 0) {
-            dispatch_async(dispatch_get_main_queue(), ^{ [DYYYUtils showToast:@"本地解析失败: 无法获取ttwid"]; });
+        if (fullCookieStr.length == 0) {
+            dispatch_async(dispatch_get_main_queue(), ^{ [DYYYUtils showToast:@"接口4解析失败: 无法获取Cookie"]; });
             if (completion) completion(nil);
             return;
         }
         // 存储ttwid供后续CDN下载使用
-        [DYYYManager shared].localParseTtwid = ttwidStr;
+        if (ttwidStr && ttwidStr.length > 0) [DYYYManager shared].localParseTtwid = ttwidStr;
 
-        // Step 2: web API
+        // Step 2: web API（完整URL参数+浏览器指纹header+全Cookie，对齐JS规则）
         __block NSDictionary *awemeDetail = nil;
-        NSString *apiURL = [NSString stringWithFormat:@"https://www.douyin.com/aweme/v1/web/aweme/detail/?aweme_id=%@&device_platform=webapp&aid=6383&channel=channel_pc_web", awemeId];
+        NSString *apiURL = [NSString stringWithFormat:@"https://www.douyin.com/aweme/v1/web/aweme/detail/?aweme_id=%@&device_platform=webapp&aid=6383&channel=channel_pc_web&update_version_code=170400&pc_client_type=1&version_code=190500&version_name=19.5.0&cookie_enabled=true&screen_width=2560&screen_height=1440&browser_language=zh-CN&browser_platform=Win32&browser_name=Chrome&browser_version=150.0.0.0&browser_online=true&engine_name=Blink&engine_version=150.0.0.0&os_name=Windows&os_version=10&cpu_core_num=12&device_memory=8&platform=PC&downlink=4.75&effective_type=4g&round_trip_time=150", awemeId];
         NSMutableURLRequest *apiReq = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:apiURL]];
-        [apiReq setValue:@"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36" forHTTPHeaderField:@"User-Agent"];
+        [apiReq setValue:@"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36" forHTTPHeaderField:@"User-Agent"];
         [apiReq setValue:@"https://www.douyin.com/" forHTTPHeaderField:@"Referer"];
-        [apiReq setValue:@"application/json" forHTTPHeaderField:@"Accept"];
-        [apiReq setValue:[NSString stringWithFormat:@"ttwid=%@", ttwidStr] forHTTPHeaderField:@"Cookie"];
+        [apiReq setValue:@"text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7" forHTTPHeaderField:@"Accept"];
+        [apiReq setValue:@"zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6" forHTTPHeaderField:@"Accept-Language"];
+        [apiReq setValue:@"no-cache" forHTTPHeaderField:@"Cache-Control"];
+        [apiReq setValue:@"no-cache" forHTTPHeaderField:@"Pragma"];
+        [apiReq setValue:@""Chromium";v="150", "Google Chrome";v="150"" forHTTPHeaderField:@"sec-ch-ua"];
+        [apiReq setValue:@"?0" forHTTPHeaderField:@"sec-ch-ua-mobile"];
+        [apiReq setValue:@""Windows"" forHTTPHeaderField:@"sec-ch-ua-platform"];
+        [apiReq setValue:@"document" forHTTPHeaderField:@"sec-fetch-dest"];
+        [apiReq setValue:@"navigate" forHTTPHeaderField:@"sec-fetch-mode"];
+        [apiReq setValue:@"same-origin" forHTTPHeaderField:@"sec-fetch-site"];
+        [apiReq setValue:@"?1" forHTTPHeaderField:@"sec-fetch-user"];
+        [apiReq setValue:@"1" forHTTPHeaderField:@"upgrade-insecure-requests"];
+        [apiReq setValue:fullCookieStr forHTTPHeaderField:@"Cookie"];
         dispatch_semaphore_t apiSem = dispatch_semaphore_create(0);
         NSURLSessionDataTask *apiTask = [[NSURLSession sharedSession] dataTaskWithRequest:apiReq completionHandler:^(NSData *apiData, NSURLResponse *apiResp, NSError *apiErr) {
             @try {
@@ -3797,59 +3811,16 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
         dispatch_semaphore_wait(apiSem, dispatch_time(DISPATCH_TIME_NOW, 15 * NSEC_PER_SEC));
 
         if (!awemeDetail || ![awemeDetail isKindOfClass:[NSDictionary class]]) {
-            // ttwid可能过期，重试一次
-            ttwidStr = nil;
-            // 先从app Cookie存储取ttwid
+            // Cookie可能过期，重新从app读取全Cookie重试一次
             NSHTTPCookieStorage *retryCookieStore = [NSHTTPCookieStorage sharedHTTPCookieStorage];
             NSArray *retryCookies = [retryCookieStore cookiesForURL:[NSURL URLWithString:@"https://www.douyin.com/"]];
+            NSMutableString *retryCookieStr = [NSMutableString string];
             for (NSHTTPCookie *rc in retryCookies) {
-                if ([[rc name] isEqualToString:@"ttwid"]) {
-                    ttwidStr = [rc value];
-                    break;
-                }
+                if (retryCookieStr.length > 0) [retryCookieStr appendString:@"; "];
+                [retryCookieStr appendFormat:@"%@=%@", [rc name], [rc value]];
             }
-            // 降级：重新注册
-            if (!ttwidStr || ttwidStr.length == 0) {
-                NSString *ttwidURL2 = @"https://ttwid.bytedance.com/ttwid/union/register/";
-                NSString *ttwidBody2 = @"{\"region\":\"cn\",\"aid\":6383,\"needFid\":false,\"service\":\"www.douyin.com\",\"migrate_info\":{\"ticket\":\"\",\"source\":\"node\"},\"cbUrlProtocol\":\"https\",\"union\":true}";
-                NSMutableURLRequest *ttwidReq2 = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:ttwidURL2]];
-                ttwidReq2.HTTPMethod = @"POST";
-                ttwidReq2.HTTPBody = [ttwidBody2 dataUsingEncoding:NSUTF8StringEncoding];
-                [ttwidReq2 setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
-                [ttwidReq2 setValue:@"Mozilla/5.0" forHTTPHeaderField:@"User-Agent"];
-                dispatch_semaphore_t ttwidSem2 = dispatch_semaphore_create(0);
-                NSURLSessionDataTask *ttwidTask2 = [[NSURLSession sharedSession] dataTaskWithRequest:ttwidReq2 completionHandler:^(NSData *d2, NSURLResponse *r2, NSError *e2) {
-                    @try {
-                        NSHTTPURLResponse *hr2 = (NSHTTPURLResponse *)r2;
-                        NSDictionary *h2 = [hr2 allHeaderFields];
-                        NSString *sc2 = h2[@"Set-Cookie"];
-                        if (sc2.length > 0) {
-                            NSRange r2v = [sc2 rangeOfString:@"ttwid="];
-                            if (r2v.location != NSNotFound) {
-                                NSString *sub2 = [sc2 substringFromIndex:r2v.location + 6];
-                                NSRange semi2 = [sub2 rangeOfString:@";"];
-                                ttwidStr = semi2.location != NSNotFound ? [sub2 substringToIndex:semi2.location] : sub2;
-                            }
-                        }
-                        if (!ttwidStr || ttwidStr.length == 0) {
-                            if (d2.length > 0) {
-                                NSDictionary *j2 = [NSJSONSerialization JSONObjectWithData:d2 options:0 error:nil];
-                                if ([j2 isKindOfClass:[NSDictionary class]]) {
-                                    NSString *bt2 = j2[@"ttwid"];
-                                    if (bt2.length > 0) ttwidStr = bt2;
-                                }
-                            }
-                        }
-                    } @catch (NSException *ex2) {}
-                    dispatch_semaphore_signal(ttwidSem2);
-                }];
-                [ttwidTask2 resume];
-                dispatch_semaphore_wait(ttwidSem2, dispatch_time(DISPATCH_TIME_NOW, 10 * NSEC_PER_SEC));
-            }
-            if (ttwidStr.length > 0) {
-                [DYYYManager shared].localParseTtwid = ttwidStr;
-                NSString *retryCookie = [NSString stringWithFormat:@"ttwid=%@", ttwidStr];
-                [apiReq setValue:retryCookie forHTTPHeaderField:@"Cookie"];
+            if (retryCookieStr.length > 0) {
+                [apiReq setValue:retryCookieStr forHTTPHeaderField:@"Cookie"];
                 dispatch_semaphore_t apiSem2 = dispatch_semaphore_create(0);
                 awemeDetail = nil;
                 NSURLSessionDataTask *apiTask2 = [[NSURLSession sharedSession] dataTaskWithRequest:apiReq completionHandler:^(NSData *aD2, NSURLResponse *aR2, NSError *aE2) {
