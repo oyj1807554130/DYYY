@@ -3785,9 +3785,11 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
         [apiReq setValue:@"zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6" forHTTPHeaderField:@"Accept-Language"];
         [apiReq setValue:@"no-cache" forHTTPHeaderField:@"Cache-Control"];
         [apiReq setValue:@"no-cache" forHTTPHeaderField:@"Pragma"];
-        [apiReq setValue:@""Chromium";v="150", "Google Chrome";v="150"" forHTTPHeaderField:@"sec-ch-ua"];
+        NSString *secChUa = [NSString stringWithFormat:@"%cChromium%c;v=%c150%c, %cGoogle Chrome%c;v=%c150%c", 34, 34, 34, 34, 34, 34, 34, 34];
+        [apiReq setValue:secChUa forHTTPHeaderField:@"sec-ch-ua"];
         [apiReq setValue:@"?0" forHTTPHeaderField:@"sec-ch-ua-mobile"];
-        [apiReq setValue:@""Windows"" forHTTPHeaderField:@"sec-ch-ua-platform"];
+        NSString *secChPlatform = [NSString stringWithFormat:@"%cWindows%c", 34, 34];
+        [apiReq setValue:secChPlatform forHTTPHeaderField:@"sec-ch-ua-platform"];
         [apiReq setValue:@"document" forHTTPHeaderField:@"sec-fetch-dest"];
         [apiReq setValue:@"navigate" forHTTPHeaderField:@"sec-fetch-mode"];
         [apiReq setValue:@"same-origin" forHTTPHeaderField:@"sec-fetch-site"];
