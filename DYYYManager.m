@@ -8,6 +8,7 @@
 #import <MobileCoreServices/UTCoreTypes.h>
 #import <Photos/Photos.h>
 #import <objc/runtime.h>
+#import <WebKit/WebKit.h>
 
 #import "DYYYToast.h"
 #import "DYYYUtils.h"
@@ -3715,15 +3716,47 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
         return;
     }
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-        // Step 1: 构建完整Cookie（从app Cookie存储取douyin.com全部cookie，对齐JS规则）
+        // Step 1: 构建完整Cookie（优先从WKHTTPCookieStore取浏览器cookie，合并NSHTTPCookieStorage）
+        NSMutableDictionary *cookieDict = [NSMutableDictionary dictionary];
+        __block NSString *ttwidStr = nil;
+        __block NSInteger wkCookieCount = 0;
+        // 1a: 从WKHTTPCookieStore获取（Douyin app内WKWebView设置的浏览器cookie，含msToken等）
+        dispatch_semaphore_t wkSem = dispatch_semaphore_create(0);
+        @try {
+            WKHTTPCookieStore *wkStore = [[WKWebsiteDataStore defaultDataStore] httpCookieStore];
+            [wkStore getAllCookies:^(NSArray<NSHTTPCookie *> *wkCookies) {
+                for (NSHTTPCookie *c in wkCookies) {
+                    NSString *d = [c domain];
+                    if ([d containsString:@"douyin"] || [d containsString:@"bytedance"] || [d containsString:@"zijieapi"]) {
+                        cookieDict[[c name]] = [c value];
+                        wkCookieCount++;
+                        if ([[c name] isEqualToString:@"ttwid"]) ttwidStr = [c value];
+                    }
+                }
+                dispatch_semaphore_signal(wkSem);
+            }];
+        } @catch (NSException *e) { dispatch_semaphore_signal(wkSem); }
+        dispatch_semaphore_wait(wkSem, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC));
+        // 1b: 合并NSHTTPCookieStorage的cookie（app native cookie）
         NSHTTPCookieStorage *cookieStore = [NSHTTPCookieStorage sharedHTTPCookieStorage];
         NSArray *appCookies = [cookieStore cookiesForURL:[NSURL URLWithString:@"https://www.douyin.com/"]];
-        NSMutableString *fullCookieStr = [NSMutableString string];
-        __block NSString *ttwidStr = nil;
+        NSInteger appCookieCount = 0;
         for (NSHTTPCookie *c in appCookies) {
+            if (!cookieDict[[c name]]) {
+                cookieDict[[c name]] = [c value];
+                appCookieCount++;
+            }
+            if ([[c name] isEqualToString:@"ttwid"] && !ttwidStr) ttwidStr = [c value];
+        }
+        // 诊断toast
+        NSString *cookieDiag = [NSString stringWithFormat:@"WK:%ld App:%ld 合计:%ld", (long)wkCookieCount, (long)appCookieCount, (long)[cookieDict count]];
+        dispatch_async(dispatch_get_main_queue(), ^{ [DYYYUtils showToast:cookieDiag]; });
+        // Build cookie string
+        NSMutableString *fullCookieStr = [NSMutableString string];
+        NSArray *sortedKeys = [[cookieDict allKeys] sortedArrayUsingSelector:@selector(compare:)];
+        for (NSString *key in sortedKeys) {
             if (fullCookieStr.length > 0) [fullCookieStr appendString:@"; "];
-            [fullCookieStr appendFormat:@"%@=%@", [c name], [c value]];
-            if ([[c name] isEqualToString:@"ttwid"]) ttwidStr = [c value];
+            [fullCookieStr appendFormat:@"%@=%@", key, cookieDict[key]];
         }
         // 降级：如果没有ttwid，从注册接口获取并追加到cookie
         if (!ttwidStr || ttwidStr.length == 0) {
