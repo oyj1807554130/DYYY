@@ -3343,6 +3343,81 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                             [diag appendString:fieldInfo];
                         }
                     } @catch (__unused NSException *ef) {}
+                    // DEBUG: 详细dump bitrateRawData(原始JSON档位) 和 manualBitrateModels
+                    @try {
+                        id rawArr = [videoModel valueForKey:@"bitrateRawData"];
+                        if ([rawArr isKindOfClass:[NSArray class]] && [(NSArray *)rawArr count] > 0) {
+                            [diag appendString:@"\n--- bitrateRawData ---\n"];
+                            for (NSInteger ri = 0; ri < [(NSArray *)rawArr count]; ri++) {
+                                @autoreleasepool {
+                                    @try {
+                                        id rd = ((NSArray *)rawArr)[ri];
+                                        if (![rd isKindOfClass:[NSDictionary class]]) {
+                                            [diag appendFormat:@"%ld=%@\n", (long)ri, NSStringFromClass([rd class])];
+                                            continue;
+                                        }
+                                        NSDictionary *d = (NSDictionary *)rd;
+                                        NSString *gn = d[@"gear_name"];
+                                        id brv = d[@"bit_rate"] ?: d[@"bitrate"];
+                                        id qt = d[@"quality_type"];
+                                        NSDictionary *pa = d[@"play_addr"];
+                                        NSString *uri = nil;
+                                        NSInteger ulcnt = 0;
+                                        NSString *firstURL = nil;
+                                        if ([pa isKindOfClass:[NSDictionary class]]) {
+                                            uri = pa[@"uri"];
+                                            NSArray *ul = pa[@"url_list"];
+                                            if ([ul isKindOfClass:[NSArray class]]) {
+                                                ulcnt = ul.count;
+                                                if (ul.count > 0) firstURL = [NSString stringWithFormat:@"%@", ul[0]];
+                                            }
+                                        }
+                                        NSString *sizeS = d[@"size"] ? [NSString stringWithFormat:@"%@", d[@"size"]] : @"-";
+                                        [diag appendFormat:@"%ld.g=%@ br=%@ qt=%@ sz=%@\n", (long)ri, gn ?: @"?", brv ?: @"?", qt ?: @"?", sizeS];
+                                        [diag appendFormat:@"  uri=%@ url数=%ld\n", uri ?: @"?", (long)ulcnt];
+                                        if (firstURL.length > 0) {
+                                            // 只显示host+obj后10位+ds/cs/qs
+                                            NSURL *fu = [NSURL URLWithString:firstURL];
+                                            NSString *objS = @"-";
+                                            for (NSString *pc in fu.pathComponents) {
+                                                if (pc.length > 15 && [pc hasPrefix:@"o"]) { objS = [pc substringFromIndex:pc.length - 10]; break; }
+                                            }
+                                            [diag appendFormat:@"  ->%@/%@\n", fu.host ?: @"?", objS];
+                                        }
+                                    } @catch (__unused NSException *er) {
+                                        [diag appendFormat:@"%ld.err\n", (long)ri];
+                                    }
+                                }
+                            }
+                        }
+                    } @catch (__unused NSException *er2) {}
+                    @try {
+                        id mbm = [videoModel valueForKey:@"manualBitrateModels"];
+                        if ([mbm isKindOfClass:[NSArray class]] && [(NSArray *)mbm count] > 0) {
+                            [diag appendString:@"\n--- manualBitrateModels ---\n"];
+                            for (NSInteger mi = 0; mi < [(NSArray *)mbm count]; mi++) {
+                                @autoreleasepool {
+                                    @try {
+                                        id m = ((NSArray *)mbm)[mi];
+                                        NSString *gn = nil; @try { gn = [m valueForKey:@"gearName"]; } @catch (__unused NSException *e) {}
+                                        NSInteger br = 0, mw = 0, mh = 0;
+                                        @try { br = [[m valueForKey:@"bitrate"] integerValue]; } @catch (__unused NSException *e) {}
+                                        @try { mw = [[m valueForKey:@"imageWidth"] integerValue]; } @catch (__unused NSException *e) {}
+                                        @try { mh = [[m valueForKey:@"imageHeight"] integerValue]; } @catch (__unused NSException *e) {}
+                                        NSString *u = nil;
+                                        @try {
+                                            id pa2 = [m valueForKey:@"playAddr"];
+                                            id ol = [pa2 valueForKey:@"originURLList"];
+                                            if ([ol isKindOfClass:[NSArray class]] && ol.count > 0) u = ol[0];
+                                        } @catch (__unused NSException *e) {}
+                                        [diag appendFormat:@"%ld.%@ %ldkbps %ldx%ld %@\n", (long)mi, gn ?: @"?", (long)(br/1000), (long)mw, (long)mh, u.length > 0 ? @"有直链" : @"无直链"];
+                                    } @catch (__unused NSException *e) {
+                                        [diag appendFormat:@"%ld.err\n", (long)mi];
+                                    }
+                                }
+                            }
+                        }
+                    } @catch (__unused NSException *er3) {}
                     // 诊断弹窗：直接在屏幕上展示所有档位（截图用）
                     NSString *diagMsg = [diag copy];
                     dispatch_async(dispatch_get_main_queue(), ^{
