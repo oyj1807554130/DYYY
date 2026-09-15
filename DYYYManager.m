@@ -3335,9 +3335,16 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                                 NSString *u = e[@"url"];
                                 if (hi == 0 && [u isKindOfClass:[NSString class]]) dyyyLatestHiURL = u;
                                 NSString *uShow = [u isKindOfClass:[NSString class]] ? (u.length > 130 ? [[u substringToIndex:130] stringByAppendingString:@"..."] : u) : @"(无url)";
-                                [diag appendFormat:@"%lu. %@ %@kbps %@x%@\n%@\n",
+                                NSString *probeLine;
+                                if (e[@"rw"]) {
+                                    long long psz = [e[@"size"] longLongValue];
+                                    probeLine = [NSString stringWithFormat:@"实测:%@x%@ 大小:%.1fMB", e[@"rw"], e[@"rh"], psz > 0 ? psz / 1048576.0 : 0];
+                                } else {
+                                    probeLine = @"实测:解析中(稍后重新解析查看)";
+                                }
+                                [diag appendFormat:@"%lu. %@ %@kbps 模型%@x%@ %@\n%@\n",
                                  (unsigned long)(hi + 1), e[@"gear"] ?: @"?", e[@"bitrate"] ?: @"?",
-                                 e[@"w"] ?: @"?", e[@"h"] ?: @"?", uShow];
+                                 e[@"w"] ?: @"?", e[@"h"] ?: @"?", probeLine, uShow];
                             }
                         }
                     } @catch (__unused NSException *ehi) {}

@@ -463,6 +463,90 @@ static BOOL DYYYShouldHandleSpeedFeatures(void) {
 %end
 
 // 默认视频流最高画质
+// ===== DEBUG: 异步实测高档直链真实分辨率(Range下载MP4头尾解析tkhd) =====
+static void DYYYProbeURLResolution(NSString *urlStr) {
+    if (![urlStr isKindOfClass:[NSString class]] || urlStr.length == 0) return;
+    NSURL *u = [NSURL URLWithString:urlStr];
+    if (!u) return;
+    static NSMutableSet *dyyyProbedURLs = nil;
+    static dispatch_once_t onceProbe;
+    dispatch_once(&onceProbe, ^{ dyyyProbedURLs = [NSMutableSet set]; });
+    @synchronized(dyyyProbedURLs) {
+        if ([dyyyProbedURLs containsObject:urlStr]) return;
+        [dyyyProbedURLs addObject:urlStr];
+    }
+    NSURLSessionConfiguration *cfg = [NSURLSessionConfiguration ephemeralSessionConfiguration];
+    cfg.timeoutIntervalForRequest = 8.0;
+    NSURLSession *sess = [NSURLSession sessionWithConfiguration:cfg];
+    NSMutableURLRequest *r1 = [NSMutableURLRequest requestWithURL:u];
+    [r1 setValue:@"bytes=0-199999" forHTTPHeaderField:@"Range"];
+    [r1 setValue:@"Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X) AppleWebKit/605.1.15" forHTTPHeaderField:@"User-Agent"];
+    [r1 setValue:@"https://www.douyin.com/" forHTTPHeaderField:@"Referer"];
+    r1.timeoutInterval = 8.0;
+    NSURLSessionDataTask *t1 = [sess dataTaskWithRequest:r1 completionHandler:^(NSData *d1, NSURLResponse *rr1, NSError *e1) {
+        @try {
+            if (e1 || d1.length < 32) { [sess invalidateAndCancel]; return; }
+            long long totalLen = 0;
+            if ([rr1 isKindOfClass:[NSHTTPURLResponse class]]) {
+                NSString *cr = [[(NSHTTPURLResponse *)rr1 allHeaderFields] objectForKey:@"Content-Range"];
+                if ([cr isKindOfClass:[NSString class]]) {
+                    NSRange slash = [cr rangeOfString:@"/" options:NSBackwardsSearch];
+                    if (slash.location != NSNotFound) totalLen = [[cr substringFromIndex:slash.location + 1] longLongValue];
+                }
+            }
+            NSMutableData *buf = [NSMutableData dataWithData:d1];
+            void (^parseBlock)(void) = ^{
+                NSData *data = [buf copy];
+                NSUInteger n = data.length;
+                const unsigned char *bytes = data.bytes;
+                NSUInteger bestW = 0, bestH = 0;
+                if (n >= 28) {
+                    for (NSUInteger i = 0; i + 28 <= n; i++) {
+                        if (bytes[i] == 't' && bytes[i+1] == 'k' && bytes[i+2] == 'h' && bytes[i+3] == 'd') {
+                            unsigned int wv = ((unsigned int)bytes[i+20] << 24) | ((unsigned int)bytes[i+21] << 16) | ((unsigned int)bytes[i+22] << 8) | bytes[i+23];
+                            unsigned int hv = ((unsigned int)bytes[i+24] << 24) | ((unsigned int)bytes[i+25] << 16) | ((unsigned int)bytes[i+26] << 8) | bytes[i+27];
+                            NSUInteger rw = (wv + 32768) >> 16;
+                            NSUInteger rh = (hv + 32768) >> 16;
+                            if (rw > bestW && rw < 10000 && rh > 0 && rh < 10000) { bestW = rw; bestH = rh; }
+                        }
+                    }
+                }
+                NSUserDefaults *df = [NSUserDefaults standardUserDefaults];
+                NSDictionary *allDef = [df dictionaryRepresentation];
+                for (NSString *k in allDef.allKeys) {
+                    if (![k hasPrefix:@"dyyy_4k_"]) continue;
+                    id v = [df objectForKey:k];
+                    if (![v isKindOfClass:[NSDictionary class]]) continue;
+                    if (![v[@"url"] isEqual:urlStr]) continue;
+                    NSMutableDictionary *ne = [v mutableCopy];
+                    if (bestW > 0) { ne[@"rw"] = @(bestW); ne[@"rh"] = @(bestH); }
+                    if (totalLen > 0) ne[@"size"] = @(totalLen);
+                    ne[@"probed"] = @1;
+                    [df setObject:ne forKey:k];
+                    [df synchronize];
+                    break;
+                }
+            };
+            if (totalLen <= 240000) { parseBlock(); [sess invalidateAndCancel]; return; }
+            NSMutableURLRequest *r2 = [NSMutableURLRequest requestWithURL:u];
+            [r2 setValue:[NSString stringWithFormat:@"bytes=%lld-%lld", totalLen - 40000, totalLen - 1] forHTTPHeaderField:@"Range"];
+            [r2 setValue:@"Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X) AppleWebKit/605.1.15" forHTTPHeaderField:@"User-Agent"];
+            [r2 setValue:@"https://www.douyin.com/" forHTTPHeaderField:@"Referer"];
+            r2.timeoutInterval = 8.0;
+            NSURLSessionDataTask *t2 = [sess dataTaskWithRequest:r2 completionHandler:^(NSData *d2, __unused NSURLResponse *rr2, __unused NSError *e2) {
+                if (d2.length) [buf appendData:d2];
+                parseBlock();
+                [sess invalidateAndCancel];
+            }];
+            [t2 resume];
+        } @catch (__unused NSException *e) {
+            [sess invalidateAndCancel];
+        }
+    }];
+    [t1 resume];
+}
+// ===== DEBUG END =====
+
 // ===== DEBUG: 监听画质数据写入，抓切4K时的真实直链 =====
 static void DYYYInspectQualityModels(NSArray *models, NSString *source) {
     if (![models isKindOfClass:[NSArray class]] || models.count == 0) return;
@@ -509,6 +593,7 @@ static void DYYYInspectQualityModels(NSArray *models, NSString *source) {
                     entry[@"time"] = @([[NSDate date] timeIntervalSince1970]);
                     [[NSUserDefaults standardUserDefaults] setObject:entry forKey:cacheKey];
                     [[NSUserDefaults standardUserDefaults] synchronize];
+                    DYYYProbeURLResolution(url);
                 } @catch (__unused NSException *e) {}
             }
             static NSTimeInterval lastHit = 0;
