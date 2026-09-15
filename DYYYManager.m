@@ -8,7 +8,6 @@
 #import <MobileCoreServices/UTCoreTypes.h>
 #import <Photos/Photos.h>
 #import <objc/runtime.h>
-#import <WebKit/WebKit.h>
 
 #import "DYYYToast.h"
 #import "DYYYUtils.h"
@@ -1199,13 +1198,8 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
       // 创建下载任务 - 加User-Agent/Referer防止CDN拒绝连接
       NSMutableURLRequest *downloadReq = [NSMutableURLRequest requestWithURL:url];
       if (![DYYYManager shared].skipNextDownloadHeaders) {
-          if ([[url absoluteString] containsString:@"a=1128"]) {
-              // 引擎探针抓到的移动端签名直链：必须用手机UA，套Windows UA会被CDN判签名不符403
-              [downloadReq setValue:@"Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148" forHTTPHeaderField:@"User-Agent"];
-          } else {
-              [downloadReq setValue:@"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36" forHTTPHeaderField:@"User-Agent"];
-              [downloadReq setValue:@"https://www.douyin.com/" forHTTPHeaderField:@"Referer"];
-          }
+          [downloadReq setValue:@"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36" forHTTPHeaderField:@"User-Agent"];
+          [downloadReq setValue:@"https://www.douyin.com/" forHTTPHeaderField:@"Referer"];
       } else {
           [DYYYManager shared].skipNextDownloadHeaders = NO;
       }
@@ -3260,117 +3254,6 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                 NSArray *bitrateModels = nil;
                 @try { bitrateModels = [videoModel valueForKey:@"bitrateModels"]; } @catch (NSException *e) {}
                 if (bitrateModels && [bitrateModels isKindOfClass:[NSArray class]] && bitrateModels.count > 0) {
-                    // DEBUG: bitrateModels内容
-                    NSLog(@"[DYYY DEBUG] ===== bitrateModels count=%lu =====", (unsigned long)bitrateModels.count);
-                    NSMutableString *diag = [NSMutableString string];
-                    [diag appendFormat:@"档位总数:%lu\n", (unsigned long)bitrateModels.count];
-                    for (NSInteger i = 0; i < bitrateModels.count; i++) {
-                        @try {
-                            id bm = bitrateModels[i];
-                            NSString *gn = nil; @try { gn = [bm valueForKey:@"gearName"]; } @catch (NSException *e) {}
-                            NSInteger br = 0;   @try { br = [[bm valueForKey:@"bitrate"] integerValue]; } @catch (NSException *e) {}
-                            NSInteger dw = 0, dh = 0;
-                            @try { dw = [[bm valueForKey:@"imageWidth"] integerValue]; } @catch (NSException *e) {}
-                            @try { dh = [[bm valueForKey:@"imageHeight"] integerValue]; } @catch (NSException *e) {}
-                            NSString *uri = nil;
-                            NSString *directURL = nil;
-                            @try {
-                                id pa = [bm valueForKey:@"playAddr"];
-                                if (pa) {
-                                    id u = [pa valueForKey:@"URI"];
-                                    if ([u isKindOfClass:[NSString class]]) uri = u;
-                                    id ol = [pa valueForKey:@"originURLList"];
-                                    if ([ol isKindOfClass:[NSArray class]] && [(NSArray *)ol count] > 0) {
-                                        id first = ((NSArray *)ol).firstObject;
-                                        if ([first isKindOfClass:[NSString class]]) directURL = first;
-                                    }
-                                }
-                            } @catch (NSException *e) {}
-                            NSLog(@"[DYYY DEBUG]   bm[%ld] gear=%@ bitrate=%ld %ldx%ld uri=%@ url=%@", (long)i, gn?:@"nil", (long)br, (long)dw, (long)dh, uri?:@"nil", directURL?:@"无");
-                            [diag appendFormat:@"%ld. %@ %ldkbps %ldx%ld %@\n",
-                             (long)i,
-                             gn ?: @"?",
-                             (long)(br/1000),
-                             (long)dw, (long)dh,
-                             directURL.length > 0 ? @"有直链" : @"无直链"];
-                        } @catch (NSException *e) {}
-                    }
-                    NSLog(@"[DYYY DEBUG] ===== bitrateModels END =====");
-                    // DEBUG: 读取引擎探针抓到的真实播放档位
-                    @try {
-                        NSUserDefaults *engDf = [NSUserDefaults standardUserDefaults];
-                        NSString *engDump = [engDf stringForKey:@"dyyy_eng_dump"];
-                        NSString *engReso = [engDf stringForKey:@"dyyy_eng_reso"];
-                        NSString *engCls = [engDf stringForKey:@"dyyy_eng_classes"];
-                        if (engCls.length > 0) {
-                            [diag appendFormat:@"\n--- 引擎类 ---\n%@\n", engCls.length > 300 ? [[engCls substringToIndex:300] stringByAppendingString:@".."] : engCls];
-                        }
-                        if (engReso.length > 0) {
-                            NSArray *resoLines = [engReso componentsSeparatedByString:@"\n"];
-                            NSInteger rStart = (NSInteger)resoLines.count - 4;
-                            if (rStart < 0) rStart = 0;
-                            NSArray *resoTail = [resoLines subarrayWithRange:NSMakeRange((NSUInteger)rStart, resoLines.count - (NSUInteger)rStart)];
-                            [diag appendFormat:@"\n--- 引擎分辨率(最后4条/共%lu) ---\n%@\n", (unsigned long)resoLines.count, [resoTail componentsJoinedByString:@"\n"]];
-                        }
-                        if (engDump.length > 0) {
-                            [diag appendFormat:@"\n--- 引擎播放数据 ---\n%@\n", engDump.length > 1500 ? [[engDump substringToIndex:1500] stringByAppendingString:@"\n..(截断,详见完整)"] : engDump];
-                        } else {
-                            [diag appendString:@"\n(引擎数据为空:请先正常播放此视频5秒再解析)\n"];
-                        }
-                    } @catch (__unused NSException *eeng) {}
-                    // DEBUG: 列出已缓存的高档直链,供复制验证真实分辨率
-                    __block NSString *dyyyLatestHiURL = nil;
-                    @try {
-                        NSUserDefaults *hiDf = [NSUserDefaults standardUserDefaults];
-                        NSDictionary *allDef = [hiDf dictionaryRepresentation];
-                        NSMutableArray *hiHits = [NSMutableArray array];
-                        for (NSString *hk in allDef.allKeys) {
-                            if (![hk hasPrefix:@"dyyy_4k_"]) continue;
-                            id hv = [hiDf objectForKey:hk];
-                            if ([hv isKindOfClass:[NSDictionary class]]) [hiHits addObject:hv];
-                        }
-                        [hiHits sortUsingComparator:^NSComparisonResult(NSDictionary *a, NSDictionary *b) {
-                            return [b[@"time"] compare:a[@"time"]];
-                        }];
-                        NSUInteger hiShow = hiHits.count < 3 ? hiHits.count : 3;
-                        if (hiShow > 0) {
-                            [diag appendFormat:@"\n--- 已缓存高档直链(共%lu条,显示最新%lu) ---\n", (unsigned long)hiHits.count, (unsigned long)hiShow];
-                            for (NSUInteger hi = 0; hi < hiShow; hi++) {
-                                NSDictionary *e = hiHits[hi];
-                                NSString *u = e[@"url"];
-                                if (hi == 0 && [u isKindOfClass:[NSString class]]) dyyyLatestHiURL = u;
-                                NSString *uShow = [u isKindOfClass:[NSString class]] ? (u.length > 130 ? [[u substringToIndex:130] stringByAppendingString:@"..."] : u) : @"(无url)";
-                                NSString *probeLine;
-                                if (e[@"rw"]) {
-                                    long long psz = [e[@"size"] longLongValue];
-                                    probeLine = [NSString stringWithFormat:@"实测:%@x%@ 大小:%.1fMB", e[@"rw"], e[@"rh"], psz > 0 ? psz / 1048576.0 : 0];
-                                } else {
-                                    probeLine = @"实测:解析中(稍后重新解析查看)";
-                                }
-                                [diag appendFormat:@"%lu. %@ %@kbps 模型%@x%@ %@\n%@\n",
-                                 (unsigned long)(hi + 1), e[@"gear"] ?: @"?", e[@"bitrate"] ?: @"?",
-                                 e[@"w"] ?: @"?", e[@"h"] ?: @"?", probeLine, uShow];
-                            }
-                        }
-                    } @catch (__unused NSException *ehi) {}
-                    // 诊断弹窗：直接在屏幕上展示所有档位（截图用）
-                    NSString *diagMsg = [diag copy];
-                    dispatch_async(dispatch_get_main_queue(), ^{
-                        @try {
-                            UIAlertController *ac = [UIAlertController alertControllerWithTitle:@"本地档位诊断(截图给我)"
-                                                                                        message:diagMsg
-                                                                                 preferredStyle:UIAlertControllerStyleAlert];
-                            if (dyyyLatestHiURL.length > 0) {
-                                [ac addAction:[UIAlertAction actionWithTitle:@"复制最新高档直链" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *act) {
-                                    [UIPasteboard generalPasteboard].string = dyyyLatestHiURL;
-                                }]];
-                            }
-                            [ac addAction:[UIAlertAction actionWithTitle:@"知道了" style:UIAlertActionStyleDefault handler:nil]];
-                            UIViewController *top = [UIApplication sharedApplication].keyWindow.rootViewController;
-                            while (top.presentedViewController) top = top.presentedViewController;
-                            if (top) [top presentViewController:ac animated:YES completion:nil];
-                        } @catch (__unused NSException *e) {}
-                    });
                     NSMutableArray *sortedModels = [NSMutableArray arrayWithArray:bitrateModels];
                     [sortedModels sortUsingComparator:^NSComparisonResult(id a, id b) {
                         NSInteger ba = 0, bb = 0;
@@ -3615,35 +3498,6 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                     }
                 }
             }
-            // 4K直链缓存：播放/切4K时由hook写入，这里读出插到画质列表（纯本地读取）
-            if (videoURI.length > 0) {
-                @try {
-                    NSString *cacheKey4K = [NSString stringWithFormat:@"dyyy_4k_%@", videoURI];
-                    NSDictionary *cached4K = [[NSUserDefaults standardUserDefaults] dictionaryForKey:cacheKey4K];
-                    NSString *url4K = cached4K[@"url"];
-                    NSInteger cw = [cached4K[@"w"] integerValue];
-                    NSInteger ch = [cached4K[@"h"] integerValue];
-                    NSInteger cbr = [cached4K[@"bitrate"] integerValue];
-                    NSInteger cmax = MAX(cw, ch);
-                    BOOL cacheValid = (cmax >= 2560) || ((cw == 0 && ch == 0) && cbr >= 6000000);
-                    if (url4K.length > 0 && cacheValid) {
-                        BOOL dup = NO;
-                        for (NSDictionary *it in videoList) {
-                            if ([it[@"url"] isKindOfClass:[NSString class]] &&
-                                [url4K isEqualToString:it[@"url"]]) { dup = YES; break; }
-                        }
-                        if (!dup) {
-                            NSTimeInterval age4K = [[NSDate date] timeIntervalSince1970] - [cached4K[@"time"] doubleValue];
-                            NSString *qName = cmax >= 3840 ? @"真4K" : (cmax >= 2560 ? @"真2K" : @"高画质");
-                            NSString *label4K = [NSString stringWithFormat:@"[%@ %ldx%ld]", qName, (long)cw, (long)ch];
-                            if (age4K >= 3600) label4K = [label4K stringByAppendingString:@"(旧)"];
-                            NSInteger insertAt = videoList.count > 0 ? 1 : 0;
-                            [videoList insertObject:@{@"level": label4K, @"url": url4K} atIndex:insertAt];
-                            NSLog(@"[DYYY 4K-CACHE] 注入4K直链 age=%.0fs url=%@", age4K, url4K);
-                        }
-                    }
-                } @catch (NSException *e) {}
-            }
             id coverURL = [videoModel valueForKey:@"coverURL"];
             if (coverURL && [coverURL valueForKey:@"originURLList"]) {
                 NSArray *list = [coverURL valueForKey:@"originURLList"];
@@ -3861,44 +3715,15 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
         return;
     }
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-        // Step 1: 构建完整Cookie（优先从WKHTTPCookieStore取浏览器cookie，合并NSHTTPCookieStorage）
-        NSMutableDictionary *cookieDict = [NSMutableDictionary dictionary];
-        __block NSString *ttwidStr = nil;
-        __block NSInteger wkCookieCount = 0;
-        // 1a: 从WKHTTPCookieStore获取（Douyin app内WKWebView设置的浏览器cookie，含msToken等）
-        dispatch_semaphore_t wkSem = dispatch_semaphore_create(0);
-        @try {
-            WKHTTPCookieStore *wkStore = [[WKWebsiteDataStore defaultDataStore] httpCookieStore];
-            [wkStore getAllCookies:^(NSArray<NSHTTPCookie *> *wkCookies) {
-                for (NSHTTPCookie *c in wkCookies) {
-                    NSString *d = [c domain];
-                    if ([d containsString:@"douyin"] || [d containsString:@"bytedance"] || [d containsString:@"zijieapi"]) {
-                        cookieDict[[c name]] = [c value];
-                        wkCookieCount++;
-                        if ([[c name] isEqualToString:@"ttwid"]) ttwidStr = [c value];
-                    }
-                }
-                dispatch_semaphore_signal(wkSem);
-            }];
-        } @catch (NSException *e) { dispatch_semaphore_signal(wkSem); }
-        dispatch_semaphore_wait(wkSem, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC));
-        // 1b: 合并NSHTTPCookieStorage的cookie（app native cookie）
+        // Step 1: 构建完整Cookie（从app Cookie存储取douyin.com全部cookie，对齐JS规则）
         NSHTTPCookieStorage *cookieStore = [NSHTTPCookieStorage sharedHTTPCookieStorage];
         NSArray *appCookies = [cookieStore cookiesForURL:[NSURL URLWithString:@"https://www.douyin.com/"]];
-        NSInteger appCookieCount = 0;
-        for (NSHTTPCookie *c in appCookies) {
-            if (!cookieDict[[c name]]) {
-                cookieDict[[c name]] = [c value];
-                appCookieCount++;
-            }
-            if ([[c name] isEqualToString:@"ttwid"] && !ttwidStr) ttwidStr = [c value];
-        }
-        // Build cookie string
         NSMutableString *fullCookieStr = [NSMutableString string];
-        NSArray *sortedKeys = [[cookieDict allKeys] sortedArrayUsingSelector:@selector(compare:)];
-        for (NSString *key in sortedKeys) {
+        __block NSString *ttwidStr = nil;
+        for (NSHTTPCookie *c in appCookies) {
             if (fullCookieStr.length > 0) [fullCookieStr appendString:@"; "];
-            [fullCookieStr appendFormat:@"%@=%@", key, cookieDict[key]];
+            [fullCookieStr appendFormat:@"%@=%@", [c name], [c value]];
+            if ([[c name] isEqualToString:@"ttwid"]) ttwidStr = [c value];
         }
         // 降级：如果没有ttwid，从注册接口获取并追加到cookie
         if (!ttwidStr || ttwidStr.length == 0) {
@@ -3950,68 +3775,47 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
         // 存储ttwid供后续CDN下载使用
         if (ttwidStr && ttwidStr.length > 0) [DYYYManager shared].localParseTtwid = ttwidStr;
 
-        // Step 2: web API（共享会话单次请求；保留断点快照）
+        // Step 2: web API（完整URL参数+浏览器指纹header+全Cookie，对齐JS规则）
         __block NSDictionary *awemeDetail = nil;
         NSString *apiURL = [NSString stringWithFormat:@"https://www.douyin.com/aweme/v1/web/aweme/detail/?aweme_id=%@&device_platform=webapp&aid=6383&channel=channel_pc_web&update_version_code=170400&pc_client_type=1&version_code=190500&version_name=19.5.0&cookie_enabled=true&screen_width=2560&screen_height=1440&browser_language=zh-CN&browser_platform=Win32&browser_name=Chrome&browser_version=150.0.0.0&browser_online=true&engine_name=Blink&engine_version=150.0.0.0&os_name=Windows&os_version=10&cpu_core_num=12&device_memory=8&platform=PC&downlink=4.75&effective_type=4g&round_trip_time=150", awemeId];
         NSMutableURLRequest *apiReq = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:apiURL]];
         [apiReq setValue:@"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36" forHTTPHeaderField:@"User-Agent"];
         [apiReq setValue:@"https://www.douyin.com/" forHTTPHeaderField:@"Referer"];
-        [apiReq setValue:@"text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8" forHTTPHeaderField:@"Accept"];
-        [apiReq setValue:@"zh-CN,zh;q=0.9" forHTTPHeaderField:@"Accept-Language"];
+        [apiReq setValue:@"text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7" forHTTPHeaderField:@"Accept"];
+        [apiReq setValue:@"zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6" forHTTPHeaderField:@"Accept-Language"];
         [apiReq setValue:@"no-cache" forHTTPHeaderField:@"Cache-Control"];
+        [apiReq setValue:@"no-cache" forHTTPHeaderField:@"Pragma"];
+        NSString *secChUa = [NSString stringWithFormat:@"%cChromium%c;v=%c150%c, %cGoogle Chrome%c;v=%c150%c", 34, 34, 34, 34, 34, 34, 34, 34];
+        [apiReq setValue:secChUa forHTTPHeaderField:@"sec-ch-ua"];
+        [apiReq setValue:@"?0" forHTTPHeaderField:@"sec-ch-ua-mobile"];
+        NSString *secChPlatform = [NSString stringWithFormat:@"%cWindows%c", 34, 34];
+        [apiReq setValue:secChPlatform forHTTPHeaderField:@"sec-ch-ua-platform"];
+        [apiReq setValue:@"document" forHTTPHeaderField:@"sec-fetch-dest"];
+        [apiReq setValue:@"navigate" forHTTPHeaderField:@"sec-fetch-mode"];
+        [apiReq setValue:@"same-origin" forHTTPHeaderField:@"sec-fetch-site"];
+        [apiReq setValue:@"?1" forHTTPHeaderField:@"sec-fetch-user"];
+        [apiReq setValue:@"1" forHTTPHeaderField:@"upgrade-insecure-requests"];
         [apiReq setValue:fullCookieStr forHTTPHeaderField:@"Cookie"];
-        void (^fireApi)(NSMutableURLRequest *) = ^(NSMutableURLRequest *req) {
-            dispatch_semaphore_t apiSem = dispatch_semaphore_create(0);
-            NSURLSessionDataTask *apiTask = [[NSURLSession sharedSession] dataTaskWithRequest:req completionHandler:^(NSData *apiData, NSURLResponse *apiResp, NSError *apiErr) {
-                @try {
-                    NSMutableDictionary *snap = [NSMutableDictionary dictionary];
-                    snap[@"t"] = @([[NSDate date] timeIntervalSince1970]);
-                    NSMutableArray *ck = [NSMutableArray array];
-                    for (NSString *kv in [fullCookieStr componentsSeparatedByString:@"; "]) {
-                        NSRange eq = [kv rangeOfString:@"="];
-                        if (eq.location != NSNotFound) [ck addObject:[kv substringToIndex:eq.location]];
+        dispatch_semaphore_t apiSem = dispatch_semaphore_create(0);
+        NSURLSessionDataTask *apiTask = [[NSURLSession sharedSession] dataTaskWithRequest:apiReq completionHandler:^(NSData *apiData, NSURLResponse *apiResp, NSError *apiErr) {
+            @try {
+                if (apiData.length > 0) {
+                    NSDictionary *apiJson = [NSJSONSerialization JSONObjectWithData:apiData options:0 error:nil];
+                    if ([apiJson isKindOfClass:[NSDictionary class]]) {
+                        NSInteger statusCode = [apiJson[@"status_code"] integerValue];
+                        if (statusCode == 0) awemeDetail = apiJson[@"aweme_detail"];
                     }
-                    snap[@"cookies"] = [ck componentsJoinedByString:@","];
-                    if (apiErr) snap[@"err"] = [NSString stringWithFormat:@"%ld", (long)apiErr.code];
-                    if (apiData.length > 0) {
-                        NSDictionary *apiJson = [NSJSONSerialization JSONObjectWithData:apiData options:0 error:nil];
-                        if ([apiJson isKindOfClass:[NSDictionary class]]) {
-                            snap[@"status"] = @([apiJson[@"status_code"] integerValue]);
-                            NSDictionary *det = apiJson[@"aweme_detail"];
-                            if ([det isKindOfClass:[NSDictionary class]]) {
-                                awemeDetail = det;
-                                NSMutableArray *gears = [NSMutableArray array];
-                                NSArray *brl = det[@"video"][@"bit_rate"];
-                                if ([brl isKindOfClass:[NSArray class]]) {
-                                    for (NSDictionary *bb in brl) {
-                                        NSString *gn = bb[@"gear_name"] ?: @"?";
-                                        NSInteger brv = [bb[@"bit_rate"] integerValue];
-                                        NSDictionary *qa = bb[@"play_addr"];
-                                        NSInteger w = [qa[@"width"] integerValue], h = [qa[@"height"] integerValue];
-                                        [gears addObject:[NSString stringWithFormat:@"%@(%ldx%ld,%ldkbps)", gn, (long)w, (long)h, (long)(brv/1000)]];
-                                    }
-                                }
-                                snap[@"gears"] = [gears componentsJoinedByString:@" | "];
-                            }
-                        }
-                    }
-                    NSUserDefaults *dd = [NSUserDefaults standardUserDefaults];
-                    NSMutableArray *snaps = [[dd arrayForKey:@"dyyy_api4_snaps"] mutableCopy];
-                    if (!snaps) snaps = [NSMutableArray array];
-                    [snaps addObject:snap];
-                    if (snaps.count > 4) [snaps removeObjectsInRange:NSMakeRange(0, snaps.count - 4)];
-                    [dd setObject:snaps forKey:@"dyyy_api4_snaps"];
-                } @catch (NSException *e) {}
-                dispatch_semaphore_signal(apiSem);
-            }];
-            [apiTask resume];
-            dispatch_semaphore_wait(apiSem, dispatch_time(DISPATCH_TIME_NOW, 15 * NSEC_PER_SEC));
-        };
-        fireApi(apiReq);
+                }
+            } @catch (NSException *e) {}
+            dispatch_semaphore_signal(apiSem);
+        }];
+        [apiTask resume];
+        dispatch_semaphore_wait(apiSem, dispatch_time(DISPATCH_TIME_NOW, 15 * NSEC_PER_SEC));
 
-        if (!awemeDetail) {
-            // Cookie重试一次
-            NSArray *retryCookies = [[NSHTTPCookieStorage sharedHTTPCookieStorage] cookiesForURL:[NSURL URLWithString:@"https://www.douyin.com/"]];
+        if (!awemeDetail || ![awemeDetail isKindOfClass:[NSDictionary class]]) {
+            // Cookie可能过期，重新从app读取全Cookie重试一次
+            NSHTTPCookieStorage *retryCookieStore = [NSHTTPCookieStorage sharedHTTPCookieStorage];
+            NSArray *retryCookies = [retryCookieStore cookiesForURL:[NSURL URLWithString:@"https://www.douyin.com/"]];
             NSMutableString *retryCookieStr = [NSMutableString string];
             for (NSHTTPCookie *rc in retryCookies) {
                 if (retryCookieStr.length > 0) [retryCookieStr appendString:@"; "];
@@ -4019,9 +3823,25 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
             }
             if (retryCookieStr.length > 0) {
                 [apiReq setValue:retryCookieStr forHTTPHeaderField:@"Cookie"];
-                fireApi(apiReq);
+                dispatch_semaphore_t apiSem2 = dispatch_semaphore_create(0);
+                awemeDetail = nil;
+                NSURLSessionDataTask *apiTask2 = [[NSURLSession sharedSession] dataTaskWithRequest:apiReq completionHandler:^(NSData *aD2, NSURLResponse *aR2, NSError *aE2) {
+                    @try {
+                        if (aD2.length > 0) {
+                            NSDictionary *aJ2 = [NSJSONSerialization JSONObjectWithData:aD2 options:0 error:nil];
+                            if ([aJ2 isKindOfClass:[NSDictionary class]]) {
+                                NSInteger sc2 = [aJ2[@"status_code"] integerValue];
+                                if (sc2 == 0) awemeDetail = aJ2[@"aweme_detail"];
+                            }
+                        }
+                    } @catch (NSException *ex3) {}
+                    dispatch_semaphore_signal(apiSem2);
+                }];
+                [apiTask2 resume];
+                dispatch_semaphore_wait(apiSem2, dispatch_time(DISPATCH_TIME_NOW, 15 * NSEC_PER_SEC));
             }
-            if (!awemeDetail) {
+
+            if (!awemeDetail || ![awemeDetail isKindOfClass:[NSDictionary class]]) {
                 if (completion) completion(nil);
                 return;
             }
@@ -4158,47 +3978,6 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
             if (sizeStr.length > 0) level = [level stringByAppendingFormat:@"-[%@]", sizeStr];
             [videoList addObject:@{@"level": level, @"url": url}];
         }
-        // 合并引擎探针缓存：重连后App自身播放器拿到的真4K直链（a=1128签名，不会被Argus拦）
-        @try {
-            if (videoURI.length > 0) {
-                NSDictionary *eng4k = [[NSUserDefaults standardUserDefaults] objectForKey:[NSString stringWithFormat:@"dyyy_4k_%@", videoURI]];
-                if ([eng4k isKindOfClass:[NSDictionary class]]) {
-                    NSString *engURL = eng4k[@"url"];
-                    // 双重关卡：实测像素<2K，或gear名是1080/720等低档，或1440低码率占位假流，一律不注入并清理旧误判缓存
-                    long long cw0 = [eng4k[@"rw"] longLongValue], ch0 = [eng4k[@"rh"] longLongValue];
-                    long long cbr0 = [eng4k[@"bitrate"] longLongValue];
-                    NSString *cg0 = [eng4k[@"gear"] isKindOfClass:[NSString class]] ? [(NSString *)eng4k[@"gear"] lowercaseString] : @"";
-                    BOOL lowGear0 = ([cg0 containsString:@"1080"] || [cg0 containsString:@"720"] || [cg0 containsString:@"540"] || [cg0 containsString:@"480"]);
-                    BOOL fake1440 = (cw0 == 0 && ch0 == 0 && [cg0 containsString:@"1440"] && cbr0 < 3000000);
-                    NSUserDefaults *engDf0 = [NSUserDefaults standardUserDefaults];
-                    NSString *engKey0 = [NSString stringWithFormat:@"dyyy_4k_%@", videoURI];
-                    if ((cw0 > 0 && MAX(cw0, ch0) < 2560) || lowGear0 || fake1440) {
-                        [engDf0 removeObjectForKey:engKey0];
-                        [engDf0 synchronize];
-                    } else if ([engURL isKindOfClass:[NSString class]] && engURL.length > 0) {
-                        BOOL dup = NO;
-                        for (NSDictionary *it in videoList) {
-                            if ([it[@"url"] isEqualToString:engURL]) { dup = YES; break; }
-                        }
-                        if (!dup) {
-                            long long rw = [eng4k[@"rw"] longLongValue];
-                            long long rh = [eng4k[@"rh"] longLongValue];
-                            if (rw <= 0) rw = [eng4k[@"w"] longLongValue];
-                            if (rh <= 0) rh = [eng4k[@"h"] longLongValue];
-                            long long esize = [eng4k[@"size"] longLongValue];
-                            NSTimeInterval age = [[NSDate date] timeIntervalSince1970] - [eng4k[@"time"] doubleValue];
-                            NSString *qName = (MAX(rw, rh) >= 3840) ? @"引擎真4K" : (MAX(rw, rh) >= 2560 ? @"引擎真2K" : @"引擎高画质");
-                            NSString *res = (rw > 0 && rh > 0) ? [NSString stringWithFormat:@"%ldx%ld", (long)rw, (long)rh] : [NSString stringWithFormat:@"%ldkbps", (long)([eng4k[@"bitrate"] longLongValue] / 1000)];
-                            NSString *sz = @"";
-                            if (esize >= 1024 * 1024) sz = [NSString stringWithFormat:@"-%.1fMB", (double)esize / (1024.0 * 1024.0)];
-                            if (age > 3600) sz = [sz stringByAppendingString:@"(旧)"];
-                            NSString *engLevel = [NSString stringWithFormat:@"[%@ %@]%@", qName, res, sz];
-                            [videoList insertObject:@{@"level": engLevel, @"url": engURL} atIndex:0];
-                        }
-                    }
-                }
-            }
-        } @catch (__unused NSException *eeng4k) {}
         if (videoList.count == 0) {
             NSArray *fallbackList = videoObj[@"play_addr"][@"url_list"];
             if ([fallbackList isKindOfClass:[NSArray class]] && fallbackList.count > 0) [videoList addObject:@{@"level": @"[原画【最高画质]]-[30FPS]", @"url": fallbackList[0]}];
@@ -5490,46 +5269,6 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                     if (disclaimerDetail) insertIdx++;
                     [actions insertObject:shareCountAction atIndex:insertIdx];
                 }
-
-                // 临时探针入口：接口4断点记录 + App原生请求记录
-                AWEUserSheetAction *probeAction = [NSClassFromString(@"AWEUserSheetAction") actionWithTitle:@"🔍探针记录(点我截图)" imgName:nil handler:^{
-                    @try {
-                        NSUserDefaults *dd = [NSUserDefaults standardUserDefaults];
-                        NSMutableString *out = [NSMutableString string];
-                        [out appendString:@"== 接口4请求快照 ==\n"];
-                        for (NSDictionary *s in [dd arrayForKey:@"dyyy_api4_snaps"]) {
-                            [out appendFormat:@"[t%@ a%@] st=%@ err=%@\n CK:%@\n 档位:%@\n\n", s[@"t"], s[@"attempt"], s[@"status"]?:@"-", s[@"err"]?:@"-", s[@"cookies"]?:@"-", s[@"gears"]?:@"(无detail)"];
-                        }
-                        [out appendString:@"== 网络相关类 ==\n"];
-                        NSString *nc = [dd stringForKey:@"dyyy_net_classes"];
-                        [out appendFormat:@"%@\n\n", nc.length > 0 ? nc : @"(未枚举到)"];
-                        [out appendString:@"== 大响应截获(Cronet/JSON) ==\n"];
-                        NSMutableArray *hits = [[dd arrayForKey:@"dyyy_cronet_hits"] mutableCopy];
-                        if (hits.count > 6) [hits removeObjectsInRange:NSMakeRange(0, hits.count - 6)];
-                        if (hits.count == 0) [out appendString:@"(暂无大响应)\n"];
-                        for (NSDictionary *h in hits) {
-                            [out appendFormat:@"[4K:%@ aid:%@ %ld字节]\n %@\n 档位:%@\n\n", h[@"has4k"], h[@"aid"], (long)[h[@"size"] integerValue], h[@"url"], h[@"gears"]];
-                        }
-                        [out appendString:@"== App原生请求/网络事件(最近) ==\n"];
-                        NSMutableArray *logs = [[dd arrayForKey:@"dyyy_native_logs"] mutableCopy];
-                        if (logs.count > 30) [logs removeObjectsInRange:NSMakeRange(0, logs.count - 30)];
-                        for (NSDictionary *e in logs) {
-                            NSString *p = e[@"p"];
-                            if ([p hasPrefix:@"<<NET"]) [out appendFormat:@"%@ o=%@ u=%@\n", p, e[@"o"]?:@"-", e[@"u"]?:@""];
-                            else if ([e[@"h"] isEqualToString:@"TTNet"]) [out appendFormat:@"[TTNet] %@\n", p];
-                            else [out appendFormat:@"%@ %@?%@\n", e[@"h"], p, e[@"q"]?:@""];
-                        }
-                        UIPasteboard *pb = [UIPasteboard generalPasteboard];
-                        pb.string = out;
-                        UIAlertController *ac = [UIAlertController alertControllerWithTitle:@"探针记录(已复制)" message:out preferredStyle:UIAlertControllerStyleAlert];
-                        [ac addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]];
-                        UIViewController *top = [UIApplication sharedApplication].keyWindow.rootViewController;
-                        while (top.presentedViewController) top = top.presentedViewController;
-                        [top presentViewController:ac animated:YES completion:nil];
-                    } @catch (NSException *e) { [DYYYUtils showToast:@"探针读取失败"]; }
-                }];
-                [actions addObject:probeAction];
-
                 [DYYYManager addDisclaimerHeaderToActionSheet:actionSheet actionCount:qualityCount];
                 [actionSheet setActions:actions];
                 [actionSheet show];
