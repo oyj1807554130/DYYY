@@ -3257,22 +3257,53 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                 if (bitrateModels && [bitrateModels isKindOfClass:[NSArray class]] && bitrateModels.count > 0) {
                     // DEBUG: bitrateModels内容
                     NSLog(@"[DYYY DEBUG] ===== bitrateModels count=%lu =====", (unsigned long)bitrateModels.count);
+                    NSMutableString *diag = [NSMutableString string];
+                    [diag appendFormat:@"档位总数:%lu\n", (unsigned long)bitrateModels.count];
                     for (NSInteger i = 0; i < bitrateModels.count; i++) {
                         @try {
                             id bm = bitrateModels[i];
                             NSString *gn = nil; @try { gn = [bm valueForKey:@"gearName"]; } @catch (NSException *e) {}
                             NSInteger br = 0;   @try { br = [[bm valueForKey:@"bitrate"] integerValue]; } @catch (NSException *e) {}
-                            NSString *uri = nil; @try {
+                            NSInteger dw = 0, dh = 0;
+                            @try { dw = [[bm valueForKey:@"imageWidth"] integerValue]; } @catch (NSException *e) {}
+                            @try { dh = [[bm valueForKey:@"imageHeight"] integerValue]; } @catch (NSException *e) {}
+                            NSString *uri = nil;
+                            NSString *directURL = nil;
+                            @try {
                                 id pa = [bm valueForKey:@"playAddr"];
                                 if (pa) {
                                     id u = [pa valueForKey:@"URI"];
                                     if ([u isKindOfClass:[NSString class]]) uri = u;
+                                    id ol = [pa valueForKey:@"originURLList"];
+                                    if ([ol isKindOfClass:[NSArray class]] && [(NSArray *)ol count] > 0) {
+                                        id first = ((NSArray *)ol).firstObject;
+                                        if ([first isKindOfClass:[NSString class]]) directURL = first;
+                                    }
                                 }
                             } @catch (NSException *e) {}
-                            NSLog(@"[DYYY DEBUG]   bm[%ld] gear=%@ bitrate=%ld uri=%@", (long)i, gn?:@"nil", (long)br, uri?:@"nil");
+                            NSLog(@"[DYYY DEBUG]   bm[%ld] gear=%@ bitrate=%ld %ldx%ld uri=%@ url=%@", (long)i, gn?:@"nil", (long)br, (long)dw, (long)dh, uri?:@"nil", directURL?:@"无");
+                            [diag appendFormat:@"%ld. %@ %ldkbps %ldx%ld %@\n",
+                             (long)i,
+                             gn ?: @"?",
+                             (long)(br/1000),
+                             (long)dw, (long)dh,
+                             directURL.length > 0 ? @"有直链" : @"无直链"];
                         } @catch (NSException *e) {}
                     }
                     NSLog(@"[DYYY DEBUG] ===== bitrateModels END =====");
+                    // 诊断弹窗：直接在屏幕上展示所有档位（截图用）
+                    NSString *diagMsg = [diag copy];
+                    dispatch_async(dispatch_get_main_queue(), ^{
+                        @try {
+                            UIAlertController *ac = [UIAlertController alertControllerWithTitle:@"本地档位诊断(截图给我)"
+                                                                                        message:diagMsg
+                                                                                 preferredStyle:UIAlertControllerStyleAlert];
+                            [ac addAction:[UIAlertAction actionWithTitle:@"知道了" style:UIAlertActionStyleDefault handler:nil]];
+                            UIViewController *top = [UIApplication sharedApplication].keyWindow.rootViewController;
+                            while (top.presentedViewController) top = top.presentedViewController;
+                            if (top) [top presentViewController:ac animated:YES completion:nil];
+                        } @catch (__unused NSException *e) {}
+                    });
                     NSMutableArray *sortedModels = [NSMutableArray arrayWithArray:bitrateModels];
                     [sortedModels sortUsingComparator:^NSComparisonResult(id a, id b) {
                         NSInteger ba = 0, bb = 0;
