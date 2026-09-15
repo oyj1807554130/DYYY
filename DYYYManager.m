@@ -3517,6 +3517,28 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                     }
                 }
             }
+            // 4K直链缓存：播放/切4K时由hook写入，这里读出插到画质列表（纯本地读取）
+            if (videoURI.length > 0) {
+                @try {
+                    NSString *cacheKey4K = [NSString stringWithFormat:@"dyyy_4k_%@", videoURI];
+                    NSDictionary *cached4K = [[NSUserDefaults standardUserDefaults] dictionaryForKey:cacheKey4K];
+                    NSString *url4K = cached4K[@"url"];
+                    if (url4K.length > 0) {
+                        BOOL dup = NO;
+                        for (NSDictionary *it in videoList) {
+                            if ([it[@"url"] isKindOfClass:[NSString class]] &&
+                                [url4K isEqualToString:it[@"url"]]) { dup = YES; break; }
+                        }
+                        if (!dup) {
+                            NSTimeInterval age4K = [[NSDate date] timeIntervalSince1970] - [cached4K[@"time"] doubleValue];
+                            NSString *label4K = (age4K < 3600) ? @"[真4K]" : @"[真4K·旧链接]";
+                            NSInteger insertAt = videoList.count > 0 ? 1 : 0;
+                            [videoList insertObject:@{@"level": label4K, @"url": url4K} atIndex:insertAt];
+                            NSLog(@"[DYYY 4K-CACHE] 注入4K直链 age=%.0fs url=%@", age4K, url4K);
+                        }
+                    }
+                } @catch (NSException *e) {}
+            }
             id coverURL = [videoModel valueForKey:@"coverURL"];
             if (coverURL && [coverURL valueForKey:@"originURLList"]) {
                 NSArray *list = [coverURL valueForKey:@"originURLList"];

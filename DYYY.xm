@@ -478,9 +478,12 @@ static void DYYYInspectQualityModels(NSArray *models, NSString *source) {
                          [gl containsString:@"1440"] || [gl containsString:@"2k"]);
             if (!isHi) continue;
             NSString *url = nil;
+            NSString *vid = nil;
             @try {
                 id pa = [m valueForKey:@"playAddr"];
                 if (pa) {
+                    id u = [pa valueForKey:@"URI"];
+                    if ([u isKindOfClass:[NSString class]]) vid = u;
                     id ol = [pa valueForKey:@"originURLList"];
                     if ([ol isKindOfClass:[NSArray class]] && [(NSArray *)ol count] > 0) {
                         id first = ((NSArray *)ol).firstObject;
@@ -488,13 +491,26 @@ static void DYYYInspectQualityModels(NSArray *models, NSString *source) {
                     }
                 }
             } @catch (__unused NSException *e) {}
+            // 缓存4K直链：key=videoID，本地解析时读取
+            if (url.length > 0 && vid.length > 0) {
+                @try {
+                    NSString *cacheKey = [NSString stringWithFormat:@"dyyy_4k_%@", vid];
+                    NSMutableDictionary *entry = [NSMutableDictionary dictionary];
+                    entry[@"url"] = url;
+                    entry[@"gear"] = gn ?: @"";
+                    entry[@"bitrate"] = @(br);
+                    entry[@"time"] = @([[NSDate date] timeIntervalSince1970]);
+                    [[NSUserDefaults standardUserDefaults] setObject:entry forKey:cacheKey];
+                    [[NSUserDefaults standardUserDefaults] synchronize];
+                } @catch (__unused NSException *e) {}
+            }
             static NSTimeInterval lastHit = 0;
             NSTimeInterval now = [NSDate timeIntervalSinceReferenceDate];
             if (now - lastHit < 8.0) return;
             lastHit = now;
-            NSString *msg = [NSString stringWithFormat:@"src=%@\ngear=%@\nbr=%ld\n%@",
-                             source, gn ?: @"nil", (long)br, url ?: @"无直链"];
-            NSLog(@"[DYYY 4K-HIT] %@", msg);
+            NSString *msg = [NSString stringWithFormat:@"已缓存4K直链(可保存)\ngear=%@\nbr=%ld\nvid=%@",
+                             gn ?: @"nil", (long)br, vid ?: @"nil"];
+            NSLog(@"[DYYY 4K-HIT] gear=%@ br=%ld vid=%@ url=%@", gn, (long)br, vid, url);
             dispatch_async(dispatch_get_main_queue(), ^{
                 @try {
                     UIAlertController *ac = [UIAlertController alertControllerWithTitle:@"抓到4K画质数据"
