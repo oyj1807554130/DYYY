@@ -4148,6 +4148,36 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
             if (sizeStr.length > 0) level = [level stringByAppendingFormat:@"-[%@]", sizeStr];
             [videoList addObject:@{@"level": level, @"url": url}];
         }
+        // 合并引擎探针缓存：重连后App自身播放器拿到的真4K直链（a=1128签名，不会被Argus拦）
+        @try {
+            if (videoURI.length > 0) {
+                NSDictionary *eng4k = [[NSUserDefaults standardUserDefaults] objectForKey:[NSString stringWithFormat:@"dyyy_4k_%@", videoURI]];
+                if ([eng4k isKindOfClass:[NSDictionary class]]) {
+                    NSString *engURL = eng4k[@"url"];
+                    if ([engURL isKindOfClass:[NSString class]] && engURL.length > 0) {
+                        BOOL dup = NO;
+                        for (NSDictionary *it in videoList) {
+                            if ([it[@"url"] isEqualToString:engURL]) { dup = YES; break; }
+                        }
+                        if (!dup) {
+                            long long rw = [eng4k[@"rw"] longLongValue];
+                            long long rh = [eng4k[@"rh"] longLongValue];
+                            if (rw <= 0) rw = [eng4k[@"w"] longLongValue];
+                            if (rh <= 0) rh = [eng4k[@"h"] longLongValue];
+                            long long esize = [eng4k[@"size"] longLongValue];
+                            NSTimeInterval age = [[NSDate date] timeIntervalSince1970] - [eng4k[@"time"] doubleValue];
+                            NSString *qName = (MAX(rw, rh) >= 3840) ? @"引擎真4K" : (MAX(rw, rh) >= 2560 ? @"引擎真2K" : @"引擎高画质");
+                            NSString *res = (rw > 0 && rh > 0) ? [NSString stringWithFormat:@"%ldx%ld", (long)rw, (long)rh] : [NSString stringWithFormat:@"%ldkbps", (long)([eng4k[@"bitrate"] longLongValue] / 1000)];
+                            NSString *sz = @"";
+                            if (esize >= 1024 * 1024) sz = [NSString stringWithFormat:@"-%.1fMB", (double)esize / (1024.0 * 1024.0)];
+                            if (age > 3600) sz = [sz stringByAppendingString:@"(旧)"];
+                            NSString *engLevel = [NSString stringWithFormat:@"[%@ %@]%@", qName, res, sz];
+                            [videoList insertObject:@{@"level": engLevel, @"url": engURL} atIndex:0];
+                        }
+                    }
+                }
+            }
+        } @catch (__unused NSException *eeng4k) {}
         if (videoList.count == 0) {
             NSArray *fallbackList = videoObj[@"play_addr"][@"url_list"];
             if ([fallbackList isKindOfClass:[NSArray class]] && fallbackList.count > 0) [videoList addObject:@{@"level": @"[原画【最高画质]]-[30FPS]", @"url": fallbackList[0]}];
