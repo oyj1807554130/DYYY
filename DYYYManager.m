@@ -3766,9 +3766,6 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
             }
             if ([[c name] isEqualToString:@"ttwid"] && !ttwidStr) ttwidStr = [c value];
         }
-        // 诊断toast
-        NSString *cookieDiag = [NSString stringWithFormat:@"WK:%ld App:%ld 合计:%ld", (long)wkCookieCount, (long)appCookieCount, (long)[cookieDict count]];
-        dispatch_async(dispatch_get_main_queue(), ^{ [DYYYUtils showToast:cookieDiag]; });
         // Build cookie string
         NSMutableString *fullCookieStr = [NSMutableString string];
         NSArray *sortedKeys = [[cookieDict allKeys] sortedArrayUsingSelector:@selector(compare:)];
