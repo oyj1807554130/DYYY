@@ -3291,133 +3291,24 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                         } @catch (NSException *e) {}
                     }
                     NSLog(@"[DYYY DEBUG] ===== bitrateModels END =====");
-                    // DEBUG: 枚举video/aweme模型所有字段,找隐藏的完整档位数据
+                    // DEBUG: 读取引擎探针抓到的真实播放档位
                     @try {
-                        NSMutableString *fieldInfo = [NSMutableString string];
-                        NSArray *scanObjs = @[@{@"n":@"V", @"o": videoModel ?: [NSNull null]},
-                                              @{@"n":@"A", @"o": awemeModel ?: [NSNull null]}];
-                        for (NSDictionary *so in scanObjs) {
-                            id obj = so[@"o"];
-                            NSString *tag = so[@"n"];
-                            if (!obj || [obj isKindOfClass:[NSNull class]]) continue;
-                            unsigned int pcount = 0;
-                            objc_property_t *props = class_copyPropertyList([obj class], &pcount);
-                            for (unsigned int pi = 0; pi < pcount; pi++) {
-                                @autoreleasepool {
-                                    NSString *pname = [NSString stringWithUTF8String:property_getName(props[pi])];
-                                    if ([pname isEqualToString:@"bitrateModels"]) continue;
-                                    BOOL hot = ([pname rangeOfString:@"itrate" options:NSCaseInsensitiveSearch].location != NSNotFound
-                                                || [pname rangeOfString:@"BitRate" options:NSCaseInsensitiveSearch].location != NSNotFound
-                                                || [pname rangeOfString:@"playAddr" options:NSCaseInsensitiveSearch].location != NSNotFound
-                                                || [pname rangeOfString:@"rawData" options:NSCaseInsensitiveSearch].location != NSNotFound
-                                                || [pname rangeOfString:@"originJson" options:NSCaseInsensitiveSearch].location != NSNotFound
-                                                || [pname rangeOfString:@"logJSON" options:NSCaseInsensitiveSearch].location != NSNotFound);
-                                    if (!hot) continue;
-                                    @try {
-                                        id val = [obj valueForKey:pname];
-                                        if ([val isKindOfClass:[NSArray class]]) {
-                                            [fieldInfo appendFormat:@"%@.%@:[%lu]", tag, pname, (unsigned long)[(NSArray *)val count]];
-                                            if ([(NSArray *)val count] > 0) {
-                                                id first = ((NSArray *)val)[0];
-                                                [fieldInfo appendFormat:@"=%@", NSStringFromClass([first class])];
-                                                if ([first isKindOfClass:[NSDictionary class]]) {
-                                                    id g = ((NSDictionary *)first)[@"gear_name"];
-                                                    if (g) [fieldInfo appendFormat:@"/%@", g];
-                                                }
-                                            }
-                                            [fieldInfo appendString:@"\n"];
-                                        } else if ([val isKindOfClass:[NSDictionary class]]) {
-                                            [fieldInfo appendFormat:@"%@.%@:dict[%lu]\n", tag, pname, (unsigned long)[(NSDictionary *)val count]];
-                                        } else if (val) {
-                                            NSString *vs = [NSString stringWithFormat:@"%@", val];
-                                            if (vs.length > 40) vs = [[vs substringToIndex:40] stringByAppendingString:@".."];
-                                            [fieldInfo appendFormat:@"%@.%@=%@\n", tag, pname, vs];
-                                        }
-                                    } @catch (__unused NSException *ev) {}
-                                }
-                            }
-                            free(props);
+                        NSUserDefaults *engDf = [NSUserDefaults standardUserDefaults];
+                        NSString *engDump = [engDf stringForKey:@"dyyy_eng_dump"];
+                        NSString *engReso = [engDf stringForKey:@"dyyy_eng_reso"];
+                        NSString *engCls = [engDf stringForKey:@"dyyy_eng_classes"];
+                        if (engCls.length > 0) {
+                            [diag appendFormat:@"\n--- 引擎类 ---\n%@\n", engCls.length > 300 ? [[engCls substringToIndex:300] stringByAppendingString:@".."] : engCls];
                         }
-                        if (fieldInfo.length > 0) {
-                            [diag appendString:@"\n--- 疑似档位字段 ---\n"];
-                            [diag appendString:fieldInfo];
+                        if (engReso.length > 0) {
+                            [diag appendFormat:@"\n--- 引擎分辨率记录 ---\n%@\n", engReso.length > 400 ? [[engReso substringToIndex:400] stringByAppendingString:@".."] : engReso];
                         }
-                    } @catch (__unused NSException *ef) {}
-                    // DEBUG: 详细dump bitrateRawData(原始JSON档位) 和 manualBitrateModels
-                    @try {
-                        id rawArr = [videoModel valueForKey:@"bitrateRawData"];
-                        if ([rawArr isKindOfClass:[NSArray class]] && [(NSArray *)rawArr count] > 0) {
-                            [diag appendString:@"\n--- bitrateRawData ---\n"];
-                            for (NSInteger ri = 0; ri < [(NSArray *)rawArr count]; ri++) {
-                                @autoreleasepool {
-                                    @try {
-                                        id rd = ((NSArray *)rawArr)[ri];
-                                        if (![rd isKindOfClass:[NSDictionary class]]) {
-                                            [diag appendFormat:@"%ld=%@\n", (long)ri, NSStringFromClass([rd class])];
-                                            continue;
-                                        }
-                                        NSDictionary *d = (NSDictionary *)rd;
-                                        NSString *gn = d[@"gear_name"];
-                                        id brv = d[@"bit_rate"] ?: d[@"bitrate"];
-                                        id qt = d[@"quality_type"];
-                                        NSDictionary *pa = d[@"play_addr"];
-                                        NSString *uri = nil;
-                                        NSInteger ulcnt = 0;
-                                        NSString *firstURL = nil;
-                                        if ([pa isKindOfClass:[NSDictionary class]]) {
-                                            uri = pa[@"uri"];
-                                            NSArray *ul = pa[@"url_list"];
-                                            if ([ul isKindOfClass:[NSArray class]]) {
-                                                ulcnt = ul.count;
-                                                if (ul.count > 0) firstURL = [NSString stringWithFormat:@"%@", ul[0]];
-                                            }
-                                        }
-                                        NSString *sizeS = d[@"size"] ? [NSString stringWithFormat:@"%@", d[@"size"]] : @"-";
-                                        [diag appendFormat:@"%ld.g=%@ br=%@ qt=%@ sz=%@\n", (long)ri, gn ?: @"?", brv ?: @"?", qt ?: @"?", sizeS];
-                                        [diag appendFormat:@"  uri=%@ url数=%ld\n", uri ?: @"?", (long)ulcnt];
-                                        if (firstURL.length > 0) {
-                                            // 只显示host+obj后10位+ds/cs/qs
-                                            NSURL *fu = [NSURL URLWithString:firstURL];
-                                            NSString *objS = @"-";
-                                            for (NSString *pc in fu.pathComponents) {
-                                                if (pc.length > 15 && [pc hasPrefix:@"o"]) { objS = [pc substringFromIndex:pc.length - 10]; break; }
-                                            }
-                                            [diag appendFormat:@"  ->%@/%@\n", fu.host ?: @"?", objS];
-                                        }
-                                    } @catch (__unused NSException *er) {
-                                        [diag appendFormat:@"%ld.err\n", (long)ri];
-                                    }
-                                }
-                            }
+                        if (engDump.length > 0) {
+                            [diag appendFormat:@"\n--- 引擎播放数据 ---\n%@\n", engDump.length > 1500 ? [[engDump substringToIndex:1500] stringByAppendingString:@"\n..(截断,详见完整)"] : engDump];
+                        } else {
+                            [diag appendString:@"\n(引擎数据为空:请先正常播放此视频5秒再解析)\n"];
                         }
-                    } @catch (__unused NSException *er2) {}
-                    @try {
-                        id mbm = [videoModel valueForKey:@"manualBitrateModels"];
-                        if ([mbm isKindOfClass:[NSArray class]] && [(NSArray *)mbm count] > 0) {
-                            [diag appendString:@"\n--- manualBitrateModels ---\n"];
-                            for (NSInteger mi = 0; mi < [(NSArray *)mbm count]; mi++) {
-                                @autoreleasepool {
-                                    @try {
-                                        id m = ((NSArray *)mbm)[mi];
-                                        NSString *gn = nil; @try { gn = [m valueForKey:@"gearName"]; } @catch (__unused NSException *e) {}
-                                        NSInteger br = 0, mw = 0, mh = 0;
-                                        @try { br = [[m valueForKey:@"bitrate"] integerValue]; } @catch (__unused NSException *e) {}
-                                        @try { mw = [[m valueForKey:@"imageWidth"] integerValue]; } @catch (__unused NSException *e) {}
-                                        @try { mh = [[m valueForKey:@"imageHeight"] integerValue]; } @catch (__unused NSException *e) {}
-                                        NSString *u = nil;
-                                        @try {
-                                            id pa2 = [m valueForKey:@"playAddr"];
-                                            id ol = [pa2 valueForKey:@"originURLList"];
-                                            if ([ol isKindOfClass:[NSArray class]] && [(NSArray *)ol count] > 0) u = ((NSArray *)ol)[0];
-                                        } @catch (__unused NSException *e) {}
-                                        [diag appendFormat:@"%ld.%@ %ldkbps %ldx%ld %@\n", (long)mi, gn ?: @"?", (long)(br/1000), (long)mw, (long)mh, u.length > 0 ? @"有直链" : @"无直链"];
-                                    } @catch (__unused NSException *e) {
-                                        [diag appendFormat:@"%ld.err\n", (long)mi];
-                                    }
-                                }
-                            }
-                        }
-                    } @catch (__unused NSException *er3) {}
+                    } @catch (__unused NSException *eeng) {}
                     // 诊断弹窗：直接在屏幕上展示所有档位（截图用）
                     NSString *diagMsg = [diag copy];
                     dispatch_async(dispatch_get_main_queue(), ^{
