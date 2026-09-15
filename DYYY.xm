@@ -553,6 +553,65 @@ static BOOL DYYYShouldHandleSpeedFeatures(void) {
     return originalModels;
 }
 
+// ===== DEBUG: 监听画质数据写入，抓切4K时的真实直链 =====
+%new
+- (void)dyyy_inspectQualityModels:(NSArray *)models source:(NSString *)source {
+    if (![models isKindOfClass:[NSArray class]] || models.count == 0) return;
+    for (id m in models) {
+        @try {
+            if (![m isKindOfClass:NSClassFromString(@"AWEVideoBSModel")]) continue;
+            NSString *gn = nil;
+            @try { gn = [m valueForKey:@"gearName"]; } @catch (__unused NSException *e) {}
+            NSInteger br = 0;
+            @try { br = [[m valueForKey:@"bitrate"] integerValue]; } @catch (__unused NSException *e) {}
+            NSString *gl = [gn lowercaseString] ?: @"";
+            BOOL isHi = ([gl containsString:@"2160"] || [gl containsString:@"4k"] ||
+                         [gl containsString:@"1440"] || [gl containsString:@"2k"]);
+            if (!isHi) continue;
+            NSString *url = nil;
+            @try {
+                id pa = [m valueForKey:@"playAddr"];
+                if (pa) {
+                    id ol = [pa valueForKey:@"originURLList"];
+                    if ([ol isKindOfClass:[NSArray class]] && [(NSArray *)ol count] > 0) {
+                        id first = ((NSArray *)ol).firstObject;
+                        if ([first isKindOfClass:[NSString class]]) url = first;
+                    }
+                }
+            } @catch (__unused NSException *e) {}
+            static NSTimeInterval lastHit = 0;
+            NSTimeInterval now = [NSDate timeIntervalSinceReferenceDate];
+            if (now - lastHit < 8.0) return;
+            lastHit = now;
+            NSString *msg = [NSString stringWithFormat:@"src=%@\ngear=%@\nbr=%ld\n%@",
+                             source, gn ?: @"nil", (long)br, url ?: @"无直链"];
+            NSLog(@"[DYYY 4K-HIT] %@", msg);
+            dispatch_async(dispatch_get_main_queue(), ^{
+                @try {
+                    UIAlertController *ac = [UIAlertController alertControllerWithTitle:@"抓到4K画质数据"
+                                                                                message:msg
+                                                                         preferredStyle:UIAlertControllerStyleAlert];
+                    [ac addAction:[UIAlertAction actionWithTitle:@"知道了" style:UIAlertActionStyleDefault handler:nil]];
+                    UIViewController *top = [UIApplication sharedApplication].keyWindow.rootViewController;
+                    while (top.presentedViewController) top = top.presentedViewController;
+                    if (top) [top presentViewController:ac animated:YES completion:nil];
+                } @catch (__unused NSException *e) {}
+            });
+        } @catch (__unused NSException *e) {}
+    }
+}
+
+- (void)setBitrateModels:(NSArray *)models {
+    %orig(models);
+    [self dyyy_inspectQualityModels:models source:@"bitrateModels"];
+}
+
+- (void)setManualBitrateModels:(NSArray *)models {
+    %orig(models);
+    [self dyyy_inspectQualityModels:models source:@"manualBitrateModels"];
+}
+// ===== DEBUG END =====
+
 %end
 
 // 直播间真实人数
