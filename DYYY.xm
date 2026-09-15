@@ -498,7 +498,7 @@ static void DYYYProbeURLResolution(NSString *urlStr) {
             void (^parseBlock)(void) = ^{
                 NSData *data = [buf copy];
                 NSUInteger n = data.length;
-                const unsigned char *bytes = data.bytes;
+                const unsigned char *bytes = (const unsigned char *)data.bytes;
                 NSUInteger bestW = 0, bestH = 0;
                 if (n >= 28) {
                     for (NSUInteger i = 0; i + 28 <= n; i++) {
