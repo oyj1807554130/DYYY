@@ -9593,9 +9593,9 @@ static void findTargetViewInView(UIView *view) {
     @try {
         NSMutableArray *engClasses = [NSMutableArray array];
         unsigned int cc = 0;
-        const char **allNames = objc_copyClassList(&cc);
+        Class *allClasses = objc_copyClassList(&cc);
         for (unsigned int ci = 0; ci < cc; ci++) {
-            const char *cn = class_getName(objc_getClass(allNames[ci]));
+            const char *cn = class_getName(allClasses[ci]);
             if (!cn) continue;
             NSString *n = [NSString stringWithUTF8String:cn];
             if ([n rangeOfString:@"VideoEngine" options:NSCaseInsensitiveSearch].location != NSNotFound
@@ -9604,7 +9604,7 @@ static void findTargetViewInView(UIView *view) {
                 [engClasses addObject:n];
             }
         }
-        free(allNames);
+        free(allClasses);
         if (engClasses.count > 0) {
             [[NSUserDefaults standardUserDefaults] setObject:[engClasses componentsJoinedByString:@","] forKey:@"dyyy_eng_classes"];
         }
