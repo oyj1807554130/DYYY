@@ -671,13 +671,68 @@ static void DYYYInspectQualityModels(NSArray *models, NSString *source) {
             NSUserDefaults *d = [NSUserDefaults standardUserDefaults];
             NSMutableArray *logs = [[d arrayForKey:@"dyyy_native_logs"] mutableCopy];
             if (!logs) logs = [NSMutableArray array];
-            [logs addObject:@{@"t":@([[NSDate date] timeIntervalSince1970]), @"p":[NSString stringWithFormat:@"<<NET %@>>", name]}];
+            [logs addObject:@{@"t":@([[NSDate date] timeIntervalSince1970]),
+                              @"p":[NSString stringWithFormat:@"<<NET %@>>", name],
+                              @"o":object ? NSStringFromClass([object class]) : @"-",
+                              @"u":userInfo ? ([[userInfo description] length] > 160 ? [[userInfo description] substringToIndex:160] : [userInfo description]) : @""}];
             if (logs.count > 60) [logs removeObjectsInRange:NSMakeRange(0, logs.count - 60)];
             [d setObject:logs forKey:@"dyyy_native_logs"];
         }
     } @catch (__unused NSException *e) {}
     %orig;
 }
+%end
+
+static void DYYYLogTTNet(NSString *response, NSString *method, NSDictionary *params) {
+    @try {
+        if (!response) return;
+        NSString *r = [response lowercaseString];
+        if (!([r containsString:@"aweme"] || [r containsString:@"/play"] || [r containsString:@"feed"] || [r containsString:@"detail"] || [params objectForKey:@"aweme_id"] || [params objectForKey:@"item_id"])) return;
+        NSString *aid = params[@"aweme_id"] ?: params[@"item_id"] ?: @"";
+        NSString *line = [NSString stringWithFormat:@"%@|%@|aid=%@", method ?: @"?", response, aid];
+        NSUserDefaults *d = [NSUserDefaults standardUserDefaults];
+        NSMutableArray *logs = [[d arrayForKey:@"dyyy_native_logs"] mutableCopy];
+        if (!logs) logs = [NSMutableArray array];
+        [logs addObject:@{@"t":@([[NSDate date] timeIntervalSince1970]), @"p":line, @"h":@"TTNet"}];
+        if (logs.count > 60) [logs removeObjectsInRange:NSMakeRange(0, logs.count - 60)];
+        [d setObject:logs forKey:@"dyyy_native_logs"];
+    } @catch (__unused NSException *e) {}
+}
+
+%group DYYYTTNetP1
+%hook TTNetworkManager
++ (id)requestForJSONWithResponse:(NSString *)response params:(NSDictionary *)params method:(NSString *)method needSerializers:(id)ser isCustomedParameter:(BOOL)cp isCarrier:(BOOL)car requestSerializerType:(NSInteger)rst responseSerializerType:(NSInteger)pst autoResume:(BOOL)ar success:(id)suc failure:(id)fail {
+    DYYYLogTTNet(response, method, params);
+    return %orig;
+}
+%end
+%end
+
+%group DYYYTTNetP2
+%hook TTNetworkManager
++ (id)requestForJSONWithResponse:(NSString *)response params:(NSDictionary *)params method:(NSString *)method needSerializers:(id)ser isCustomedParameter:(BOOL)cp isCarrier:(BOOL)car success:(id)suc failure:(id)fail {
+    DYYYLogTTNet(response, method, params);
+    return %orig;
+}
+%end
+%end
+
+%group DYYYTTNetP3
+%hook TTNetworkManager
++ (id)requestForJSONWithResponse:(NSString *)response params:(NSDictionary *)params method:(NSString *)method needSerializers:(id)ser isCustomedParameter:(BOOL)cp success:(id)suc failure:(id)fail {
+    DYYYLogTTNet(response, method, params);
+    return %orig;
+}
+%end
+%end
+
+%group DYYYTTNetP4
+%hook TTNetworkManager
++ (id)requestForBinaryWithResponse:(NSString *)response params:(NSDictionary *)params method:(NSString *)method needSerializers:(id)ser isCustomedParameter:(BOOL)cp isCarrier:(BOOL)car success:(id)suc failure:(id)fail {
+    DYYYLogTTNet(response, method, params);
+    return %orig;
+}
+%end
 %end
 
 %hook AWEVideoModel
@@ -9809,6 +9864,37 @@ static void findTargetViewInView(UIView *view) {
         if (engCls) {
             %init(DYYYEngineProbe);
         }
+
+        // 枚举TTNet/网络状态相关类，按真实方法签名启用TTNet请求hook
+        Class ttnCls = objc_getClass("TTNetworkManager");
+        if (ttnCls) {
+            if (class_getClassMethod(ttnCls, @selector(requestForJSONWithResponse:params:method:needSerializers:isCustomedParameter:isCarrier:requestSerializerType:responseSerializerType:autoResume:success:failure:))) %init(DYYYTTNetP1);
+            if (class_getClassMethod(ttnCls, @selector(requestForJSONWithResponse:params:method:needSerializers:isCustomedParameter:isCarrier:success:failure:))) %init(DYYYTTNetP2);
+            if (class_getClassMethod(ttnCls, @selector(requestForJSONWithResponse:params:method:needSerializers:isCustomedParameter:success:failure:))) %init(DYYYTTNetP3);
+            if (class_getClassMethod(ttnCls, @selector(requestForBinaryWithResponse:params:method:needSerializers:isCustomedParameter:isCarrier:success:failure:))) %init(DYYYTTNetP4);
+        }
+        dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+            @try {
+                NSMutableArray *netClasses = [NSMutableArray array];
+                unsigned int nc = 0;
+                Class *all = objc_copyClassList(&nc);
+                for (unsigned int ni = 0; ni < nc; ni++) {
+                    const char *cn = class_getName(all[ni]);
+                    if (!cn) continue;
+                    NSString *n = [NSString stringWithUTF8String:cn];
+                    NSString *nl = n.lowercaseString;
+                    if ([nl containsString:@"networkmanager"] || [nl containsString:@"reachab"] || [nl containsString:@"netstatus"] || [nl containsString:@"ttnet"] || [nl containsString:@"networkstatus"]) {
+                        if (![n containsString:@"NSURLSession"] && ![n containsString:@"CFNetwork"]) [netClasses addObject:n];
+                    }
+                }
+                free(all);
+                if (netClasses.count > 0) {
+                    // 只存前25个类名，避免过长
+                    if (netClasses.count > 25) [netClasses removeObjectsInRange:NSMakeRange(25, netClasses.count - 25)];
+                    [[NSUserDefaults standardUserDefaults] setObject:[netClasses componentsJoinedByString:@","] forKey:@"dyyy_net_classes"];
+                }
+            } @catch (__unused NSException *e) {}
+        });
     } @catch (__unused NSException *e) {}
 
     Class interactionBaseLabelClass = objc_getClass("AWECommentSwiftBizUI.CommentInteractionBaseLabel");

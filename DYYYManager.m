@@ -5506,12 +5506,16 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                         for (NSDictionary *s in [dd arrayForKey:@"dyyy_api4_snaps"]) {
                             [out appendFormat:@"[t%@ a%@] st=%@ err=%@\n CK:%@\n 档位:%@\n\n", s[@"t"], s[@"attempt"], s[@"status"]?:@"-", s[@"err"]?:@"-", s[@"cookies"]?:@"-", s[@"gears"]?:@"(无detail)"];
                         }
+                        [out appendString:@"== 网络相关类 ==\n"];
+                        NSString *nc = [dd stringForKey:@"dyyy_net_classes"];
+                        [out appendFormat:@"%@\n\n", nc.length > 0 ? nc : @"(未枚举到)"];
                         [out appendString:@"== App原生请求/网络事件(最近) ==\n"];
                         NSMutableArray *logs = [[dd arrayForKey:@"dyyy_native_logs"] mutableCopy];
                         if (logs.count > 30) [logs removeObjectsInRange:NSMakeRange(0, logs.count - 30)];
                         for (NSDictionary *e in logs) {
                             NSString *p = e[@"p"];
-                            if ([p hasPrefix:@"<<NET"]) [out appendFormat:@"%@\n", p];
+                            if ([p hasPrefix:@"<<NET"]) [out appendFormat:@"%@ o=%@ u=%@\n", p, e[@"o"]?:@"-", e[@"u"]?:@""];
+                            else if ([e[@"h"] isEqualToString:@"TTNet"]) [out appendFormat:@"[TTNet] %@\n", p];
                             else [out appendFormat:@"%@ %@?%@\n", e[@"h"], p, e[@"q"]?:@""];
                         }
                         UIPasteboard *pb = [UIPasteboard generalPasteboard];
