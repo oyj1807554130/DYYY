@@ -3255,6 +3255,24 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                 NSArray *bitrateModels = nil;
                 @try { bitrateModels = [videoModel valueForKey:@"bitrateModels"]; } @catch (NSException *e) {}
                 if (bitrateModels && [bitrateModels isKindOfClass:[NSArray class]] && bitrateModels.count > 0) {
+                    // DEBUG: bitrateModels内容
+                    NSLog(@"[DYYY DEBUG] ===== bitrateModels count=%lu =====", (unsigned long)bitrateModels.count);
+                    for (NSInteger i = 0; i < bitrateModels.count; i++) {
+                        @try {
+                            id bm = bitrateModels[i];
+                            NSString *gn = nil; @try { gn = [bm valueForKey:@"gearName"]; } @catch (NSException *e) {}
+                            NSInteger br = 0;   @try { br = [[bm valueForKey:@"bitrate"] integerValue]; } @catch (NSException *e) {}
+                            NSString *uri = nil; @try {
+                                id pa = [bm valueForKey:@"playAddr"];
+                                if (pa) {
+                                    id u = [pa valueForKey:@"URI"];
+                                    if ([u isKindOfClass:[NSString class]]) uri = u;
+                                }
+                            } @catch (NSException *e) {}
+                            NSLog(@"[DYYY DEBUG]   bm[%ld] gear=%@ bitrate=%ld uri=%@", (long)i, gn?:@"nil", (long)br, uri?:@"nil");
+                        } @catch (NSException *e) {}
+                    }
+                    NSLog(@"[DYYY DEBUG] ===== bitrateModels END =====");
                     NSMutableArray *sortedModels = [NSMutableArray arrayWithArray:bitrateModels];
                     [sortedModels sortUsingComparator:^NSComparisonResult(id a, id b) {
                         NSInteger ba = 0, bb = 0;
