@@ -4159,7 +4159,16 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                 NSDictionary *eng4k = [[NSUserDefaults standardUserDefaults] objectForKey:[NSString stringWithFormat:@"dyyy_4k_%@", videoURI]];
                 if ([eng4k isKindOfClass:[NSDictionary class]]) {
                     NSString *engURL = eng4k[@"url"];
-                    if ([engURL isKindOfClass:[NSString class]] && engURL.length > 0) {
+                    // 双重关卡：实测像素<2K，或gear名是1080/720等低档，一律不注入并清理旧误判缓存
+                    long long cw0 = [eng4k[@"rw"] longLongValue], ch0 = [eng4k[@"rh"] longLongValue];
+                    NSString *cg0 = [eng4k[@"gear"] isKindOfClass:[NSString class]] ? [(NSString *)eng4k[@"gear"] lowercaseString] : @"";
+                    BOOL lowGear0 = ([cg0 containsString:@"1080"] || [cg0 containsString:@"720"] || [cg0 containsString:@"540"] || [cg0 containsString:@"480"]);
+                    NSUserDefaults *engDf0 = [NSUserDefaults standardUserDefaults];
+                    NSString *engKey0 = [NSString stringWithFormat:@"dyyy_4k_%@", videoURI];
+                    if ((cw0 > 0 && MAX(cw0, ch0) < 2560) || lowGear0) {
+                        [engDf0 removeObjectForKey:engKey0];
+                        [engDf0 synchronize];
+                    } else if ([engURL isKindOfClass:[NSString class]] && engURL.length > 0) {
                         BOOL dup = NO;
                         for (NSDictionary *it in videoList) {
                             if ([it[@"url"] isEqualToString:engURL]) { dup = YES; break; }

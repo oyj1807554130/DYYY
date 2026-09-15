@@ -481,7 +481,6 @@ static void DYYYProbeURLResolution(NSString *urlStr) {
     NSMutableURLRequest *r1 = [NSMutableURLRequest requestWithURL:u];
     [r1 setValue:@"bytes=0-199999" forHTTPHeaderField:@"Range"];
     [r1 setValue:@"Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X) AppleWebKit/605.1.15" forHTTPHeaderField:@"User-Agent"];
-    [r1 setValue:@"https://www.douyin.com/" forHTTPHeaderField:@"Referer"];
     r1.timeoutInterval = 8.0;
     NSURLSessionDataTask *t1 = [sess dataTaskWithRequest:r1 completionHandler:^(NSData *d1, NSURLResponse *rr1, NSError *e1) {
         @try {
@@ -522,7 +521,12 @@ static void DYYYProbeURLResolution(NSString *urlStr) {
                     if (bestW > 0) { ne[@"rw"] = @(bestW); ne[@"rh"] = @(bestH); }
                     if (totalLen > 0) ne[@"size"] = @(totalLen);
                     ne[@"probed"] = @1;
-                    [df setObject:ne forKey:k];
+                    // 实测像素是最终裁判：长边<2560说明是1080P高码率冒充，淘汰
+                    if (bestW > 0 && MAX(bestW, bestH) < 2560) {
+                        [df removeObjectForKey:k];
+                    } else {
+                        [df setObject:ne forKey:k];
+                    }
                     [df synchronize];
                     break;
                 }
@@ -531,7 +535,6 @@ static void DYYYProbeURLResolution(NSString *urlStr) {
             NSMutableURLRequest *r2 = [NSMutableURLRequest requestWithURL:u];
             [r2 setValue:[NSString stringWithFormat:@"bytes=%lld-%lld", totalLen - 40000, totalLen - 1] forHTTPHeaderField:@"Range"];
             [r2 setValue:@"Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X) AppleWebKit/605.1.15" forHTTPHeaderField:@"User-Agent"];
-            [r2 setValue:@"https://www.douyin.com/" forHTTPHeaderField:@"Referer"];
             r2.timeoutInterval = 8.0;
             NSURLSessionDataTask *t2 = [sess dataTaskWithRequest:r2 completionHandler:^(NSData *d2, __unused NSURLResponse *rr2, __unused NSError *e2) {
                 if (d2.length) [buf appendData:d2];
@@ -562,9 +565,17 @@ static void DYYYInspectQualityModels(NSArray *models, NSString *source) {
             @try { iw = [[m valueForKey:@"imageWidth"] integerValue]; } @catch (__unused NSException *e) {}
             @try { ih = [[m valueForKey:@"imageHeight"] integerValue]; } @catch (__unused NSException *e) {}
             NSInteger maxEdge = MAX(iw, ih);
-            // 真2K长边≥2560，真4K长边≥3840；读不到分辨率时只信6Mbps以上（几乎必4K）
-            BOOL isHi = ((iw > 0 || ih > 0) && maxEdge >= 2560) ||
-                        ((iw == 0 && ih == 0) && br >= 6000000);
+            // 档位判定：只认gear名明确的4K/2K或真实像素，码率不再单独作为依据(1080P高码率会误判)
+            NSString *gl = [gn lowercaseString] ?: @"";
+            BOOL isLowGear = ([gl containsString:@"1080"] || [gl containsString:@"720"] ||
+                              [gl containsString:@"540"] || [gl containsString:@"480"] ||
+                              [gl containsString:@"360"]);
+            BOOL is4KGear = ([gl containsString:@"2160"] || [gl containsString:@"_4_"] ||
+                             [gl hasSuffix:@"_4"] || [gl containsString:@"4k"]);
+            BOOL is2KGear = ([gl containsString:@"1440"] || [gl containsString:@"2k"]);
+            BOOL isHi = NO;
+            if (maxEdge >= 2560) isHi = YES;
+            else if (!isLowGear && (is4KGear || is2KGear)) isHi = YES;
             if (!isHi) continue;
             NSString *url = nil;
             NSString *vid = nil;
