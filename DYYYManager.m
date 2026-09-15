@@ -3291,99 +3291,66 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                         } @catch (NSException *e) {}
                     }
                     NSLog(@"[DYYY DEBUG] ===== bitrateModels END =====");
+                    // DEBUG: 枚举video/aweme模型所有字段,找隐藏的完整档位数据
+                    @try {
+                        NSMutableString *fieldInfo = [NSMutableString string];
+                        NSArray *scanObjs = @[@{@"n":@"V", @"o": videoModel ?: [NSNull null]},
+                                              @{@"n":@"A", @"o": awemeModel ?: [NSNull null]}];
+                        for (NSDictionary *so in scanObjs) {
+                            id obj = so[@"o"];
+                            NSString *tag = so[@"n"];
+                            if (!obj || [obj isKindOfClass:[NSNull class]]) continue;
+                            unsigned int pcount = 0;
+                            objc_property_t *props = class_copyPropertyList([obj class], &pcount);
+                            for (unsigned int pi = 0; pi < pcount; pi++) {
+                                @autoreleasepool {
+                                    NSString *pname = [NSString stringWithUTF8String:property_getName(props[pi])];
+                                    if ([pname isEqualToString:@"bitrateModels"]) continue;
+                                    BOOL hot = ([pname rangeOfString:@"itrate" options:NSCaseInsensitiveSearch].location != NSNotFound
+                                                || [pname rangeOfString:@"BitRate" options:NSCaseInsensitiveSearch].location != NSNotFound
+                                                || [pname rangeOfString:@"playAddr" options:NSCaseInsensitiveSearch].location != NSNotFound
+                                                || [pname rangeOfString:@"rawData" options:NSCaseInsensitiveSearch].location != NSNotFound
+                                                || [pname rangeOfString:@"originJson" options:NSCaseInsensitiveSearch].location != NSNotFound
+                                                || [pname rangeOfString:@"logJSON" options:NSCaseInsensitiveSearch].location != NSNotFound);
+                                    if (!hot) continue;
+                                    @try {
+                                        id val = [obj valueForKey:pname];
+                                        if ([val isKindOfClass:[NSArray class]]) {
+                                            [fieldInfo appendFormat:@"%@.%@:[%lu]", tag, pname, (unsigned long)[(NSArray *)val count]];
+                                            if ([(NSArray *)val count] > 0) {
+                                                id first = ((NSArray *)val)[0];
+                                                [fieldInfo appendFormat:@"=%@", NSStringFromClass([first class])];
+                                                if ([first isKindOfClass:[NSDictionary class]]) {
+                                                    id g = ((NSDictionary *)first)[@"gear_name"];
+                                                    if (g) [fieldInfo appendFormat:@"/%@", g];
+                                                }
+                                            }
+                                            [fieldInfo appendString:@"\n"];
+                                        } else if ([val isKindOfClass:[NSDictionary class]]) {
+                                            [fieldInfo appendFormat:@"%@.%@:dict[%lu]\n", tag, pname, (unsigned long)[(NSDictionary *)val count]];
+                                        } else if (val) {
+                                            NSString *vs = [NSString stringWithFormat:@"%@", val];
+                                            if (vs.length > 40) vs = [[vs substringToIndex:40] stringByAppendingString:@".."];
+                                            [fieldInfo appendFormat:@"%@.%@=%@\n", tag, pname, vs];
+                                        }
+                                    } @catch (__unused NSException *ev) {}
+                                }
+                            }
+                            free(props);
+                        }
+                        if (fieldInfo.length > 0) {
+                            [diag appendString:@"\n--- 疑似档位字段 ---\n"];
+                            [diag appendString:fieldInfo];
+                        }
+                    } @catch (__unused NSException *ef) {}
                     // 诊断弹窗：直接在屏幕上展示所有档位（截图用）
                     NSString *diagMsg = [diag copy];
-                    NSString *diagVid = videoURI;
                     dispatch_async(dispatch_get_main_queue(), ^{
                         @try {
                             UIAlertController *ac = [UIAlertController alertControllerWithTitle:@"本地档位诊断(截图给我)"
                                                                                         message:diagMsg
                                                                                  preferredStyle:UIAlertControllerStyleAlert];
                             [ac addAction:[UIAlertAction actionWithTitle:@"知道了" style:UIAlertActionStyleDefault handler:nil]];
-                            [ac addAction:[UIAlertAction actionWithTitle:@"测试play切4K" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *act) {
-                                @try {
-                                    UIAlertController *prog = [UIAlertController alertControllerWithTitle:@"正在测试切档" message:@"请求中,约10秒..." preferredStyle:UIAlertControllerStyleAlert];
-                                    UIViewController *topP = [UIApplication sharedApplication].keyWindow.rootViewController;
-                                    while (topP.presentedViewController) topP = topP.presentedViewController;
-                                    if (topP) [topP presentViewController:prog animated:YES completion:nil];
-                                    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-                                        NSMutableString *res = [NSMutableString string];
-                                        NSArray *ratios = @[@"4k", @"1080p", @"720p"];
-                                        NSMutableDictionary *objByRatio = [NSMutableDictionary dictionary];
-                                        for (NSString *ratio in ratios) {
-                                            @autoreleasepool {
-                                                @try {
-                                                    NSString *vidPart = diagVid ?: @"";
-                                                    NSString *pu = [NSString stringWithFormat:@"https://aweme.snssdk.com/aweme/v1/play/?video_id=%@&ratio=%@&line=0&media_type=4&vr_type=0", vidPart, ratio];
-                                                    NSMutableURLRequest *rq = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:pu] cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:10];
-                                                    rq.HTTPMethod = @"HEAD";
-                                                    [rq setValue:@"Aweme/29.1.0 (iPhone; iOS 18.1.0; Scale/3.00)" forHTTPHeaderField:@"User-Agent"];
-                                                    __block NSURL *finalURL = nil;
-                                                    __block long long clen = -1;
-                                                    __block NSInteger code = 0;
-                                                    dispatch_semaphore_t sem = dispatch_semaphore_create(0);
-                                                    NSURLSessionDataTask *task = [[NSURLSession sharedSession] dataTaskWithRequest:rq completionHandler:^(__unused NSData *d, NSURLResponse *rp, __unused NSError *e) {
-                                                        @try {
-                                                            if ([rp isKindOfClass:[NSHTTPURLResponse class]]) {
-                                                                NSHTTPURLResponse *hp = (NSHTTPURLResponse *)rp;
-                                                                code = hp.statusCode;
-                                                                finalURL = rp.URL;
-                                                                clen = hp.expectedContentLength;
-                                                            }
-                                                        } @catch (__unused NSException *e2) {}
-                                                        dispatch_semaphore_signal(sem);
-                                                    }];
-                                                    [task resume];
-                                                    dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, 12 * NSEC_PER_SEC));
-                                                    if (code == 0) { [task cancel]; }
-                                                    NSString *hostS = @"-";
-                                                    NSString *objKey = @"-";
-                                                    NSString *extraP = @"";
-                                                    if (finalURL) {
-                                                        hostS = finalURL.host ?: @"?";
-                                                        NSString *obj = @"";
-                                                        for (NSString *pc in finalURL.pathComponents) {
-                                                            if (pc.length > 15 && [pc hasPrefix:@"o"]) { obj = pc; break; }
-                                                        }
-                                                        if (obj.length > 10) {
-                                                            objKey = [obj substringFromIndex:obj.length - 10];
-                                                            objByRatio[ratio] = objKey;
-                                                        }
-                                                        NSString *query = finalURL.query ?: @"";
-                                                        for (NSString *k in @[@"ds", @"cs", @"qs"]) {
-                                                            NSRange kr = [query rangeOfString:[NSString stringWithFormat:@"%@=", k]];
-                                                            if (kr.location != NSNotFound) {
-                                                                NSInteger qs2 = kr.location + kr.length;
-                                                                NSInteger qe = qs2;
-                                                                while (qe < (NSInteger)query.length) {
-                                                                    if ([query characterAtIndex:qe] == '&') break;
-                                                                    qe++;
-                                                                }
-                                                                extraP = [extraP stringByAppendingFormat:@"%@=%@ ", k, [query substringWithRange:NSMakeRange(qs2, qe - qs2)]];
-                                                            }
-                                                        }
-                                                    }
-                                                    NSString *sz = clen > 0 ? [NSString stringWithFormat:@"%.1fMB", (double)clen / 1048576.0] : @"无大小";
-                                                    [res appendFormat:@"[%@] code=%ld\n%@ %@ %@ %@\n", ratio, (long)code, hostS, objKey, extraP, sz];
-                                                } @catch (__unused NSException *e3) {
-                                                    [res appendFormat:@"[%@] 异常\n", ratio];
-                                                }
-                                            }
-                                        }
-                                        if (objByRatio[@"4k"] && objByRatio[@"1080p"]) {
-                                            BOOL same = [objByRatio[@"4k"] isEqualToString:objByRatio[@"1080p"]];
-                                            [res appendFormat:@"\n4k与1080同链: %@", same ? @"是(被降级)" : @"否(有戏!)"];
-                                        }
-                                        NSString *resCopy = [res copy];
-                                        dispatch_async(dispatch_get_main_queue(), ^{
-                                            @try {
-                                                prog.message = resCopy;
-                                                [prog addAction:[UIAlertAction actionWithTitle:@"截图发给我" style:UIAlertActionStyleDefault handler:nil]];
-                                            } @catch (__unused NSException *e4) {}
-                                        });
-                                    });
-                                } @catch (__unused NSException *e5) {}
-                            }]];
                             UIViewController *top = [UIApplication sharedApplication].keyWindow.rootViewController;
                             while (top.presentedViewController) top = top.presentedViewController;
                             if (top) [top presentViewController:ac animated:YES completion:nil];
