@@ -3301,7 +3301,11 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                             [diag appendFormat:@"\n--- 引擎类 ---\n%@\n", engCls.length > 300 ? [[engCls substringToIndex:300] stringByAppendingString:@".."] : engCls];
                         }
                         if (engReso.length > 0) {
-                            [diag appendFormat:@"\n--- 引擎分辨率记录 ---\n%@\n", engReso.length > 400 ? [[engReso substringToIndex:400] stringByAppendingString:@".."] : engReso];
+                            NSArray *resoLines = [engReso componentsSeparatedByString:@"\n"];
+                            NSInteger rStart = (NSInteger)resoLines.count - 4;
+                            if (rStart < 0) rStart = 0;
+                            NSArray *resoTail = [resoLines subarrayWithRange:NSMakeRange((NSUInteger)rStart, resoLines.count - (NSUInteger)rStart)];
+                            [diag appendFormat:@"\n--- 引擎分辨率(最后4条/共%lu) ---\n%@\n", (unsigned long)resoLines.count, [resoTail componentsJoinedByString:@"\n"]];
                         }
                         if (engDump.length > 0) {
                             [diag appendFormat:@"\n--- 引擎播放数据 ---\n%@\n", engDump.length > 1500 ? [[engDump substringToIndex:1500] stringByAppendingString:@"\n..(截断,详见完整)"] : engDump];
@@ -3309,6 +3313,34 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                             [diag appendString:@"\n(引擎数据为空:请先正常播放此视频5秒再解析)\n"];
                         }
                     } @catch (__unused NSException *eeng) {}
+                    // DEBUG: 列出已缓存的高档直链,供复制验证真实分辨率
+                    __block NSString *dyyyLatestHiURL = nil;
+                    @try {
+                        NSUserDefaults *hiDf = [NSUserDefaults standardUserDefaults];
+                        NSDictionary *allDef = [hiDf dictionaryRepresentation];
+                        NSMutableArray *hiHits = [NSMutableArray array];
+                        for (NSString *hk in allDef.allKeys) {
+                            if (![hk hasPrefix:@"dyyy_4k_"]) continue;
+                            id hv = [hiDf objectForKey:hk];
+                            if ([hv isKindOfClass:[NSDictionary class]]) [hiHits addObject:hv];
+                        }
+                        [hiHits sortUsingComparator:^NSComparisonResult(NSDictionary *a, NSDictionary *b) {
+                            return [b[@"time"] compare:a[@"time"]];
+                        }];
+                        NSUInteger hiShow = hiHits.count < 3 ? hiHits.count : 3;
+                        if (hiShow > 0) {
+                            [diag appendFormat:@"\n--- 已缓存高档直链(共%lu条,显示最新%lu) ---\n", (unsigned long)hiHits.count, (unsigned long)hiShow];
+                            for (NSUInteger hi = 0; hi < hiShow; hi++) {
+                                NSDictionary *e = hiHits[hi];
+                                NSString *u = e[@"url"];
+                                if (hi == 0 && [u isKindOfClass:[NSString class]]) dyyyLatestHiURL = u;
+                                NSString *uShow = [u isKindOfClass:[NSString class]] ? (u.length > 130 ? [[u substringToIndex:130] stringByAppendingString:@"..."] : u) : @"(无url)";
+                                [diag appendFormat:@"%lu. %@ %@kbps %@x%@\n%@\n",
+                                 (unsigned long)(hi + 1), e[@"gear"] ?: @"?", e[@"bitrate"] ?: @"?",
+                                 e[@"w"] ?: @"?", e[@"h"] ?: @"?", uShow];
+                            }
+                        }
+                    } @catch (__unused NSException *ehi) {}
                     // 诊断弹窗：直接在屏幕上展示所有档位（截图用）
                     NSString *diagMsg = [diag copy];
                     dispatch_async(dispatch_get_main_queue(), ^{
@@ -3316,6 +3348,11 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                             UIAlertController *ac = [UIAlertController alertControllerWithTitle:@"本地档位诊断(截图给我)"
                                                                                         message:diagMsg
                                                                                  preferredStyle:UIAlertControllerStyleAlert];
+                            if (dyyyLatestHiURL.length > 0) {
+                                [ac addAction:[UIAlertAction actionWithTitle:@"复制最新高档直链" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *act) {
+                                    [UIPasteboard generalPasteboard].string = dyyyLatestHiURL;
+                                }]];
+                            }
                             [ac addAction:[UIAlertAction actionWithTitle:@"知道了" style:UIAlertActionStyleDefault handler:nil]];
                             UIViewController *top = [UIApplication sharedApplication].keyWindow.rootViewController;
                             while (top.presentedViewController) top = top.presentedViewController;
