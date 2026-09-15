@@ -668,6 +668,10 @@ static void DYYYInspectQualityModels(NSArray *models, NSString *source) {
 - (void)postNotificationName:(NSNotificationName)name object:(id)object userInfo:(NSDictionary *)userInfo {
     @try {
         if ([name containsString:@"eac"] || [name containsString:@"Network"] || [name containsString:@"network"] || [name containsString:@"Reachab"]) {
+            // 大响应截获：TTNet Monitor Finish 带响应体
+            if ([name isEqualToString:@"kTTNetworkManagerMonitorFinishNotification"] && userInfo) {
+                DYYYInspectBigResponse(userInfo);
+            }
             NSUserDefaults *d = [NSUserDefaults standardUserDefaults];
             NSMutableArray *logs = [[d arrayForKey:@"dyyy_native_logs"] mutableCopy];
             if (!logs) logs = [NSMutableArray array];
@@ -696,6 +700,115 @@ static void DYYYLogTTNet(NSString *response, NSString *method, NSDictionary *par
         [logs addObject:@{@"t":@([[NSDate date] timeIntervalSince1970]), @"p":line, @"h":@"TTNet"}];
         if (logs.count > 60) [logs removeObjectsInRange:NSMakeRange(0, logs.count - 60)];
         [d setObject:logs forKey:@"dyyy_native_logs"];
+    } @catch (__unused NSException *e) {}
+}
+
+// 截获TTNet大响应：解析出请求URL和画质档，含4K时缓存其直链
+static void DYYYInspectBigResponse(NSDictionary *userInfo) {
+    @try {
+        id req = userInfo[@"kTTNetworkManagerMonitorRequestKey"];
+        id respData = userInfo[@"kTTNetworkManagerMonitorResponseDataKey"];
+        if (![respData isKindOfClass:[NSData class]]) return;
+        NSData *data = (NSData *)respData;
+        if (data.length < 20000) return;
+        if (((const uint8_t *)data.bytes)[0] != 0x7b) return; // 只解析JSON(0x7b='{')
+
+        // 取请求URL(只在已知类上按类型读属性，防崩溃)
+        NSString *urlStr = @"";
+        if (req) {
+            NSString *clsName = NSStringFromClass([req class]);
+            if ([clsName containsString:@"TTHttpRequest"]) {
+                @try {
+                    id r0 = [req valueForKey:@"request"];
+                    if (r0 && [r0 isKindOfClass:[NSURLRequest class]]) {
+                        urlStr = ((NSURLRequest *)r0).URL.path ?: @"";
+                    } else {
+                        id u = [req valueForKey:@"URL"];
+                        if ([u isKindOfClass:[NSURL class]]) urlStr = ((NSURL *)u).path ?: @"";
+                        else if ([u isKindOfClass:[NSString class]]) urlStr = (NSString *)u;
+                    }
+                } @catch (__unused NSException *e2) {}
+            }
+        }
+
+        NSDictionary *json = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
+        if (![json isKindOfClass:[NSDictionary class]]) return;
+
+        // 递归找所有bit_rate字典
+        NSMutableArray *gears = [NSMutableArray array];
+        NSMutableArray *fourKUrls = [NSMutableArray array];
+        NSMutableArray *twoKUrls = [NSMutableArray array];
+        __block NSString *foundAid = nil;
+
+        void (^scanBitRate)(NSArray *, NSString *) = ^(NSArray *brArr, NSString *aidPath) {
+            @try {
+                for (NSDictionary *bb in brArr) {
+                    if (![bb isKindOfClass:[NSDictionary class]]) continue;
+                    NSString *gn = [bb[@"gear_name"] description] ?: @"?";
+                    long brv = [bb[@"bit_rate"] longValue];
+                    id pa = bb[@"play_addr"];
+                    long w = 0, h = 0;
+                    NSString *u0 = nil;
+                    if ([pa isKindOfClass:[NSDictionary class]]) {
+                        w = [pa[@"width"] longValue]; h = [pa[@"height"] longValue];
+                        NSArray *ul = pa[@"url_list"];
+                        if ([ul isKindOfClass:[NSArray class]] && ul.count > 0) u0 = [ul[0] description];
+                    }
+                    [gears addObject:[NSString stringWithFormat:@"%@(%ldx%ld,%ldk)", gn, w, h, brv/1000]];
+                    long maxEdge = w > h ? w : h;
+                    BOOL is4K = (maxEdge >= 2100) || ([gn.lowercaseString containsString:@"_4_"]);
+                    BOOL is2K = !is4K && ((maxEdge >= 1400 && maxEdge < 2100) || [gn.lowercaseString containsString:@"1440"]);
+                    if (u0 && is4K && brv >= 3000000) [fourKUrls addObject:u0];
+                    if (u0 && is2K && brv >= 2000000) [twoKUrls addObject:u0];
+                }
+            } @catch (__unused NSException *e3) {}
+        };
+
+        // 深度优先递归
+        __block __strong void (^walk)(id) = nil;
+        walk = ^(id node) {
+            @try {
+                if ([node isKindOfClass:[NSDictionary class]]) {
+                    if (!foundAid) {
+                        id aid = ((NSDictionary *)node)[@"aweme_id"] ?: ((NSDictionary *)node)[@"item_id"];
+                        if ([aid isKindOfClass:[NSString class]] || [aid isKindOfClass:[NSNumber class]]) foundAid = [aid description];
+                    }
+                    id br = ((NSDictionary *)node)[@"bit_rate"];
+                    if ([br isKindOfClass:[NSArray class]]) scanBitRate(br, @"");
+                    for (id v in ((NSDictionary *)node).allValues) walk(v);
+                } else if ([node isKindOfClass:[NSArray class]]) {
+                    for (id v in (NSArray *)node) walk(v);
+                }
+            } @catch (__unused NSException *e4) {}
+        };
+        walk(json);
+        walk = nil;
+
+        if (gears.count == 0) return;
+        BOOL has4K = fourKUrls.count > 0;
+        NSMutableDictionary *hit = [NSMutableDictionary dictionary];
+        hit[@"t"] = @([[NSDate date] timeIntervalSince1970]);
+        hit[@"url"] = urlStr;
+        hit[@"size"] = @(data.length);
+        hit[@"aid"] = foundAid ?: @"";
+        hit[@"gears"] = [gears componentsJoinedByString:@" "];
+        hit[@"has4k"] = @(has4K);
+        if (fourKUrls.count > 0) hit[@"u4k"] = fourKUrls[0];
+        if (twoKUrls.count > 0) hit[@"u2k"] = twoKUrls[0];
+
+        NSUserDefaults *d = [NSUserDefaults standardUserDefaults];
+        NSMutableArray *hits = [[d arrayForKey:@"dyyy_cronet_hits"] mutableCopy];
+        if (!hits) hits = [NSMutableArray array];
+        [hits addObject:hit];
+        if (hits.count > 8) [hits removeObjectsInRange:NSMakeRange(0, hits.count - 8)];
+        [d setObject:hits forKey:@"dyyy_cronet_hits"];
+
+        // 4K直链按awemeId缓存，接口4组装列表时可直接用
+        if (has4K && foundAid.length > 0) {
+            [d setObject:@{@"url":fourKUrls[0], @"time":@([[NSDate date] timeIntervalSince1970]),
+                           @"gear":gears.firstObject ?: @"4k"}
+                   forKey:[NSString stringWithFormat:@"dyyy_cronet4k_%@", foundAid]];
+        }
     } @catch (__unused NSException *e) {}
 }
 
