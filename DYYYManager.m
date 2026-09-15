@@ -1199,8 +1199,13 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
       // 创建下载任务 - 加User-Agent/Referer防止CDN拒绝连接
       NSMutableURLRequest *downloadReq = [NSMutableURLRequest requestWithURL:url];
       if (![DYYYManager shared].skipNextDownloadHeaders) {
-          [downloadReq setValue:@"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36" forHTTPHeaderField:@"User-Agent"];
-          [downloadReq setValue:@"https://www.douyin.com/" forHTTPHeaderField:@"Referer"];
+          if ([[url absoluteString] containsString:@"a=1128"]) {
+              // 引擎探针抓到的移动端签名直链：必须用手机UA，套Windows UA会被CDN判签名不符403
+              [downloadReq setValue:@"Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148" forHTTPHeaderField:@"User-Agent"];
+          } else {
+              [downloadReq setValue:@"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36" forHTTPHeaderField:@"User-Agent"];
+              [downloadReq setValue:@"https://www.douyin.com/" forHTTPHeaderField:@"Referer"];
+          }
       } else {
           [DYYYManager shared].skipNextDownloadHeaders = NO;
       }
