@@ -473,9 +473,14 @@ static void DYYYInspectQualityModels(NSArray *models, NSString *source) {
             @try { gn = [m valueForKey:@"gearName"]; } @catch (__unused NSException *e) {}
             NSInteger br = 0;
             @try { br = [[m valueForKey:@"bitrate"] integerValue]; } @catch (__unused NSException *e) {}
-            NSString *gl = [gn lowercaseString] ?: @"";
-            BOOL isHi = ([gl containsString:@"2160"] || [gl containsString:@"4k"] ||
-                         [gl containsString:@"1440"] || [gl containsString:@"2k"]);
+            // 读真实分辨率（gear名字不可信，必须用像素/码率判定）
+            NSInteger iw = 0, ih = 0;
+            @try { iw = [[m valueForKey:@"imageWidth"] integerValue]; } @catch (__unused NSException *e) {}
+            @try { ih = [[m valueForKey:@"imageHeight"] integerValue]; } @catch (__unused NSException *e) {}
+            NSInteger maxEdge = MAX(iw, ih);
+            // 真2K长边≥2560，真4K长边≥3840；读不到分辨率时只信6Mbps以上（几乎必4K）
+            BOOL isHi = ((iw > 0 || ih > 0) && maxEdge >= 2560) ||
+                        ((iw == 0 && ih == 0) && br >= 6000000);
             if (!isHi) continue;
             NSString *url = nil;
             NSString *vid = nil;
@@ -499,6 +504,8 @@ static void DYYYInspectQualityModels(NSArray *models, NSString *source) {
                     entry[@"url"] = url;
                     entry[@"gear"] = gn ?: @"";
                     entry[@"bitrate"] = @(br);
+                    entry[@"w"] = @(iw);
+                    entry[@"h"] = @(ih);
                     entry[@"time"] = @([[NSDate date] timeIntervalSince1970]);
                     [[NSUserDefaults standardUserDefaults] setObject:entry forKey:cacheKey];
                     [[NSUserDefaults standardUserDefaults] synchronize];
@@ -508,8 +515,8 @@ static void DYYYInspectQualityModels(NSArray *models, NSString *source) {
             NSTimeInterval now = [NSDate timeIntervalSinceReferenceDate];
             if (now - lastHit < 8.0) return;
             lastHit = now;
-            NSString *msg = [NSString stringWithFormat:@"已缓存4K直链(可保存)\ngear=%@\nbr=%ld\nvid=%@",
-                             gn ?: @"nil", (long)br, vid ?: @"nil"];
+            NSString *msg = [NSString stringWithFormat:@"已抓到高画质直链\n%ldx%ld  %ldkbps\ngear=%@\nvid=%@",
+                             (long)iw, (long)ih, (long)(br/1000), gn ?: @"nil", vid ?: @"nil"];
             NSLog(@"[DYYY 4K-HIT] gear=%@ br=%ld vid=%@ url=%@", gn, (long)br, vid, url);
             dispatch_async(dispatch_get_main_queue(), ^{
                 @try {

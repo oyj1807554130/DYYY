@@ -3523,7 +3523,12 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                     NSString *cacheKey4K = [NSString stringWithFormat:@"dyyy_4k_%@", videoURI];
                     NSDictionary *cached4K = [[NSUserDefaults standardUserDefaults] dictionaryForKey:cacheKey4K];
                     NSString *url4K = cached4K[@"url"];
-                    if (url4K.length > 0) {
+                    NSInteger cw = [cached4K[@"w"] integerValue];
+                    NSInteger ch = [cached4K[@"h"] integerValue];
+                    NSInteger cbr = [cached4K[@"bitrate"] integerValue];
+                    NSInteger cmax = MAX(cw, ch);
+                    BOOL cacheValid = (cmax >= 2560) || ((cw == 0 && ch == 0) && cbr >= 6000000);
+                    if (url4K.length > 0 && cacheValid) {
                         BOOL dup = NO;
                         for (NSDictionary *it in videoList) {
                             if ([it[@"url"] isKindOfClass:[NSString class]] &&
@@ -3531,7 +3536,9 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                         }
                         if (!dup) {
                             NSTimeInterval age4K = [[NSDate date] timeIntervalSince1970] - [cached4K[@"time"] doubleValue];
-                            NSString *label4K = (age4K < 3600) ? @"[真4K]" : @"[真4K·旧链接]";
+                            NSString *qName = cmax >= 3840 ? @"真4K" : (cmax >= 2560 ? @"真2K" : @"高画质");
+                            NSString *label4K = [NSString stringWithFormat:@"[%@ %ldx%ld]", qName, (long)cw, (long)ch];
+                            if (age4K >= 3600) label4K = [label4K stringByAppendingString:@"(旧)"];
                             NSInteger insertAt = videoList.count > 0 ? 1 : 0;
                             [videoList insertObject:@{@"level": label4K, @"url": url4K} atIndex:insertAt];
                             NSLog(@"[DYYY 4K-CACHE] 注入4K直链 age=%.0fs url=%@", age4K, url4K);
