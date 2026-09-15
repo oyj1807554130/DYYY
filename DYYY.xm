@@ -664,6 +664,8 @@ static void DYYYInspectQualityModels(NSArray *models, NSString *source) {
 }
 %end
 
+static void DYYYInspectBigResponse(NSDictionary *userInfo);
+
 %hook NSNotificationCenter
 - (void)postNotificationName:(NSNotificationName)name object:(id)object userInfo:(NSDictionary *)userInfo {
     @try {
