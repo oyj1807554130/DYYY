@@ -3408,7 +3408,7 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                                         @try {
                                             id pa2 = [m valueForKey:@"playAddr"];
                                             id ol = [pa2 valueForKey:@"originURLList"];
-                                            if ([ol isKindOfClass:[NSArray class]] && ol.count > 0) u = ol[0];
+                                            if ([ol isKindOfClass:[NSArray class]] && [(NSArray *)ol count] > 0) u = ((NSArray *)ol)[0];
                                         } @catch (__unused NSException *e) {}
                                         [diag appendFormat:@"%ld.%@ %ldkbps %ldx%ld %@\n", (long)mi, gn ?: @"?", (long)(br/1000), (long)mw, (long)mh, u.length > 0 ? @"有直链" : @"无直链"];
                                     } @catch (__unused NSException *e) {
