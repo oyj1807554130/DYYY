@@ -3977,23 +3977,47 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                 __block BOOL has4KThis = NO;
                 NSURLSessionDataTask *apiTask = [epSession dataTaskWithRequest:apiReq completionHandler:^(NSData *apiData, NSURLResponse *apiResp, NSError *apiErr) {
                     @try {
+                        NSMutableDictionary *snap = [NSMutableDictionary dictionary];
+                        snap[@"t"] = @([[NSDate date] timeIntervalSince1970]);
+                        snap[@"attempt"] = @(attempt);
+                        // Cookie名单(只记key和有无msToken/ttwid)
+                        NSMutableArray *ck = [NSMutableArray array];
+                        for (NSString *kv in [fullCookieStr componentsSeparatedByString:@"; "]) {
+                            NSRange eq = [kv rangeOfString:@"="];
+                            if (eq.location != NSNotFound) [ck addObject:[kv substringToIndex:eq.location]];
+                        }
+                        snap[@"cookies"] = [ck componentsJoinedByString:@","];
+                        if (apiErr) snap[@"err"] = [NSString stringWithFormat:@"%ld", (long)apiErr.code];
                         if (apiData.length > 0) {
                             NSDictionary *apiJson = [NSJSONSerialization JSONObjectWithData:apiData options:0 error:nil];
-                            if ([apiJson isKindOfClass:[NSDictionary class]] && [apiJson[@"status_code"] integerValue] == 0) {
+                            if ([apiJson isKindOfClass:[NSDictionary class]]) {
+                                snap[@"status"] = @([apiJson[@"status_code"] integerValue]);
                                 NSDictionary *det = apiJson[@"aweme_detail"];
                                 if ([det isKindOfClass:[NSDictionary class]]) {
                                     detailThis = det;
+                                    NSMutableArray *gears = [NSMutableArray array];
                                     NSArray *brl = det[@"video"][@"bit_rate"];
                                     if ([brl isKindOfClass:[NSArray class]]) {
                                         for (NSDictionary *bb in brl) {
-                                            NSString *gn = bb[@"gear_name"] ?: @"";
-                                            NSString *gnl = [gn lowercaseString];
-                                            if ([gnl containsString:@"_4_"] || [gnl containsString:@"4k"] || [gnl containsString:@"2160"]) { has4KThis = YES; break; }
+                                            NSString *gn = bb[@"gear_name"] ?: @"?";
+                                            NSInteger brv = [bb[@"bit_rate"] integerValue];
+                                            NSDictionary *qa = bb[@"play_addr"];
+                                            NSInteger w = [qa[@"width"] integerValue], h = [qa[@"height"] integerValue];
+                                            [gears addObject:[NSString stringWithFormat:@"%@(%ldx%ld,%ldkbps)", gn, (long)w, (long)h, (long)(brv/1000)]];
+                                            NSString *gnl = [gn.lowercaseString copy];
+                                            if ([gnl containsString:@"_4_"] || [gnl containsString:@"4k"] || [gnl containsString:@"2160"]) has4KThis = YES;
                                         }
                                     }
+                                    snap[@"gears"] = [gears componentsJoinedByString:@" | "];
                                 }
                             }
                         }
+                        NSUserDefaults *dd = [NSUserDefaults standardUserDefaults];
+                        NSMutableArray *snaps = [[dd arrayForKey:@"dyyy_api4_snaps"] mutableCopy];
+                        if (!snaps) snaps = [NSMutableArray array];
+                        [snaps addObject:snap];
+                        if (snaps.count > 4) [snaps removeObjectsInRange:NSMakeRange(0, snaps.count - 4)];
+                        [dd setObject:snaps forKey:@"dyyy_api4_snaps"];
                     } @catch (NSException *e) {}
                     dispatch_semaphore_signal(apiSem);
                 }];
@@ -5472,6 +5496,35 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                     if (disclaimerDetail) insertIdx++;
                     [actions insertObject:shareCountAction atIndex:insertIdx];
                 }
+
+                // 临时探针入口：接口4断点记录 + App原生请求记录
+                AWEUserSheetAction *probeAction = [NSClassFromString(@"AWEUserSheetAction") actionWithTitle:@"🔍探针记录(点我截图)" imgName:nil handler:^{
+                    @try {
+                        NSUserDefaults *dd = [NSUserDefaults standardUserDefaults];
+                        NSMutableString *out = [NSMutableString string];
+                        [out appendString:@"== 接口4请求快照 ==\n"];
+                        for (NSDictionary *s in [dd arrayForKey:@"dyyy_api4_snaps"]) {
+                            [out appendFormat:@"[t%@ a%@] st=%@ err=%@\n CK:%@\n 档位:%@\n\n", s[@"t"], s[@"attempt"], s[@"status"]?:@"-", s[@"err"]?:@"-", s[@"cookies"]?:@"-", s[@"gears"]?:@"(无detail)"];
+                        }
+                        [out appendString:@"== App原生请求/网络事件(最近) ==\n"];
+                        NSMutableArray *logs = [[dd arrayForKey:@"dyyy_native_logs"] mutableCopy];
+                        if (logs.count > 30) [logs removeObjectsInRange:NSMakeRange(0, logs.count - 30)];
+                        for (NSDictionary *e in logs) {
+                            NSString *p = e[@"p"];
+                            if ([p hasPrefix:@"<<NET"]) [out appendFormat:@"%@\n", p];
+                            else [out appendFormat:@"%@ %@?%@\n", e[@"h"], p, e[@"q"]?:@""];
+                        }
+                        UIPasteboard *pb = [UIPasteboard generalPasteboard];
+                        pb.string = out;
+                        UIAlertController *ac = [UIAlertController alertControllerWithTitle:@"探针记录(已复制)" message:out preferredStyle:UIAlertControllerStyleAlert];
+                        [ac addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]];
+                        UIViewController *top = [UIApplication sharedApplication].keyWindow.rootViewController;
+                        while (top.presentedViewController) top = top.presentedViewController;
+                        [top presentViewController:ac animated:YES completion:nil];
+                    } @catch (NSException *e) { [DYYYUtils showToast:@"探针读取失败"]; }
+                }];
+                [actions addObject:probeAction];
+
                 [DYYYManager addDisclaimerHeaderToActionSheet:actionSheet actionCount:qualityCount];
                 [actionSheet setActions:actions];
                 [actionSheet show];

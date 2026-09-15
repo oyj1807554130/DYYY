@@ -626,6 +626,60 @@ static void DYYYInspectQualityModels(NSArray *models, NSString *source) {
     }
 }
 
+%hook NSURLSessionTask
+- (void)resume {
+    @try {
+        NSURL *u = self.originalRequest.URL ?: self.currentRequest.URL;
+        NSString *us = u.absoluteString;
+        if (us.length > 0 && ([us containsString:@"douyin"] || [us containsString:@"amemv"] || [us containsString:@"iesdouyin"])) {
+            if (![us containsString:@".douyinvod.com"] && ![us containsString:@"douyinpic.com"] && ![us containsString:@"douyincdn.com"] && ![us containsString:@"byteimg.com"]) {
+                NSString *path = u.path ?: @"";
+                NSString *q = u.query ?: @"";
+                if ([path containsString:@"aweme"] || [path containsString:@"/play"] || [path containsString:@"feed"] || [path containsString:@"detail"] || [q containsString:@"aweme_id"]) {
+                    NSMutableDictionary *e = [NSMutableDictionary dictionary];
+                    e[@"t"] = @([[NSDate date] timeIntervalSince1970]);
+                    e[@"p"] = path;
+                    e[@"h"] = u.host ?: @"";
+                    // query只留识别参数，去掉签名长参数
+                    NSMutableArray *kp = [NSMutableArray array];
+                    for (NSString *kv in [q componentsSeparatedByString:@"&"]) {
+                        NSRange eq = [kv rangeOfString:@"="];
+                        NSString *k = eq.location == NSNotFound ? kv : [kv substringToIndex:eq.location];
+                        if ([k isEqualToString:@"aweme_id"] || [k isEqualToString:@"aid"] || [k isEqualToString:@"feed_style"] || [k isEqualToString:@"pull_type"] || [k isEqualToString:@"refresh_index"] || [k isEqualToString:@"video_id"] || [k isEqualToString:@"ratio"] || [k isEqualToString:@"from"] || [k isEqualToString:@"channel"]) {
+                            [kp addObject:kv];
+                        }
+                    }
+                    e[@"q"] = [kp componentsJoinedByString:@"&"];
+                    NSUserDefaults *d = [NSUserDefaults standardUserDefaults];
+                    NSMutableArray *logs = [[d arrayForKey:@"dyyy_native_logs"] mutableCopy];
+                    if (!logs) logs = [NSMutableArray array];
+                    [logs addObject:e];
+                    if (logs.count > 60) [logs removeObjectsInRange:NSMakeRange(0, logs.count - 60)];
+                    [d setObject:logs forKey:@"dyyy_native_logs"];
+                }
+            }
+        }
+    } @catch (__unused NSException *ex) {}
+    %orig;
+}
+%end
+
+%hook NSNotificationCenter
+- (void)postNotificationName:(NSNotificationName)name object:(id)object userInfo:(NSDictionary *)userInfo {
+    @try {
+        if ([name containsString:@"eac"] || [name containsString:@"Network"] || [name containsString:@"network"] || [name containsString:@"Reachab"]) {
+            NSUserDefaults *d = [NSUserDefaults standardUserDefaults];
+            NSMutableArray *logs = [[d arrayForKey:@"dyyy_native_logs"] mutableCopy];
+            if (!logs) logs = [NSMutableArray array];
+            [logs addObject:@{@"t":@([[NSDate date] timeIntervalSince1970]), @"p":[NSString stringWithFormat:@"<<NET %@>>", name]}];
+            if (logs.count > 60) [logs removeObjectsInRange:NSMakeRange(0, logs.count - 60)];
+            [d setObject:logs forKey:@"dyyy_native_logs"];
+        }
+    } @catch (__unused NSException *e) {}
+    %orig;
+}
+%end
+
 %hook AWEVideoModel
 
 - (AWEURLModel *)playURL {
