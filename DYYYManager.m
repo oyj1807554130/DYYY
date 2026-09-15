@@ -3950,76 +3950,63 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
         // 存储ttwid供后续CDN下载使用
         if (ttwidStr && ttwidStr.length > 0) [DYYYManager shared].localParseTtwid = ttwidStr;
 
-        // Step 2: web API（完整URL参数+浏览器指纹header+全Cookie，对齐JS规则）
+        // Step 2: web API —— 每次都用一次性全新会话(模拟断网重连后的新连接，风控对新连接放行全画质)，没拿到4K档自动重试一次
         __block NSDictionary *awemeDetail = nil;
-        NSString *apiURL = [NSString stringWithFormat:@"https://www.douyin.com/aweme/v1/web/aweme/detail/?aweme_id=%@&device_platform=webapp&aid=6383&channel=channel_pc_web&update_version_code=170400&pc_client_type=1&version_code=190500&version_name=19.5.0&cookie_enabled=true&screen_width=2560&screen_height=1440&browser_language=zh-CN&browser_platform=Win32&browser_name=Chrome&browser_version=150.0.0.0&browser_online=true&engine_name=Blink&engine_version=150.0.0.0&os_name=Windows&os_version=10&cpu_core_num=12&device_memory=8&platform=PC&downlink=4.75&effective_type=4g&round_trip_time=150", awemeId];
-        NSMutableURLRequest *apiReq = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:apiURL]];
-        [apiReq setValue:@"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36" forHTTPHeaderField:@"User-Agent"];
-        [apiReq setValue:@"https://www.douyin.com/" forHTTPHeaderField:@"Referer"];
-        [apiReq setValue:@"text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7" forHTTPHeaderField:@"Accept"];
-        [apiReq setValue:@"zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6" forHTTPHeaderField:@"Accept-Language"];
-        [apiReq setValue:@"no-cache" forHTTPHeaderField:@"Cache-Control"];
-        [apiReq setValue:@"no-cache" forHTTPHeaderField:@"Pragma"];
-        NSString *secChUa = [NSString stringWithFormat:@"%cChromium%c;v=%c150%c, %cGoogle Chrome%c;v=%c150%c", 34, 34, 34, 34, 34, 34, 34, 34];
-        [apiReq setValue:secChUa forHTTPHeaderField:@"sec-ch-ua"];
-        [apiReq setValue:@"?0" forHTTPHeaderField:@"sec-ch-ua-mobile"];
-        NSString *secChPlatform = [NSString stringWithFormat:@"%cWindows%c", 34, 34];
-        [apiReq setValue:secChPlatform forHTTPHeaderField:@"sec-ch-ua-platform"];
-        [apiReq setValue:@"document" forHTTPHeaderField:@"sec-fetch-dest"];
-        [apiReq setValue:@"navigate" forHTTPHeaderField:@"sec-fetch-mode"];
-        [apiReq setValue:@"same-origin" forHTTPHeaderField:@"sec-fetch-site"];
-        [apiReq setValue:@"?1" forHTTPHeaderField:@"sec-fetch-user"];
-        [apiReq setValue:@"1" forHTTPHeaderField:@"upgrade-insecure-requests"];
-        [apiReq setValue:fullCookieStr forHTTPHeaderField:@"Cookie"];
-        dispatch_semaphore_t apiSem = dispatch_semaphore_create(0);
-        NSURLSessionDataTask *apiTask = [[NSURLSession sharedSession] dataTaskWithRequest:apiReq completionHandler:^(NSData *apiData, NSURLResponse *apiResp, NSError *apiErr) {
-            @try {
-                if (apiData.length > 0) {
-                    NSDictionary *apiJson = [NSJSONSerialization JSONObjectWithData:apiData options:0 error:nil];
-                    if ([apiJson isKindOfClass:[NSDictionary class]]) {
-                        NSInteger statusCode = [apiJson[@"status_code"] integerValue];
-                        if (statusCode == 0) awemeDetail = apiJson[@"aweme_detail"];
-                    }
-                }
-            } @catch (NSException *e) {}
-            dispatch_semaphore_signal(apiSem);
-        }];
-        [apiTask resume];
-        dispatch_semaphore_wait(apiSem, dispatch_time(DISPATCH_TIME_NOW, 15 * NSEC_PER_SEC));
-
-        if (!awemeDetail || ![awemeDetail isKindOfClass:[NSDictionary class]]) {
-            // Cookie可能过期，重新从app读取全Cookie重试一次
-            NSHTTPCookieStorage *retryCookieStore = [NSHTTPCookieStorage sharedHTTPCookieStorage];
-            NSArray *retryCookies = [retryCookieStore cookiesForURL:[NSURL URLWithString:@"https://www.douyin.com/"]];
-            NSMutableString *retryCookieStr = [NSMutableString string];
-            for (NSHTTPCookie *rc in retryCookies) {
-                if (retryCookieStr.length > 0) [retryCookieStr appendString:@"; "];
-                [retryCookieStr appendFormat:@"%@=%@", [rc name], [rc value]];
-            }
-            if (retryCookieStr.length > 0) {
-                [apiReq setValue:retryCookieStr forHTTPHeaderField:@"Cookie"];
-                dispatch_semaphore_t apiSem2 = dispatch_semaphore_create(0);
-                awemeDetail = nil;
-                NSURLSessionDataTask *apiTask2 = [[NSURLSession sharedSession] dataTaskWithRequest:apiReq completionHandler:^(NSData *aD2, NSURLResponse *aR2, NSError *aE2) {
+        __block BOOL got4KGear = NO;
+        NSString *msTokenApi = cookieDict[@"msToken"];
+        if (![msTokenApi isKindOfClass:[NSString class]]) msTokenApi = nil;
+        NSString *apiURLBase = [NSString stringWithFormat:@"https://www.douyin.com/aweme/v1/web/aweme/detail/?aweme_id=%@&device_platform=webapp&aid=6383&channel=channel_pc_web&update_version_code=170400&pc_client_type=1&version_code=190500&version_name=19.5.0&cookie_enabled=true&screen_width=2560&screen_height=1440&browser_language=zh-CN&browser_platform=Win32&browser_name=Chrome&browser_version=150.0.0.0&browser_online=true&engine_name=Blink&engine_version=150.0.0.0&os_name=Windows&os_version=10&cpu_core_num=12&device_memory=8&platform=PC&downlink=4.75&effective_type=4g&round_trip_time=150", awemeId];
+        for (NSInteger attempt = 0; attempt < 2 && !(awemeDetail && got4KGear); attempt++) {
+            if (attempt > 0) [NSThread sleepForTimeInterval:2.0];
+            @autoreleasepool {
+                NSString *apiURL = apiURLBase;
+                if (msTokenApi.length > 0) apiURL = [apiURLBase stringByAppendingFormat:@"&msToken=%@", msTokenApi];
+                NSMutableURLRequest *apiReq = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:apiURL]];
+                [apiReq setValue:@"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36" forHTTPHeaderField:@"User-Agent"];
+                [apiReq setValue:@"https://www.douyin.com/" forHTTPHeaderField:@"Referer"];
+                [apiReq setValue:@"text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7" forHTTPHeaderField:@"Accept"];
+                [apiReq setValue:@"zh-CN,zh;q=0.9,en;q=0.8" forHTTPHeaderField:@"Accept-Language"];
+                [apiReq setValue:@"no-cache" forHTTPHeaderField:@"Cache-Control"];
+                [apiReq setValue:@"no-cache" forHTTPHeaderField:@"Pragma"];
+                [apiReq setValue:fullCookieStr forHTTPHeaderField:@"Cookie"];
+                NSURLSessionConfiguration *epCfg = [NSURLSessionConfiguration ephemeralSessionConfiguration];
+                epCfg.timeoutIntervalForRequest = 15.0;
+                NSURLSession *epSession = [NSURLSession sessionWithConfiguration:epCfg];
+                dispatch_semaphore_t apiSem = dispatch_semaphore_create(0);
+                __block NSDictionary *detailThis = nil;
+                __block BOOL has4KThis = NO;
+                NSURLSessionDataTask *apiTask = [epSession dataTaskWithRequest:apiReq completionHandler:^(NSData *apiData, NSURLResponse *apiResp, NSError *apiErr) {
                     @try {
-                        if (aD2.length > 0) {
-                            NSDictionary *aJ2 = [NSJSONSerialization JSONObjectWithData:aD2 options:0 error:nil];
-                            if ([aJ2 isKindOfClass:[NSDictionary class]]) {
-                                NSInteger sc2 = [aJ2[@"status_code"] integerValue];
-                                if (sc2 == 0) awemeDetail = aJ2[@"aweme_detail"];
+                        if (apiData.length > 0) {
+                            NSDictionary *apiJson = [NSJSONSerialization JSONObjectWithData:apiData options:0 error:nil];
+                            if ([apiJson isKindOfClass:[NSDictionary class]] && [apiJson[@"status_code"] integerValue] == 0) {
+                                NSDictionary *det = apiJson[@"aweme_detail"];
+                                if ([det isKindOfClass:[NSDictionary class]]) {
+                                    detailThis = det;
+                                    NSArray *brl = det[@"video"][@"bit_rate"];
+                                    if ([brl isKindOfClass:[NSArray class]]) {
+                                        for (NSDictionary *bb in brl) {
+                                            NSString *gn = bb[@"gear_name"] ?: @"";
+                                            NSString *gnl = [gn lowercaseString];
+                                            if ([gnl containsString:@"_4_"] || [gnl containsString:@"4k"] || [gnl containsString:@"2160"]) { has4KThis = YES; break; }
+                                        }
+                                    }
+                                }
                             }
                         }
-                    } @catch (NSException *ex3) {}
-                    dispatch_semaphore_signal(apiSem2);
+                    } @catch (NSException *e) {}
+                    dispatch_semaphore_signal(apiSem);
                 }];
-                [apiTask2 resume];
-                dispatch_semaphore_wait(apiSem2, dispatch_time(DISPATCH_TIME_NOW, 15 * NSEC_PER_SEC));
+                [apiTask resume];
+                dispatch_semaphore_wait(apiSem, dispatch_time(DISPATCH_TIME_NOW, 15 * NSEC_PER_SEC));
+                [epSession invalidateAndCancel];
+                if (detailThis) { awemeDetail = detailThis; got4KGear = has4KThis; }
             }
+        }
 
-            if (!awemeDetail || ![awemeDetail isKindOfClass:[NSDictionary class]]) {
-                if (completion) completion(nil);
-                return;
-            }
+        if (!awemeDetail || ![awemeDetail isKindOfClass:[NSDictionary class]]) {
+            if (completion) completion(nil);
+            return;
         }
 
         // Step 3: bit_rate全画质解析（JS规则）
