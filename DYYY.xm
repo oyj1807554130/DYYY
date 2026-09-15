@@ -565,17 +565,14 @@ static void DYYYInspectQualityModels(NSArray *models, NSString *source) {
             @try { iw = [[m valueForKey:@"imageWidth"] integerValue]; } @catch (__unused NSException *e) {}
             @try { ih = [[m valueForKey:@"imageHeight"] integerValue]; } @catch (__unused NSException *e) {}
             NSInteger maxEdge = MAX(iw, ih);
-            // 档位判定：只认gear名明确的4K/2K或真实像素，码率不再单独作为依据(1080P高码率会误判)
+            // 档位判定：真实像素≥2560才算；模型像素读不到时，只认明确的2160/_4_档且码率≥3Mbps
+            // 注意：gear名"1440"是抖音内部占位假流代号(实测304kbps)，绝不能当2K
             NSString *gl = [gn lowercaseString] ?: @"";
-            BOOL isLowGear = ([gl containsString:@"1080"] || [gl containsString:@"720"] ||
-                              [gl containsString:@"540"] || [gl containsString:@"480"] ||
-                              [gl containsString:@"360"]);
             BOOL is4KGear = ([gl containsString:@"2160"] || [gl containsString:@"_4_"] ||
                              [gl hasSuffix:@"_4"] || [gl containsString:@"4k"]);
-            BOOL is2KGear = ([gl containsString:@"1440"] || [gl containsString:@"2k"]);
             BOOL isHi = NO;
             if (maxEdge >= 2560) isHi = YES;
-            else if (!isLowGear && (is4KGear || is2KGear)) isHi = YES;
+            else if (is4KGear && br >= 3000000) isHi = YES;
             if (!isHi) continue;
             NSString *url = nil;
             NSString *vid = nil;
