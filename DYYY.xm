@@ -633,6 +633,67 @@ static void DYYYInspectQualityModels(NSArray *models, NSString *source) {
     %orig(models);
     DYYYInspectQualityModels(models, @"manualBitrateModels");
 }
+
+// 蹲守原始JSON档位:任何页面(详情/搜索/主页)收到4K数据必走这里
+- (void)setBitrateRawData:(NSArray *)rawArr {
+    %orig(rawArr);
+    if (![rawArr isKindOfClass:[NSArray class]]) return;
+    for (id item in rawArr) {
+        @try {
+            if (![item isKindOfClass:[NSDictionary class]]) continue;
+            NSDictionary *d = (NSDictionary *)item;
+            NSString *gear = d[@"gear_name"];
+            long long br = 0;
+            @try { br = [d[@"bit_rate"] longLongValue]; } @catch (__unused NSException *e) {}
+            long long pw = 0, ph = 0;
+            NSDictionary *pa = d[@"play_addr"];
+            if ([pa isKindOfClass:[NSDictionary class]]) {
+                @try { pw = [pa[@"width"] longLongValue]; } @catch (__unused NSException *e) {}
+                @try { ph = [pa[@"height"] longLongValue]; } @catch (__unused NSException *e) {}
+            }
+            long long maxEdge = MAX(pw, ph);
+            BOOL gear4K = [gear rangeOfString:@"4k" options:NSCaseInsensitiveSearch].location != NSNotFound
+                          || [gear rangeOfString:@"_4_" options:0].location != NSNotFound
+                          || [gear rangeOfString:@"1440" options:0].location != NSNotFound;
+            BOOL isHi = gear4K || br >= 4500000 || maxEdge >= 2560;
+            if (!isHi) continue;
+            NSString *vid = nil;
+            NSString *url = nil;
+            if ([pa isKindOfClass:[NSDictionary class]]) {
+                vid = pa[@"uri"];
+                NSArray *ul = pa[@"url_list"];
+                if ([ul isKindOfClass:[NSArray class]] && ul.count > 0) url = ul[0];
+            }
+            if (url.length == 0 || vid.length == 0) continue;
+            NSMutableDictionary *entry = [NSMutableDictionary dictionary];
+            entry[@"url"] = url;
+            entry[@"gear"] = gear ?: @"";
+            entry[@"bitrate"] = @(br);
+            entry[@"w"] = @(pw);
+            entry[@"h"] = @(ph);
+            entry[@"time"] = @([[NSDate date] timeIntervalSince1970]);
+            [[NSUserDefaults standardUserDefaults] setObject:entry forKey:[NSString stringWithFormat:@"dyyy_4k_%@", vid]];
+            [[NSUserDefaults standardUserDefaults] synchronize];
+            NSLog(@"[DYYY 4K-RAW] gear=%@ br=%lld %lldx%lld vid=%@ url=%@", gear, br, pw, ph, vid, url);
+            static NSTimeInterval lastRawHit = 0;
+            NSTimeInterval nowT = [NSDate timeIntervalSinceReferenceDate];
+            if (nowT - lastRawHit < 10.0) continue;
+            lastRawHit = nowT;
+            NSString *msg = [NSString stringWithFormat:@"截获高档位数据\n%@  %lldkbps  %lldx%lld\nvid=%@", gear ?: @"?", br/1000, pw, ph, vid];
+            dispatch_async(dispatch_get_main_queue(), ^{
+                @try {
+                    UIAlertController *ac = [UIAlertController alertControllerWithTitle:@"抓到4K原始档位"
+                                                                                message:msg
+                                                                         preferredStyle:UIAlertControllerStyleAlert];
+                    [ac addAction:[UIAlertAction actionWithTitle:@"知道了" style:UIAlertActionStyleDefault handler:nil]];
+                    UIViewController *top = [UIApplication sharedApplication].keyWindow.rootViewController;
+                    while (top.presentedViewController) top = top.presentedViewController;
+                    if (top) [top presentViewController:ac animated:YES completion:nil];
+                } @catch (__unused NSException *e) {}
+            });
+        } @catch (__unused NSException *e) {}
+    }
+}
 // ===== DEBUG END =====
 
 %end
