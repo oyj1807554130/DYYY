@@ -637,8 +637,24 @@ static void DYYYInspectQualityModels(NSArray *models, NSString *source) {
 
 %end
 
-// ===== DEBUG: TTVideoEngine引擎探针，抓播放器实际拉到的播放档位(4K通道排查) =====
+// ===== DEBUG: TTVideoEngine引擎探针(安全版:仅白名单KVC,不递归属性,不跨线程延迟) =====
 %group DYYYEngineProbe
+
+// 仅处理NSString/NSNumber/NSURL/NSArray(字符串元素)/NSDictionary(安全键)
+static NSString *DYYYEngSafeStr(id v) {
+    if (!v || v == (id)kCFNull) return nil;
+    @try {
+        if ([v isKindOfClass:[NSString class]]) {
+            NSString *s = (NSString *)v;
+            if (s.length == 0) return nil;
+            if (s.length > 200) s = [[s substringToIndex:150] stringByAppendingFormat:@"...%@", [s substringFromIndex:s.length - 40]];
+            return [s stringByReplacingOccurrencesOfString:@"\n" withString:@" "];
+        }
+        if ([v isKindOfClass:[NSNumber class]]) return [NSString stringWithFormat:@"%@", v];
+        if ([v isKindOfClass:[NSURL class]]) return DYYYEngSafeStr([(NSURL *)v absoluteString]);
+    } @catch (__unused NSException *e) {}
+    return nil;
+}
 
 static void DYYYEngSave(NSString *key, NSString *val) {
     if (val.length == 0) return;
@@ -649,94 +665,63 @@ static void DYYYEngSave(NSString *key, NSString *val) {
     } @catch (__unused NSException *e) {}
 }
 
-static NSString *DYYYEngShort(id s) {
-    if (![s isKindOfClass:[NSString class]] || [(NSString *)s length] == 0) return @"";
-    NSString *str = (NSString *)s;
-    if (str.length <= 180) return str;
-    return [[NSString stringWithFormat:@"%@...%@", [str substringToIndex:110], [str substringFromIndex:str.length - 60]] stringByReplacingOccurrencesOfString:@"\n" withString:@" "];
-}
-
-static NSString *DYYYEngDescribe(id obj, NSInteger depth) {
-    if (!obj || obj == (id)kCFNull) return @"nil";
-    @try {
-        if ([obj isKindOfClass:[NSString class]]) return DYYYEngShort(obj);
-        if ([obj isKindOfClass:[NSNumber class]]) return [NSString stringWithFormat:@"%@", obj];
-        if ([obj isKindOfClass:[NSURL class]]) return DYYYEngShort([(NSURL *)obj absoluteString]);
-        if ([obj isKindOfClass:[NSDictionary class]]) {
-            if (depth <= 0) return @"{..}";
-            NSMutableArray *parts = [NSMutableArray array];
-            for (id k in (NSDictionary *)obj) {
-                if (parts.count >= 24) { [parts addObject:@".."]; break; }
-                id v = ((NSDictionary *)obj)[k];
-                if ([v isKindOfClass:[NSData class]]) continue;
-                NSString *vs;
-                if ([v isKindOfClass:[NSString class]] || [v isKindOfClass:[NSNumber class]] || [v isKindOfClass:[NSURL class]]) {
-                    vs = DYYYEngDescribe(v, 0);
-                } else if ([v isKindOfClass:[NSArray class]]) {
-                    vs = depth >= 2 ? [NSString stringWithFormat:@"[%lu项]", (unsigned long)[(NSArray *)v count]] : DYYYEngDescribe(v, depth - 1);
-                } else if ([v isKindOfClass:[NSDictionary class]]) {
-                    vs = depth >= 2 ? [NSString stringWithFormat:@"{dict%lu}", (unsigned long)[(NSDictionary *)v count]] : DYYYEngDescribe(v, depth - 1);
-                } else {
-                    continue;
+// 只对白名单key做KVC,绝不遍历属性列表
+static NSString *DYYYEngSafeKV(id obj, NSArray *keys) {
+    if (!obj) return nil;
+    NSMutableString *s = [NSMutableString string];
+    for (NSString *k in keys) {
+        @try {
+            id v = [obj valueForKey:k];
+            if (!v || v == (id)kCFNull) continue;
+            if ([v isKindOfClass:[NSData class]]) continue;
+            if ([v isKindOfClass:[NSString class]] || [v isKindOfClass:[NSNumber class]] || [v isKindOfClass:[NSURL class]]) {
+                NSString *vs = DYYYEngSafeStr(v);
+                if (vs.length > 0) [s appendFormat:@"%@=%@\n", k, vs];
+            } else if ([v isKindOfClass:[NSArray class]]) {
+                NSArray *arr = (NSArray *)v;
+                [s appendFormat:@"%@=[%lu项]\n", k, (unsigned long)arr.count];
+                NSInteger idx = 0;
+                for (id it in arr) {
+                    if (idx >= 5) break;
+                    if ([it isKindOfClass:[NSString class]] || [it isKindOfClass:[NSURL class]]) {
+                        NSString *vs = DYYYEngSafeStr(it);
+                        if (vs.length > 0) [s appendFormat:@"  [%ld] %@\n", (long)idx, vs];
+                    } else if (it && ![it isKindOfClass:[NSData class]]) {
+                        // 子对象也只用白名单key,不做propertyList
+                        NSString *sub = DYYYEngSafeKV(it, @[@"vid", @"videoId", @"mediaType", @"mediaTypeCode",
+                                                             @"bitrate", @"resolution", @"vwidth", @"vheight",
+                                                             @"size", @"codecType", @"fileHash", @"definition",
+                                                             @"quality", @"gearName", @"mainURL", @"backupURL",
+                                                             @"playURL", @"urlList", @"URLList", @"directURL"]);
+                        if (sub.length > 0) [s appendFormat:@"  [%ld] %@: %@", (long)idx, NSStringFromClass([it class]), sub];
+                    }
+                    idx++;
                 }
-                [parts addObject:[NSString stringWithFormat:@"%@=%@", k, vs]];
-            }
-            return [NSString stringWithFormat:@"{%@}", [parts componentsJoinedByString:@" "]];
-        }
-        if ([obj isKindOfClass:[NSArray class]]) {
-            if (depth <= 0) return [NSString stringWithFormat:@"[%lu项]", (unsigned long)[(NSArray *)obj count]];
-            NSMutableArray *parts = [NSMutableArray array];
-            NSInteger i = 0;
-            for (id v in (NSArray *)obj) {
-                if (i >= 6) { [parts addObject:@".."]; break; }
-                [parts addObject:DYYYEngDescribe(v, depth - 1)];
-                i++;
-            }
-            return [NSString stringWithFormat:@"[%@]", [parts componentsJoinedByString:@" | "]];
-        }
-        NSMutableArray *parts = [NSMutableArray array];
-        unsigned int pc = 0;
-        objc_property_t *props = class_copyPropertyList([obj class], &pc);
-        for (unsigned int i = 0; i < pc; i++) {
-            if (parts.count >= 30) { [parts addObject:@".."]; break; }
-            NSString *pn = [NSString stringWithUTF8String:property_getName(props[i])];
-            @try {
-                id v = [obj valueForKey:pn];
-                if (!v || [v isKindOfClass:[NSData class]]) continue;
-                if ([v isKindOfClass:[NSString class]] || [v isKindOfClass:[NSNumber class]] || [v isKindOfClass:[NSURL class]]) {
-                    NSString *sv = DYYYEngDescribe(v, 0);
-                    if (sv.length > 0 && ![sv isEqualToString:@"nil"]) [parts addObject:[NSString stringWithFormat:@"%@=%@", pn, sv]];
-                } else if ([v isKindOfClass:[NSArray class]] || [v isKindOfClass:[NSDictionary class]]) {
-                    [parts addObject:[NSString stringWithFormat:@"%@=%@", pn, DYYYEngDescribe(v, depth - 1)]];
+            } else if ([v isKindOfClass:[NSDictionary class]]) {
+                NSDictionary *d = (NSDictionary *)v;
+                [s appendFormat:@"%@={dict%lu}\n", k, (unsigned long)d.count];
+                NSInteger idx = 0;
+                for (id dk in d) {
+                    if (idx >= 8) break;
+                    if (![dk isKindOfClass:[NSString class]]) continue;
+                    NSString *dks = (NSString *)dk;
+                    if ([dks rangeOfString:@"url" options:NSCaseInsensitiveSearch].location == NSNotFound
+                        && [dks rangeOfString:@"bit" options:NSCaseInsensitiveSearch].location == NSNotFound
+                        && [dks rangeOfString:@"res" options:NSCaseInsensitiveSearch].location == NSNotFound
+                        && [dks rangeOfString:@"gear" options:NSCaseInsensitiveSearch].location == NSNotFound
+                        && [dks rangeOfString:@"size" options:NSCaseInsensitiveSearch].location == NSNotFound
+                        && [dks rangeOfString:@"def" options:NSCaseInsensitiveSearch].location == NSNotFound
+                        && [dks rangeOfString:@"quality" options:NSCaseInsensitiveSearch].location == NSNotFound) continue;
+                    id dv = d[dk];
+                    NSString *dvs = DYYYEngSafeStr(dv);
+                    if (dvs.length > 0) [s appendFormat:@"  %@=%@\n", dks, dvs];
+                    idx++;
                 }
-            } @catch (__unused NSException *e) {}
-        }
-        free(props);
-        return [NSString stringWithFormat:@"<%@:%@>", NSStringFromClass([obj class]), [parts componentsJoinedByString:@" "]];
-    } @catch (__unused NSException *e) {
-        return @"<err>";
+            }
+            // 其他自定义对象类型一律不读
+        } @catch (__unused NSException *e) {}
     }
-}
-
-static void DYYYEngCapture(id engine, NSString *tag) {
-    @try {
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1500 * (long long)NSEC_PER_MSEC)), dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-            @try {
-                NSMutableString *s = [NSMutableString stringWithFormat:@"[%@] engine=%@\n", tag, NSStringFromClass([engine class])];
-                for (NSString *k in @[@"playInfo", @"videoModel", @"fetcherVideoModel", @"currentVideoVideoModel", @"videoInfo", @"preloadVideoModel"]) {
-                    @try {
-                        id v = [engine valueForKey:k];
-                        if (v && ![v isKindOfClass:[NSData class]]) {
-                            [s appendFormat:@"\n#%@\n%@\n", k, DYYYEngDescribe(v, 3)];
-                        }
-                    } @catch (__unused NSException *e) {}
-                }
-                NSString *out = [s copy];
-                if (out.length > 12000) out = [[out substringToIndex:12000] stringByAppendingString:@"..截断"];
-                DYYYEngSave(@"dyyy_eng_dump", out);
-            } @catch (__unused NSException *e) {}
-        });
-    } @catch (__unused NSException *e) {}
+    return s;
 }
 
 %hook TTVideoEngine
@@ -744,33 +729,35 @@ static void DYYYEngCapture(id engine, NSString *tag) {
 - (void)setVideoModel:(id)model {
     %orig(model);
     @try {
-        NSString *d = [NSString stringWithFormat:@"[setVideoModel]\n%@", DYYYEngDescribe(model, 3)];
-        if (d.length > 12000) d = [[d substringToIndex:12000] stringByAppendingString:@"..截断"];
-        DYYYEngSave(@"dyyy_eng_dump", d);
+        if (!model) return;
+        NSMutableString *s = [NSMutableString stringWithFormat:@"#setVideoModel %@\n", NSStringFromClass([model class])];
+        // 先读模型顶层标量/集合白名单
+        NSString *top = DYYYEngSafeKV(model, @[@"vid", @"videoId", @"mediaType", @"mediaTypeCode",
+                                                @"supportedResolutionTypes", @"resolutionMap",
+                                                @"bitrateInfoList", @"videoBitrateList",
+                                                @"playInfoList", @"videoModelList",
+                                                @"codecType", @"videoCodecType",
+                                                @"defaultResolution", @"currentResolution"]);
+        if (top.length > 0) [s appendString:top];
+        if (s.length > 6000) s = [[s substringToIndex:6000] mutableCopy];
+        DYYYEngSave(@"dyyy_eng_dump", s);
     } @catch (__unused NSException *e) {}
-}
-
-- (void)play {
-    %orig;
-    DYYYEngCapture(self, @"play");
 }
 
 - (void)configResolution:(NSInteger)resolution {
     @try {
-        NSString *line = [NSString stringWithFormat:@"configResolution=%ld\n", (long)resolution];
         NSUserDefaults *df = [NSUserDefaults standardUserDefaults];
         NSString *old = [df stringForKey:@"dyyy_eng_reso"] ?: @"";
-        NSString *all = [old stringByAppendingString:line];
-        if (all.length > 1200) all = [all substringFromIndex:all.length - 1200];
+        NSString *all = [old stringByAppendingFormat:@"%ld ", (long)resolution];
+        if (all.length > 600) all = [all substringFromIndex:all.length - 600];
         DYYYEngSave(@"dyyy_eng_reso", all);
     } @catch (__unused NSException *e) {}
     %orig(resolution);
 }
 
 %end
-
-%end
 // ===== DEBUG END =====
+
 
 // 直播间真实人数
 %hook IESLiveUserSeqlistFragment
