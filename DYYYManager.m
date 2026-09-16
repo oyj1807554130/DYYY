@@ -3088,7 +3088,7 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
             }
 
 
-            // 2.25 web API获取4K画质（全Cookie + 全参数 + 浏览器指纹，对齐JS）
+            // 2.25 web API获取4K画质（ttwid + bit_rate）
             {
                 NSString *awemeId = nil;
                 @try { awemeId = [awemeModel valueForKey:@"awemeID"]; } @catch (NSException *e) {}
@@ -3096,105 +3096,87 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                     @try { awemeId = [awemeModel valueForKey:@"awemeId"]; } @catch (NSException *e2) {}
                 }
                 if (awemeId.length > 0 && videoURI.length > 0) {
+                    __block NSString *ttwidStr = nil;
                     __block NSDictionary *webBitrate4K = nil;
                     __block NSDictionary *webBitrate1440 = nil;
-                    // Step 1: 构建完整Cookie（从app Cookie存储取douyin.com全部cookie）
-                    NSHTTPCookieStorage *cookieStore = [NSHTTPCookieStorage sharedHTTPCookieStorage];
-                    NSArray *appCookies = [cookieStore cookiesForURL:[NSURL URLWithString:@"https://www.douyin.com/"]];
-                    NSMutableString *fullCookieStr = [NSMutableString string];
-                    __block NSString *ttwidStr = nil;
-                    for (NSHTTPCookie *c in appCookies) {
-                        if (fullCookieStr.length > 0) [fullCookieStr appendString:@"; "];
-                        [fullCookieStr appendFormat:@"%@=%@", [c name], [c value]];
-                        if ([[c name] isEqualToString:@"ttwid"]) ttwidStr = [c value];
-                    }
-                    // 降级：如果没有Cookie，注册ttwid
-                    if (fullCookieStr.length == 0) {
-                        NSString *ttwidURL = @"https://ttwid.bytedance.com/ttwid/union/register/";
-                        NSString *ttwidBody = @"{\"region\":\"cn\",\"aid\":6383,\"needFid\":false,\"service\":\"www.douyin.com\",\"migrate_info\":{\"ticket\":\"\",\"source\":\"node\"},\"cbUrlProtocol\":\"https\",\"union\":true}";
-                        NSMutableURLRequest *ttwidReq = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:ttwidURL]];
-                        ttwidReq.HTTPMethod = @"POST";
-                        ttwidReq.HTTPBody = [ttwidBody dataUsingEncoding:NSUTF8StringEncoding];
-                        [ttwidReq setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
-                        [ttwidReq setValue:@"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36" forHTTPHeaderField:@"User-Agent"];
-                        dispatch_semaphore_t ttwidSem = dispatch_semaphore_create(0);
-                        NSURLSessionDataTask *ttwidTask = [[NSURLSession sharedSession] dataTaskWithRequest:ttwidReq completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
-                            @try {
-                                NSHTTPURLResponse *httpResp = (NSHTTPURLResponse *)response;
-                                NSDictionary *headers = [httpResp allHeaderFields];
-                                NSString *setCookie = headers[@"Set-Cookie"];
-                                if (setCookie.length > 0) {
-                                    NSRange r = [setCookie rangeOfString:@"ttwid="];
-                                    if (r.location != NSNotFound) {
-                                        NSString *sub = [setCookie substringFromIndex:r.location + 6];
-                                        NSRange semi = [sub rangeOfString:@";"];
-                                        ttwidStr = semi.location != NSNotFound ? [sub substringToIndex:semi.location] : sub;
-                                    }
+                    dispatch_group_t webApiGroup = dispatch_group_create();
+                    dispatch_group_enter(webApiGroup);
+                    // Step 1: 获取ttwid
+                    NSString *ttwidURL = @"https://ttwid.bytedance.com/ttwid/union/register/";
+                    NSString *ttwidBody = @"{\"region\":\"cn\",\"aid\":6383,\"needFid\":false,\"service\":\"www.douyin.com\",\"migrate_info\":{\"ticket\":\"\",\"source\":\"node\"},\"cbUrlProtocol\":\"https\",\"union\":true}";
+                    NSMutableURLRequest *ttwidReq = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:ttwidURL]];
+                    ttwidReq.HTTPMethod = @"POST";
+                    ttwidReq.HTTPBody = [ttwidBody dataUsingEncoding:NSUTF8StringEncoding];
+                    [ttwidReq setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
+                    [ttwidReq setValue:@"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" forHTTPHeaderField:@"User-Agent"];
+                    NSURLSessionDataTask *ttwidTask = [[NSURLSession sharedSession] dataTaskWithRequest:ttwidReq completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
+                        @try {
+                            NSHTTPURLResponse *httpResp = (NSHTTPURLResponse *)response;
+                            NSDictionary *headers = [httpResp allHeaderFields];
+                            NSString *setCookie = headers[@"Set-Cookie"];
+                            if (setCookie.length > 0) {
+                                NSRange r = [setCookie rangeOfString:@"ttwid="];
+                                if (r.location != NSNotFound) {
+                                    NSString *sub = [setCookie substringFromIndex:r.location + 6];
+                                    NSRange semi = [sub rangeOfString:@";"];
+                                    ttwidStr = semi.location != NSNotFound ? [sub substringToIndex:semi.location] : sub;
                                 }
-                            } @catch (NSException *e) {}
-                            dispatch_semaphore_signal(ttwidSem);
-                        }];
-                        [ttwidTask resume];
-                        dispatch_semaphore_wait(ttwidSem, dispatch_time(DISPATCH_TIME_NOW, 8 * NSEC_PER_SEC));
-                        if (ttwidStr && ttwidStr.length > 0) {
-                            fullCookieStr = [NSMutableString stringWithFormat:@"ttwid=%@", ttwidStr];
-                        }
-                    }
-                    // 存储ttwid供后续CDN下载使用
-                    if (ttwidStr && ttwidStr.length > 0) [DYYYManager shared].localParseTtwid = ttwidStr;
-                    // Step 2: 用全Cookie调web API（完整URL参数+浏览器指纹header）
-                    if (fullCookieStr.length > 0) {
-                        NSString *apiURL = [NSString stringWithFormat:@"https://www.douyin.com/aweme/v1/web/aweme/detail/?aweme_id=%@&device_platform=webapp&aid=6383&channel=channel_pc_web&update_version_code=170400&pc_client_type=1&version_code=190500&version_name=19.5.0&cookie_enabled=true&screen_width=2560&screen_height=1440&browser_language=zh-CN&browser_platform=Win32&browser_name=Chrome&browser_version=150.0.0.0&browser_online=true&engine_name=Blink&engine_version=150.0.0.0&os_name=Windows&os_version=10&cpu_core_num=12&device_memory=8&platform=PC&downlink=4.75&effective_type=4g&round_trip_time=150", awemeId];
-                        NSMutableURLRequest *apiReq = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:apiURL]];
-                        [apiReq setValue:@"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36" forHTTPHeaderField:@"User-Agent"];
-                        [apiReq setValue:@"https://www.douyin.com/" forHTTPHeaderField:@"Referer"];
-                        [apiReq setValue:@"text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7" forHTTPHeaderField:@"Accept"];
-                        [apiReq setValue:@"zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6" forHTTPHeaderField:@"Accept-Language"];
-                        [apiReq setValue:@"no-cache" forHTTPHeaderField:@"Cache-Control"];
-                        NSString *secChUa = [NSString stringWithFormat:@"%cChromium%c;v=%c150%c, %cGoogle Chrome%c;v=%c150%c", 34, 34, 34, 34, 34, 34, 34, 34];
-                        [apiReq setValue:secChUa forHTTPHeaderField:@"sec-ch-ua"];
-                        [apiReq setValue:@"?0" forHTTPHeaderField:@"sec-ch-ua-mobile"];
-                        [apiReq setValue:[NSString stringWithFormat:@"%cWindows%c", 34, 34] forHTTPHeaderField:@"sec-ch-ua-platform"];
-                        [apiReq setValue:@"document" forHTTPHeaderField:@"sec-fetch-dest"];
-                        [apiReq setValue:@"navigate" forHTTPHeaderField:@"sec-fetch-mode"];
-                        [apiReq setValue:@"same-origin" forHTTPHeaderField:@"sec-fetch-site"];
-                        [apiReq setValue:fullCookieStr forHTTPHeaderField:@"Cookie"];
-                        dispatch_semaphore_t apiSem = dispatch_semaphore_create(0);
-                        NSURLSessionDataTask *apiTask = [[NSURLSession sharedSession] dataTaskWithRequest:apiReq completionHandler:^(NSData *apiData, NSURLResponse *apiResp, NSError *apiErr) {
-                            @try {
-                                if (apiData.length > 0) {
-                                    NSDictionary *apiJson = [NSJSONSerialization JSONObjectWithData:apiData options:0 error:nil];
-                                    NSDictionary *awemeDetail = apiJson[@"aweme_detail"];
-                                    NSDictionary *videoDetail = awemeDetail[@"video"];
-                                    NSArray *bitRateList = videoDetail[@"bit_rate"];
-                                    if (bitRateList && [bitRateList isKindOfClass:[NSArray class]]) {
-                                        for (NSDictionary *br in bitRateList) {
-                                            NSString *gear = br[@"gear_name"] ?: @"";
-                                            NSDictionary *pa = br[@"play_addr"] ?: @{};
-                                            NSString *urlKey = pa[@"url_key"] ?: @"";
-                                            NSInteger h = [pa[@"height"] integerValue];
-                                            NSString *meta = [NSString stringWithFormat:@"%@ %@ %ld", gear, urlKey, (long)h];
-                                            // 4K: gear含_4_ 或 meta含4k 或 height>=2160
-                                            if (([gear containsString:@"_4_"] || [meta containsString:@"4k"] || h >= 2160)) {
-                                                if (!webBitrate4K || [[br valueForKey:@"bit_rate"] integerValue] > [[webBitrate4K valueForKey:@"bit_rate"] integerValue]) {
-                                                    webBitrate4K = br;
-                                                }
-                                            }
-                                            // 2K: gear含1440 或 meta含1440p 或 height>=1440且<2160
-                                            if (([gear containsString:@"1440"] || [meta containsString:@"1440p"] || (h >= 1440 && h < 2160))) {
-                                                if (!webBitrate1440 || [[br valueForKey:@"bit_rate"] integerValue] > [[webBitrate1440 valueForKey:@"bit_rate"] integerValue]) {
-                                                    webBitrate1440 = br;
+                            }
+                            // 降级：注册失败时从app Cookie存储取ttwid
+                            if (!ttwidStr || ttwidStr.length == 0) {
+                                NSHTTPCookieStorage *cs1 = [NSHTTPCookieStorage sharedHTTPCookieStorage];
+                                NSArray *ck1 = [cs1 cookiesForURL:[NSURL URLWithString:@"https://www.douyin.com/"]];
+                                for (NSHTTPCookie *c1 in ck1) {
+                                    if ([[c1 name] isEqualToString:@"ttwid"]) { ttwidStr = [c1 value]; break; }
+                                }
+                            }
+                            // Step 2: 用ttwid调web API
+                            if (ttwidStr.length > 0) {
+                                // 存储ttwid供后续CDN下载使用
+                                [DYYYManager shared].localParseTtwid = ttwidStr;
+                                NSString *apiURL = [NSString stringWithFormat:@"https://www.douyin.com/aweme/v1/web/aweme/detail/?aweme_id=%@&device_platform=webapp&aid=6383&channel=channel_pc_web", awemeId];
+                                NSMutableURLRequest *apiReq = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:apiURL]];
+                                [apiReq setValue:@"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36" forHTTPHeaderField:@"User-Agent"];
+                                [apiReq setValue:@"https://www.douyin.com/" forHTTPHeaderField:@"Referer"];
+                                [apiReq setValue:@"application/json" forHTTPHeaderField:@"Accept"];
+                                [apiReq setValue:[NSString stringWithFormat:@"ttwid=%@", ttwidStr] forHTTPHeaderField:@"Cookie"];
+                                NSURLSessionDataTask *apiTask = [[NSURLSession sharedSession] dataTaskWithRequest:apiReq completionHandler:^(NSData *apiData, NSURLResponse *apiResp, NSError *apiErr) {
+                                    @try {
+                                        if (apiData.length > 0) {
+                                            NSDictionary *apiJson = [NSJSONSerialization JSONObjectWithData:apiData options:0 error:nil];
+                                            NSDictionary *awemeDetail = apiJson[@"aweme_detail"];
+                                            NSDictionary *videoDetail = awemeDetail[@"video"];
+                                            NSArray *bitRateList = videoDetail[@"bit_rate"];
+                                            if (bitRateList && [bitRateList isKindOfClass:[NSArray class]]) {
+                                                for (NSDictionary *br in bitRateList) {
+                                                    NSString *gear = br[@"gear_name"];
+                                                    if (!gear) continue;
+                                                    // 4K条目（gear含_4_且bitrate最高）
+                                                    if ([gear containsString:@"_4_"] && !webBitrate4K) {
+                                                        if (!webBitrate4K || [[br valueForKey:@"bit_rate"] integerValue] > [[webBitrate4K valueForKey:@"bit_rate"] integerValue]) {
+                                                            webBitrate4K = br;
+                                                        }
+                                                    }
+                                                    // 1440P条目
+                                                    if ([gear containsString:@"1440"] && !webBitrate1440) {
+                                                        webBitrate1440 = br;
+                                                    }
                                                 }
                                             }
                                         }
-                                    }
-                                }
-                            } @catch (NSException *e2) {}
-                            dispatch_semaphore_signal(apiSem);
-                        }];
-                        [apiTask resume];
-                        dispatch_semaphore_wait(apiSem, dispatch_time(DISPATCH_TIME_NOW, 12 * NSEC_PER_SEC));
-                    }
+                                    } @catch (NSException *e2) {}
+                                    dispatch_group_leave(webApiGroup);
+                                }];
+                                [apiTask resume];
+                            } else {
+                                dispatch_group_leave(webApiGroup);
+                            }
+                        } @catch (NSException *e) {
+                            dispatch_group_leave(webApiGroup);
+                        }
+                    }];
+                    [ttwidTask resume];
+                    dispatch_group_wait(webApiGroup, dispatch_time(DISPATCH_TIME_NOW, 10 * NSEC_PER_SEC));
                     
                     // Step 3: 从4K条目提取CDN直链，构建画质条目
                     NSMutableArray *web4KItems = [NSMutableArray array];
