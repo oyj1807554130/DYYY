@@ -1266,14 +1266,33 @@ static BOOL DYYYShouldHandleSpeedFeatures(void) {
 %new
 - (void)applyBlurEffectIfNeeded {
     if (DYYYGetBool(@"DYYYEnableCommentBlur") && [self isKindOfClass:NSClassFromString(@"AWECommentPanelContainerSwiftImpl.CommentContainerInnerViewController")]) {
-        // 动态获取用户设置的透明度
         float userTransparency = [[[NSUserDefaults standardUserDefaults] objectForKey:@"DYYYCommentBlurTransparent"] floatValue];
         if (userTransparency <= 0 || userTransparency > 1) {
             userTransparency = 0.9;
         }
 
-        // 应用毛玻璃效果
-        [DYYYUtils applyBlurEffectToView:self.view transparency:userTransparency blurViewTag:999];
+        // 找到self.view上方第一个不透明背景的superview（探针显示sup.sup bgA=1.00）
+        // 把blur加到那个superview上，这样blur模糊的是背后的视频，评论区面板完全不动
+        UIView *targetView = nil;
+        UIView *sv = self.view.superview;
+        int lv = 0;
+        while (sv && lv < 4) {
+            UIColor *bg = sv.backgroundColor;
+            if (bg && CGColorGetAlpha(bg.CGColor) > 0.5f) {
+                targetView = sv;
+                break;
+            }
+            sv = sv.superview;
+            lv++;
+        }
+
+        if (targetView) {
+            // 在opaque superview上加blur（blur放在index 0，模糊背后的视频）
+            [DYYYUtils applyBlurEffectToView:targetView transparency:userTransparency blurViewTag:999];
+        } else {
+            // 没找到opaque superview（另一台设备的情况），回退到原有逻辑
+            [DYYYUtils applyBlurEffectToView:self.view transparency:userTransparency blurViewTag:999];
+        }
     }
 }
 %end
