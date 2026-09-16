@@ -3730,12 +3730,16 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
             [warmupReq setValue:@"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36" forHTTPHeaderField:@"User-Agent"];
             [warmupReq setValue:@"https://www.douyin.com/" forHTTPHeaderField:@"Referer"];
             dispatch_semaphore_t warmupSem = dispatch_semaphore_create(0);
+            __block NSInteger warmupStatus = 0;
+            __block NSInteger warmupCookieCountBefore = [[NSHTTPCookieStorage sharedHTTPCookieStorage] cookiesForURL:[NSURL URLWithString:@"https://www.douyin.com/"]].count;
             NSURLSessionDataTask *warmupTask = [[NSURLSession sharedSession] dataTaskWithRequest:warmupReq completionHandler:^(NSData *wData, NSURLResponse *wResp, NSError *wErr) {
-                // NSHTTPCookieStorage自动存储Set-Cookie，无需手动处理
+                if (wResp && [wResp isKindOfClass:[NSHTTPURLResponse class]]) warmupStatus = [(NSHTTPURLResponse *)wResp statusCode];
                 dispatch_semaphore_signal(warmupSem);
             }];
             [warmupTask resume];
             dispatch_semaphore_wait(warmupSem, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC));
+            NSInteger warmupCookieCountAfter = [[NSHTTPCookieStorage sharedHTTPCookieStorage] cookiesForURL:[NSURL URLWithString:@"https://www.douyin.com/"]].count;
+            [probeLog appendFormat:@"\n[Step0 预热]\nGET www.douyin.com → HTTP %ld\nCookie: %ld→%ld\n", (long)warmupStatus, (long)warmupCookieCountBefore, (long)warmupCookieCountAfter];
         }
 
         // Step 1: 构建完整Cookie（从app Cookie存储取douyin.com全部cookie，对齐JS规则）
@@ -3766,9 +3770,13 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
             [ttwidReq setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
             [ttwidReq setValue:@"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36" forHTTPHeaderField:@"User-Agent"];
             dispatch_semaphore_t ttwidSem = dispatch_semaphore_create(0);
+            __block NSInteger ttwidHttpStatus = 0;
+            __block NSString *ttwidFromHeader = nil;
+            __block NSString *ttwidFromBody = nil;
             NSURLSessionDataTask *ttwidTask = [[NSURLSession sharedSession] dataTaskWithRequest:ttwidReq completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
                 @try {
                     NSHTTPURLResponse *httpResp = (NSHTTPURLResponse *)response;
+                    ttwidHttpStatus = [httpResp statusCode];
                     NSDictionary *headers = [httpResp allHeaderFields];
                     NSString *setCookie = headers[@"Set-Cookie"];
                     if (setCookie.length > 0) {
@@ -3776,15 +3784,16 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                         if (r.location != NSNotFound) {
                             NSString *sub = [setCookie substringFromIndex:r.location + 6];
                             NSRange semi = [sub rangeOfString:@";"];
-                            ttwidStr = semi.location != NSNotFound ? [sub substringToIndex:semi.location] : sub;
+                            ttwidFromHeader = semi.location != NSNotFound ? [sub substringToIndex:semi.location] : sub;
+                            ttwidStr = ttwidFromHeader;
                         }
                     }
                     if (!ttwidStr || ttwidStr.length == 0) {
                         if (data.length > 0) {
                             NSDictionary *json = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
                             if ([json isKindOfClass:[NSDictionary class]]) {
-                                NSString *bodyTtwid = json[@"ttwid"];
-                                if (bodyTtwid.length > 0) ttwidStr = bodyTtwid;
+                                ttwidFromBody = json[@"ttwid"];
+                                if (ttwidFromBody.length > 0) ttwidStr = ttwidFromBody;
                             }
                         }
                     }
@@ -3793,6 +3802,7 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
             }];
             [ttwidTask resume];
             dispatch_semaphore_wait(ttwidSem, dispatch_time(DISPATCH_TIME_NOW, 10 * NSEC_PER_SEC));
+            [probeLog appendFormat:@"\n[Step1.5 ttwid注册]\nPOST ttwid.bytedance.com → HTTP %ld\nSet-Cookie ttwid=%@ (len=%lu)\nJSON body ttwid=%@\n最终ttwid=%@\n", (long)ttwidHttpStatus, ttwidFromHeader ? [[ttwidFromHeader substringToIndex:MIN(20, ttwidFromHeader.length)] stringByAppendingString:@"..."] : @"无", (unsigned long)(ttwidFromHeader ? ttwidFromHeader.length : 0), ttwidFromBody ? @"有" : @"无", ttwidStr.length > 0 ? @"有" : @"无"];
             if (ttwidStr && ttwidStr.length > 0) {
                 if (fullCookieStr.length > 0) [fullCookieStr appendString:@"; "];
                 [fullCookieStr appendFormat:@"ttwid=%@", ttwidStr];
@@ -3827,6 +3837,7 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
         [apiReq setValue:@"?1" forHTTPHeaderField:@"sec-fetch-user"];
         [apiReq setValue:@"1" forHTTPHeaderField:@"upgrade-insecure-requests"];
         [apiReq setValue:fullCookieStr forHTTPHeaderField:@"Cookie"];
+        [probeLog appendFormat:@"\n[Step2 发送Cookie] len=%lu preview=%@...\n", (unsigned long)fullCookieStr.length, [fullCookieStr substringToIndex:MIN(120, fullCookieStr.length)]];
         dispatch_semaphore_t apiSem = dispatch_semaphore_create(0);
         NSURLSessionDataTask *apiTask = [[NSURLSession sharedSession] dataTaskWithRequest:apiReq completionHandler:^(NSData *apiData, NSURLResponse *apiResp, NSError *apiErr) {
             @try {
