@@ -3833,10 +3833,10 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
             }
         }
         if (fullCookieStr.length == 0) {
-            [probeLog appendFormat:@"\n[失败] Cookie为空，无法构建请求\n"];
+            [probeLog appendFormat:@"\n[降级] Cookie为空，降级本地解析\n"];
             [[NSNotificationCenter defaultCenter] postNotificationName:@"DYYYProbeNotification" object:nil userInfo:@{@"text": [probeLog copy]}];
-            dispatch_async(dispatch_get_main_queue(), ^{ [DYYYUtils showToast:@"接口4解析失败: 无法获取Cookie"]; });
-            if (completion) completion(nil);
+            dispatch_async(dispatch_get_main_queue(), ^{ [DYYYUtils showToast:@"接口4: 降级本地解析"]; });
+            [DYYYManager localParseFromAwemeModel:awemeModel completion:completion];
             return;
         }
         // 存储ttwid供后续CDN下载使用
@@ -3937,9 +3937,10 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
             }
 
             if (!awemeDetail || ![awemeDetail isKindOfClass:[NSDictionary class]]) {
-                [probeLog appendFormat:@"\n[失败] 重试后仍无aweme_detail，API响应无效\n"];
+                [probeLog appendFormat:@"\n[降级] WebAPI失败，降级本地解析\n"];
                 [[NSNotificationCenter defaultCenter] postNotificationName:@"DYYYProbeNotification" object:nil userInfo:@{@"text": [probeLog copy]}];
-                if (completion) completion(nil);
+                dispatch_async(dispatch_get_main_queue(), ^{ [DYYYUtils showToast:@"接口4: WebAPI失败，降级本地解析"]; });
+                [DYYYManager localParseFromAwemeModel:awemeModel completion:completion];
                 return;
             }
         }
