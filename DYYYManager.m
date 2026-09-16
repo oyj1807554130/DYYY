@@ -3924,17 +3924,14 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
         if (!bitRateList || ![bitRateList isKindOfClass:[NSArray class]]) bitRateList = @[];
         NSMutableDictionary *byQuality = [NSMutableDictionary dictionary];
         for (NSDictionary *b in bitRateList) {
-            NSString *gearName = b[@"gear_name"] ?: @"";
             NSDictionary *playAddr = b[@"play_addr"] ?: @{};
-            NSString *urlKey = playAddr[@"url_key"] ?: @"";
             NSInteger height = [playAddr[@"height"] integerValue];
-            NSString *meta = [NSString stringWithFormat:@"%@ %@ %ld", gearName, urlKey, (long)height];
             NSString *qCode = nil;
-            if ([meta containsString:@"4k"] || [gearName containsString:@"_4_"]) qCode = @"2160p";
-            else if ([meta containsString:@"1440p"] || [gearName containsString:@"1440"]) qCode = @"1440p";
-            else if ([meta containsString:@"1080p"] || [gearName containsString:@"1080_0"] || [gearName containsString:@"1080_1"] || [gearName containsString:@"1080_2"]) qCode = @"1080p";
-            else if ([meta containsString:@"720p"] || [gearName containsString:@"720"]) qCode = @"720p";
-            else if ([meta containsString:@"540p"] || [gearName containsString:@"540"]) qCode = @"540p";
+            if (height >= 2160) qCode = @"2160p";
+            else if (height >= 1440) qCode = @"1440p";
+            else if (height >= 1080) qCode = @"1080p";
+            else if (height >= 720) qCode = @"720p";
+            else if (height >= 540) qCode = @"540p";
             if (!qCode) continue;
             NSArray *urlList = playAddr[@"url_list"];
             NSString *url = (urlList && urlList.count > 0) ? urlList[0] : nil;
@@ -4338,17 +4335,14 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
         if (!bitRateList || ![bitRateList isKindOfClass:[NSArray class]]) bitRateList = @[];
         NSMutableDictionary *byQuality = [NSMutableDictionary dictionary];
         for (NSDictionary *b in bitRateList) {
-            NSString *gearName = b[@"gear_name"] ?: @"";
             NSDictionary *playAddr = b[@"play_addr"] ?: @{};
-            NSString *urlKey = playAddr[@"url_key"] ?: @"";
             NSInteger height = [playAddr[@"height"] integerValue];
-            NSString *meta = [NSString stringWithFormat:@"%@ %@ %ld", gearName, urlKey, (long)height];
             NSString *qCode = nil;
-            if ([meta containsString:@"4k"] || [gearName containsString:@"_4_"]) qCode = @"2160p";
-            else if ([meta containsString:@"1440p"] || [gearName containsString:@"1440"]) qCode = @"1440p";
-            else if ([meta containsString:@"1080p"] || [gearName containsString:@"1080_0"] || [gearName containsString:@"1080_1"] || [gearName containsString:@"1080_2"]) qCode = @"1080p";
-            else if ([meta containsString:@"720p"] || [gearName containsString:@"720"]) qCode = @"720p";
-            else if ([meta containsString:@"540p"] || [gearName containsString:@"540"]) qCode = @"540p";
+            if (height >= 2160) qCode = @"2160p";
+            else if (height >= 1440) qCode = @"1440p";
+            else if (height >= 1080) qCode = @"1080p";
+            else if (height >= 720) qCode = @"720p";
+            else if (height >= 540) qCode = @"540p";
             if (!qCode) continue;
             NSArray *urlList = playAddr[@"url_list"];
             NSString *url = (urlList && urlList.count > 0) ? urlList[0] : nil;
