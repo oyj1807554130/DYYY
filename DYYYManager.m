@@ -1173,6 +1173,11 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                             audio:(NSURL *)audioURL
                          progress:(void (^)(float progress))progressBlock
                        completion:(void (^)(BOOL success, NSURL *fileURL))completion {
+    // 探针：下载URL
+    NSLog(@"[DYYY探针] downloadURL=%@ type=%ld", url, (long)mediaType);
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [DYYYUtils showToast:[NSString stringWithFormat:@"下载: %@ (%@)", url.host, url.path.length > 30 ? [url.path substringToIndex:30] : url.path]];
+    });
     // 创建自定义进度条界面
     dispatch_async(dispatch_get_main_queue(), ^{
       // 创建进度视图
@@ -3715,6 +3720,10 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
         return;
     }
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+        // ===== 接口4全流程探针 =====
+        __block NSMutableString *probeLog = [NSMutableString stringWithString:@"[接口4探针]\n"];
+        [probeLog appendFormat:@"awemeId=%@\n", awemeId];
+
         // Step 0: Cookie预热——GET www.douyin.com刷新web Cookie，确保msToken等不过期
         {
             NSMutableURLRequest *warmupReq = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:@"https://www.douyin.com/"]];
@@ -3739,6 +3748,14 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
             [fullCookieStr appendFormat:@"%@=%@", [c name], [c value]];
             if ([[c name] isEqualToString:@"ttwid"]) ttwidStr = [c value];
         }
+        // 探针：Cookie信息
+        [probeLog appendFormat:@"\n[Step1 Cookie]\ncount=%lu\n", (unsigned long)appCookies.count];
+        for (NSHTTPCookie *c in appCookies) {
+            NSString *val = [c value];
+            NSString *valPreview = val.length > 20 ? [[val substringToIndex:20] stringByAppendingString:@"..."] : val;
+            [probeLog appendFormat:@"  %@=%@ (domain=%@)\n", [c name], valPreview, [c domain]];
+        }
+        [probeLog appendFormat:@"ttwid=%@\n", ttwidStr.length > 0 ? @"有" : @"无"];
         // 降级：如果没有ttwid，从注册接口获取并追加到cookie
         if (!ttwidStr || ttwidStr.length == 0) {
             NSString *ttwidURL = @"https://ttwid.bytedance.com/ttwid/union/register/";
@@ -3818,7 +3835,34 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                     if ([apiJson isKindOfClass:[NSDictionary class]]) {
                         NSInteger statusCode = [apiJson[@"status_code"] integerValue];
                         if (statusCode == 0) awemeDetail = apiJson[@"aweme_detail"];
+                        // 探针：web API响应
+                        [probeLog appendFormat:@"\n[Step2 WebAPI响应]\nstatus_code=%ld\n", (long)statusCode];
+                        NSHTTPURLResponse *httpR = (NSHTTPURLResponse *)apiResp;
+                        [probeLog appendFormat:@"HTTP status=%ld\n", (long)httpR.statusCode];
+                        [probeLog appendFormat:@"responseBody长度=%lu\n", (unsigned long)apiData.length];
+                        if (statusCode == 0 && awemeDetail) {
+                            NSDictionary *vObj = awemeDetail[@"video"];
+                            NSArray *brList = vObj[@"bit_rate"];
+                            [probeLog appendFormat:@"bit_rate条目数=%lu\n", (unsigned long)(brList ? brList.count : 0)];
+                            for (NSDictionary *br in (brList ?: @[])) {
+                                NSString *gn = br[@"gear_name"] ?: @"?";
+                                NSInteger brVal = [br[@"bit_rate"] integerValue];
+                                NSInteger fps = [br[@"FPS"] integerValue];
+                                NSDictionary *pa = br[@"play_addr"] ?: @{};
+                                NSInteger h = [pa[@"height"] integerValue];
+                                NSInteger w = [pa[@"width"] integerValue];
+                                long long ds = [pa[@"data_size"] longLongValue];
+                                [probeLog appendFormat:@"  gear=%@ bitrate=%ld fps=%ld %ldx%ld size=%lld\n", gn, (long)brVal, (long)fps, (long)w, (long)h, ds];
+                            }
+                        } else {
+                            // 截取前200字符看错误
+                            NSString *raw = [[NSString alloc] initWithData:apiData encoding:NSUTF8StringEncoding];
+                            if (raw.length > 200) raw = [raw substringToIndex:200];
+                            [probeLog appendFormat:@"error响应: %@\n", raw];
+                        }
                     }
+                } else {
+                    [probeLog appendFormat:@"\n[Step2 WebAPI响应]\n响应为空! error=%@\n", apiErr.localizedDescription];
                 }
             } @catch (NSException *e) {}
             dispatch_semaphore_signal(apiSem);
@@ -4057,6 +4101,31 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
         }
         result[@"title"] = awemeDetail[@"desc"] ?: @"";
         result[@"author"] = author[@"nickname"] ?: @"";
+
+        // ===== 探针：最终video_list + 弹窗展示 =====
+        NSArray *finalVideoList = result[@"video_list"];
+        [probeLog appendFormat:@"\n[最终画质列表] count=%lu\n", (unsigned long)(finalVideoList ? finalVideoList.count : 0)];
+        for (NSDictionary *item in (finalVideoList ?: @[])) {
+            NSString *lvl = item[@"level"] ?: @"?";
+            NSString *u = item[@"url"] ?: @"?";
+            NSString *urlPreview = u.length > 60 ? [[u substringToIndex:60] stringByAppendingString:@"..."] : u;
+            [probeLog appendFormat:@"  %@ → %@\n", lvl, urlPreview];
+        }
+        [probeLog appendFormat:@"\nvideoURI=%@\n", videoURI ?: @"无"];
+        {
+            NSString *probeText = [probeLog copy];
+            dispatch_async(dispatch_get_main_queue(), ^{
+                UIAlertController *probeAlert = [UIAlertController alertControllerWithTitle:@"接口4探针" message:probeText preferredStyle:UIAlertControllerStyleActionSheet];
+                [probeAlert addAction:[UIAlertAction actionWithTitle:@"复制" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
+                    UIPasteboard.generalPasteboard.string = probeText;
+                }]];
+                [probeAlert addAction:[UIAlertAction actionWithTitle:@"关闭" style:UIAlertActionStyleCancel handler:nil]];
+                UIViewController *topVC = [UIApplication sharedApplication].keyWindow.rootViewController;
+                while (topVC.presentedViewController) topVC = topVC.presentedViewController;
+                [topVC presentViewController:probeAlert animated:YES completion:nil];
+            }];
+        }
+
         if (completion) completion(result.count > 0 ? result : nil);
     });
 }
