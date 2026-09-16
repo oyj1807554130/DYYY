@@ -4187,14 +4187,35 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
         }
         [DYYYManager shared].localParseTtwid = ttwidStr;
 
-        // Step 3: 用ttwid调web API
+        // Step 3: 用全Cookie调web API（4K/2K需要msToken/sid_guard等完整Cookie）
         __block NSDictionary *awemeDetail = nil;
-        NSString *apiURL = [NSString stringWithFormat:@"https://www.douyin.com/aweme/v1/web/aweme/detail/?aweme_id=%@&device_platform=webapp&aid=6383&channel=channel_pc_web", awemeId];
+        // 从app Cookie存储取全部douyin.com Cookie
+        NSString *fullCookie = nil;
+        NSHTTPCookieStorage *fullCookieStore = [NSHTTPCookieStorage sharedHTTPCookieStorage];
+        NSArray *fullCookies = [fullCookieStore cookiesForURL:[NSURL URLWithString:@"https://www.douyin.com/"]];
+        if (fullCookies.count > 0) {
+            NSMutableArray *cookieParts = [NSMutableArray array];
+            for (NSHTTPCookie *fc in fullCookies) {
+                [cookieParts addObject:[NSString stringWithFormat:@"%@=%@", [fc name], [fc value]]];
+            }
+            fullCookie = [cookieParts componentsJoinedByString:@"; "];
+        }
+        if (!fullCookie || fullCookie.length == 0) {
+            fullCookie = [NSString stringWithFormat:@"ttwid=%@", ttwidStr];
+        }
+        NSString *apiURL = [NSString stringWithFormat:@"https://www.douyin.com/aweme/v1/web/aweme/detail/?aweme_id=%@&device_platform=webapp&aid=6383&channel=channel_pc_web&version_code=190600&screen_width=1920&screen_height=1080&browser_language=zh-CN&browser_name=Chrome&browser_version=126.0.0.0&cookie_enabled=true&platform=PC&downlink=10", awemeId];
         NSMutableURLRequest *apiReq = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:apiURL]];
         [apiReq setValue:@"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36" forHTTPHeaderField:@"User-Agent"];
         [apiReq setValue:@"https://www.douyin.com/" forHTTPHeaderField:@"Referer"];
-        [apiReq setValue:@"application/json" forHTTPHeaderField:@"Accept"];
-        [apiReq setValue:[NSString stringWithFormat:@"ttwid=%@", ttwidStr] forHTTPHeaderField:@"Cookie"];
+        [apiReq setValue:@"application/json, text/plain, */*" forHTTPHeaderField:@"Accept"];
+        [apiReq setValue:@"zh-CN,zh;q=0.9,en;q=0.8" forHTTPHeaderField:@"Accept-Language"];
+        [apiReq setValue:@"no-cors" forHTTPHeaderField:@"sec-fetch-mode"];
+        [apiReq setValue:@"same-origin" forHTTPHeaderField:@"sec-fetch-site"];
+        [apiReq setValue:@"empty" forHTTPHeaderField:@"sec-fetch-dest"];
+        [apiReq setValue:@"\"Chromium\";v=\"126\", \"Google Chrome\";v=\"126\", \"Not-A.Brand\";v=\"99\"" forHTTPHeaderField:@"sec-ch-ua"];
+        [apiReq setValue:@"?0" forHTTPHeaderField:@"sec-ch-ua-mobile"];
+        [apiReq setValue:@"\"Windows\"" forHTTPHeaderField:@"sec-ch-ua-platform"];
+        [apiReq setValue:fullCookie forHTTPHeaderField:@"Cookie"];
         dispatch_semaphore_t apiSem = dispatch_semaphore_create(0);
         NSURLSessionDataTask *apiTask = [[NSURLSession sharedSession] dataTaskWithRequest:apiReq completionHandler:^(NSData *apiData, NSURLResponse *apiResp, NSError *apiErr) {
             @try {
