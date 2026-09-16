@@ -1297,25 +1297,29 @@ static BOOL DYYYShouldHandleSpeedFeatures(void) {
         }
 
         // 立即清一次可见cell背景
-        [self dyyy_clearCommentCellBackgrounds];
-        // 延迟再清一次，覆盖app布局重置
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.2 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            [self dyyy_clearCommentCellBackgrounds];
-        });
-    }
-}
-
-%new
-- (void)dyyy_clearCommentCellBackgrounds {
-    for (UIView *subview in self.view.subviews) {
-        if ([subview isKindOfClass:[UICollectionView class]]) {
-            UICollectionView *cv = (UICollectionView *)subview;
-            cv.backgroundColor = [UIColor clearColor];
-            for (UICollectionViewCell *cell in cv.visibleCells) {
-                cell.backgroundColor = [UIColor clearColor];
-                cell.contentView.backgroundColor = [UIColor clearColor];
+        for (UIView *subview in self.view.subviews) {
+            if ([subview isKindOfClass:[UICollectionView class]]) {
+                UICollectionView *cv = (UICollectionView *)subview;
+                cv.backgroundColor = [UIColor clearColor];
+                for (UICollectionViewCell *cell in cv.visibleCells) {
+                    cell.backgroundColor = [UIColor clearColor];
+                    cell.contentView.backgroundColor = [UIColor clearColor];
+                }
             }
         }
+        // 延迟再清一次，覆盖app布局重置
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.2 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            for (UIView *subview in self.view.subviews) {
+                if ([subview isKindOfClass:[UICollectionView class]]) {
+                    UICollectionView *cv = (UICollectionView *)subview;
+                    cv.backgroundColor = [UIColor clearColor];
+                    for (UICollectionViewCell *cell in cv.visibleCells) {
+                        cell.backgroundColor = [UIColor clearColor];
+                        cell.contentView.backgroundColor = [UIColor clearColor];
+                    }
+                }
+            }
+        });
     }
 }
 %end
