@@ -3802,6 +3802,30 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
             }];
             [ttwidTask resume];
             dispatch_semaphore_wait(ttwidSem, dispatch_time(DISPATCH_TIME_NOW, 10 * NSEC_PER_SEC));
+            // 断网重连后网络可能未就绪，首次失败等2秒重试一次
+            if (!ttwidStr || ttwidStr.length == 0) {
+                [ttwidTask cancel];
+                [NSThread sleepForTimeInterval:2.0];
+                ttwidSem = dispatch_semaphore_create(0);
+                ttwidHttpStatus = 0; ttwidFromHeader = nil; ttwidFromBody = nil;
+                NSMutableURLRequest *rtReq = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:ttwidURL]];
+                rtReq.HTTPMethod = @"POST";
+                rtReq.HTTPBody = [ttwidBody dataUsingEncoding:NSUTF8StringEncoding];
+                [rtReq setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
+                [rtReq setValue:@"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36" forHTTPHeaderField:@"User-Agent"];
+                NSURLSessionDataTask *rtTask = [[NSURLSession sharedSession] dataTaskWithRequest:rtReq completionHandler:^(NSData *rd, NSURLResponse *rr, NSError *re) {
+                    @try {
+                        NSHTTPURLResponse *hr = (NSHTTPURLResponse *)rr;
+                        ttwidHttpStatus = [hr statusCode];
+                        NSString *sc = [hr allHeaderFields][@"Set-Cookie"];
+                        if (sc.length > 0) { NSRange r2 = [sc rangeOfString:@"ttwid="]; if (r2.location != NSNotFound) { NSString *s2 = [sc substringFromIndex:r2.location + 6]; NSRange sm = [s2 rangeOfString:@";"]; ttwidFromHeader = sm.location != NSNotFound ? [s2 substringToIndex:sm.location] : s2; ttwidStr = ttwidFromHeader; } }
+                        if (!ttwidStr || ttwidStr.length == 0) { if (rd.length > 0) { NSDictionary *rj = [NSJSONSerialization JSONObjectWithData:rd options:0 error:nil]; if ([rj isKindOfClass:[NSDictionary class]]) { ttwidFromBody = rj[@"ttwid"]; if (ttwidFromBody.length > 0) ttwidStr = ttwidFromBody; } } }
+                    } @catch (NSException *ex) {}
+                    dispatch_semaphore_signal(ttwidSem);
+                }];
+                [rtTask resume];
+                dispatch_semaphore_wait(ttwidSem, dispatch_time(DISPATCH_TIME_NOW, 10 * NSEC_PER_SEC));
+            }
             [probeLog appendFormat:@"\n[Step1.5 ttwid注册]\nPOST ttwid.bytedance.com → HTTP %ld\nSet-Cookie ttwid=%@ (len=%lu)\nJSON body ttwid=%@\n最终ttwid=%@\n", (long)ttwidHttpStatus, ttwidFromHeader ? [[ttwidFromHeader substringToIndex:MIN(20, ttwidFromHeader.length)] stringByAppendingString:@"..."] : @"无", (unsigned long)(ttwidFromHeader ? ttwidFromHeader.length : 0), ttwidFromBody ? @"有" : @"无", ttwidStr.length > 0 ? @"有" : @"无"];
             if (ttwidStr && ttwidStr.length > 0) {
                 if (fullCookieStr.length > 0) [fullCookieStr appendString:@"; "];
@@ -3809,6 +3833,8 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
             }
         }
         if (fullCookieStr.length == 0) {
+            [probeLog appendFormat:@"\n[失败] Cookie为空，无法构建请求\n"];
+            [[NSNotificationCenter defaultCenter] postNotificationName:@"DYYYProbeNotification" object:nil userInfo:@{@"text": [probeLog copy]}];
             dispatch_async(dispatch_get_main_queue(), ^{ [DYYYUtils showToast:@"接口4解析失败: 无法获取Cookie"]; });
             if (completion) completion(nil);
             return;
@@ -3911,6 +3937,8 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
             }
 
             if (!awemeDetail || ![awemeDetail isKindOfClass:[NSDictionary class]]) {
+                [probeLog appendFormat:@"\n[失败] 重试后仍无aweme_detail，API响应无效\n"];
+                [[NSNotificationCenter defaultCenter] postNotificationName:@"DYYYProbeNotification" object:nil userInfo:@{@"text": [probeLog copy]}];
                 if (completion) completion(nil);
                 return;
             }
