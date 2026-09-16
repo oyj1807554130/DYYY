@@ -3925,13 +3925,15 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
         NSMutableDictionary *byQuality = [NSMutableDictionary dictionary];
         for (NSDictionary *b in bitRateList) {
             NSDictionary *playAddr = b[@"play_addr"] ?: @{};
+            NSInteger width = [playAddr[@"width"] integerValue];
             NSInteger height = [playAddr[@"height"] integerValue];
+            NSInteger longerSide = (width > height) ? width : height;
             NSString *qCode = nil;
-            if (height >= 2160) qCode = @"2160p";
-            else if (height >= 1440) qCode = @"1440p";
-            else if (height >= 1080) qCode = @"1080p";
-            else if (height >= 720) qCode = @"720p";
-            else if (height >= 540) qCode = @"540p";
+            if (longerSide >= 3840) qCode = @"2160p";
+            else if (longerSide >= 2560) qCode = @"1440p";
+            else if (longerSide >= 1920) qCode = @"1080p";
+            else if (longerSide >= 1280) qCode = @"720p";
+            else if (longerSide >= 1024) qCode = @"540p";
             if (!qCode) continue;
             NSArray *urlList = playAddr[@"url_list"];
             NSString *url = (urlList && urlList.count > 0) ? urlList[0] : nil;
@@ -4336,13 +4338,15 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
         NSMutableDictionary *byQuality = [NSMutableDictionary dictionary];
         for (NSDictionary *b in bitRateList) {
             NSDictionary *playAddr = b[@"play_addr"] ?: @{};
+            NSInteger width = [playAddr[@"width"] integerValue];
             NSInteger height = [playAddr[@"height"] integerValue];
+            NSInteger longerSide = (width > height) ? width : height;
             NSString *qCode = nil;
-            if (height >= 2160) qCode = @"2160p";
-            else if (height >= 1440) qCode = @"1440p";
-            else if (height >= 1080) qCode = @"1080p";
-            else if (height >= 720) qCode = @"720p";
-            else if (height >= 540) qCode = @"540p";
+            if (longerSide >= 3840) qCode = @"2160p";
+            else if (longerSide >= 2560) qCode = @"1440p";
+            else if (longerSide >= 1920) qCode = @"1080p";
+            else if (longerSide >= 1280) qCode = @"720p";
+            else if (longerSide >= 1024) qCode = @"540p";
             if (!qCode) continue;
             NSArray *urlList = playAddr[@"url_list"];
             NSString *url = (urlList && urlList.count > 0) ? urlList[0] : nil;
