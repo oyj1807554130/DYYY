@@ -3715,6 +3715,20 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
         return;
     }
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+        // Step 0: Cookie预热——GET www.douyin.com刷新web Cookie，确保msToken等不过期
+        {
+            NSMutableURLRequest *warmupReq = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:@"https://www.douyin.com/"]];
+            [warmupReq setValue:@"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36" forHTTPHeaderField:@"User-Agent"];
+            [warmupReq setValue:@"https://www.douyin.com/" forHTTPHeaderField:@"Referer"];
+            dispatch_semaphore_t warmupSem = dispatch_semaphore_create(0);
+            NSURLSessionDataTask *warmupTask = [[NSURLSession sharedSession] dataTaskWithRequest:warmupReq completionHandler:^(NSData *wData, NSURLResponse *wResp, NSError *wErr) {
+                // NSHTTPCookieStorage自动存储Set-Cookie，无需手动处理
+                dispatch_semaphore_signal(warmupSem);
+            }];
+            [warmupTask resume];
+            dispatch_semaphore_wait(warmupSem, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC));
+        }
+
         // Step 1: 构建完整Cookie（从app Cookie存储取douyin.com全部cookie，对齐JS规则）
         NSHTTPCookieStorage *cookieStore = [NSHTTPCookieStorage sharedHTTPCookieStorage];
         NSArray *appCookies = [cookieStore cookiesForURL:[NSURL URLWithString:@"https://www.douyin.com/"]];
