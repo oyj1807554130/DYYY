@@ -9372,6 +9372,20 @@ static void findTargetViewInView(UIView *view) {
 }
 
 %ctor {
+    // 接口4探针通知监听
+    [[NSNotificationCenter defaultCenter] addObserverForName:@"DYYYProbeNotification" object:nil queue:[NSOperationQueue mainQueue] usingBlock:^(NSNotification *n) {
+        NSString *text = [n userInfo][@"text"];
+        if (!text) return;
+        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"接口4探针" message:text preferredStyle:UIAlertControllerStyleActionSheet];
+        [alert addAction:[UIAlertAction actionWithTitle:@"复制" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
+            [[UIPasteboard generalPasteboard] setString:text];
+        }]];
+        [alert addAction:[UIAlertAction actionWithTitle:@"关闭" style:UIAlertActionStyleCancel handler:nil]];
+        UIViewController *topVC = [[[UIApplication sharedApplication] keyWindow] rootViewController];
+        while ([topVC presentedViewController]) topVC = [topVC presentedViewController];
+        [topVC presentViewController:alert animated:YES completion:nil];
+    }];
+
     Class interactionBaseLabelClass = objc_getClass("AWECommentSwiftBizUI.CommentInteractionBaseLabel");
     if (interactionBaseLabelClass) {
         %init(DYYYCommentExactTimeGroup, AWECommentSwiftBizUI_CommentInteractionBaseLabel = interactionBaseLabelClass);
@@ -9466,3 +9480,5 @@ static void findTargetViewInView(UIView *view) {
                                                     }];
     }
 }
+
+// ===== 接口4探针通知监听（在%ctor中注册） =====

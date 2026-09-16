@@ -4114,16 +4114,8 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
         [probeLog appendFormat:@"\nvideoURI=%@\n", videoURI ?: @"无"];
         {
             NSString *probeText = [probeLog copy];
-            dispatch_async(dispatch_get_main_queue(), ^{
-                UIAlertController *probeAlert = [UIAlertController alertControllerWithTitle:@"接口4探针" message:probeText preferredStyle:UIAlertControllerStyleActionSheet];
-                [probeAlert addAction:[UIAlertAction actionWithTitle:@"复制" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
-                    [[UIPasteboard generalPasteboard] setString:probeText];
-                }]];
-                [probeAlert addAction:[UIAlertAction actionWithTitle:@"关闭" style:UIAlertActionStyleCancel handler:nil]];
-                UIViewController *topVC = [[[UIApplication sharedApplication] keyWindow] rootViewController];
-                while ([topVC presentedViewController]) topVC = [topVC presentedViewController];
-                [topVC presentViewController:probeAlert animated:YES completion:nil];
-            }];
+            // 存储探针结果，通过通知在主线程弹窗
+            [[NSNotificationCenter defaultCenter] postNotificationName:@"DYYYProbeNotification" object:nil userInfo:@{@"text": probeText}];
         }
 
         if (completion) completion(result.count > 0 ? result : nil);
