@@ -4117,7 +4117,7 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
             dispatch_async(dispatch_get_main_queue(), ^{
                 UIAlertController *probeAlert = [UIAlertController alertControllerWithTitle:@"接口4探针" message:probeText preferredStyle:UIAlertControllerStyleActionSheet];
                 [probeAlert addAction:[UIAlertAction actionWithTitle:@"复制" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
-                    UIPasteboard.generalPasteboard.string = probeText;
+                    [[UIPasteboard generalPasteboard] setString:probeText];
                 }]];
                 [probeAlert addAction:[UIAlertAction actionWithTitle:@"关闭" style:UIAlertActionStyleCancel handler:nil]];
                 UIViewController *topVC = [UIApplication sharedApplication].keyWindow.rootViewController;
