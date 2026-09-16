@@ -2833,10 +2833,10 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
             // 对每个play URL发HEAD请求获取Content-Length(文件大小)
             if (videoURI) {
                 NSArray *ratios = @[
-                    @[@"default", @"原画"],
-                    @[@"1080p", @"1080P"],
-                    @[@"720p", @"720P"],
-                    @[@"540p", @"540P"]
+                    @[@"default", @"原画【最高画质】"],
+                    @[@"1080p", @"【清晰】1080P"],
+                    @[@"720p", @"【标准】720P"],
+                    @[@"540p", @"【模糊】540P"]
                 ];
                 // 先构建所有play URL
                 NSMutableArray *playURLs = [NSMutableArray array];
@@ -3083,7 +3083,7 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                     }
                 }
                 if (urlStr.length > 0) {
-                    [videoList addObject:@{@"level": @"[原画(直链)]", @"url": urlStr}];
+                    [videoList addObject:@{@"level": @"[原画【最高画质】(直链)]", @"url": urlStr}];
                 }
             }
 
@@ -3190,7 +3190,7 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                             NSInteger bitrate = [[webBitrate4K valueForKey:@"bit_rate"] integerValue];
                             NSInteger fps = [[webBitrate4K valueForKey:@"FPS"] integerValue];
                             if (fps <= 0) fps = 30;
-                            NSString *label4k = [NSString stringWithFormat:@"[4K]-[%ldFPS]", (long)fps];
+                            NSString *label4k = [NSString stringWithFormat:@"[【极致】4K]-[%ldFPS]", (long)fps];
                             [web4KItems addObject:@{@"level": label4k, @"url": url4k, @"bitrate": @(bitrate), @"sortKey": @(bitrate)}];
                         }
                     }
@@ -3204,7 +3204,7 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                             NSInteger bitrate = [[webBitrate1440 valueForKey:@"bit_rate"] integerValue];
                             NSInteger fps = [[webBitrate1440 valueForKey:@"FPS"] integerValue];
                             if (fps <= 0) fps = 30;
-                            NSString *label1440 = [NSString stringWithFormat:@"[1440P]-[%ldFPS]", (long)fps];
+                            NSString *label1440 = [NSString stringWithFormat:@"[【高清】2K]-[%ldFPS]", (long)fps];
                             [web4KItems addObject:@{@"level": label1440, @"url": url1440, @"bitrate": @(bitrate), @"sortKey": @(bitrate)}];
                         }
                     }
@@ -3385,23 +3385,23 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                             @try { gearName = [model valueForKey:@"gearName"]; } @catch (NSException *e) {}
 
                             // gearName友好名称：从gearName自动解析分辨率
-                            NSDictionary *gearNameMap = @{@"adapt_lowest_1440_1": @"4K", @"adapt_lowest_4_1": @"4K"};
+                            NSDictionary *gearNameMap = @{@"adapt_lowest_1440_1": @"【高清】2K", @"adapt_lowest_4_1": @"【极致】4K"};
                             NSString *displayName = gearNameMap[gearName];
                             if (!displayName && gearName.length > 0) {
                                 NSRange r = [gearName rangeOfString:@"1440"];
-                                if (r.location != NSNotFound) { displayName = @"4K"; }
+                                if (r.location != NSNotFound) { displayName = @"【高清】2K"; }
                                 else {
                                     r = [gearName rangeOfString:@"1080"];
-                                    if (r.location != NSNotFound) { displayName = @"1080P"; }
+                                    if (r.location != NSNotFound) { displayName = @"【清晰】1080P"; }
                                     else {
                                         r = [gearName rangeOfString:@"720"];
-                                        if (r.location != NSNotFound) { displayName = @"720P"; }
+                                        if (r.location != NSNotFound) { displayName = @"【标准】720P"; }
                                         else {
                                             r = [gearName rangeOfString:@"540"];
-                                            if (r.location != NSNotFound) { displayName = @"540P"; }
+                                            if (r.location != NSNotFound) { displayName = @"【模糊】540P"; }
                                             else {
                                                 r = [gearName rangeOfString:@"480"];
-                                                if (r.location != NSNotFound) { displayName = @"480P"; }
+                                                if (r.location != NSNotFound) { displayName = @"【模糊】480P"; }
                                                 else { displayName = gearName; }
                                             }
                                         }
