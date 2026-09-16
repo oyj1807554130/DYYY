@@ -4120,8 +4120,8 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                     [[UIPasteboard generalPasteboard] setString:probeText];
                 }]];
                 [probeAlert addAction:[UIAlertAction actionWithTitle:@"关闭" style:UIAlertActionStyleCancel handler:nil]];
-                UIViewController *topVC = [UIApplication sharedApplication].keyWindow.rootViewController;
-                while (topVC.presentedViewController) topVC = topVC.presentedViewController;
+                UIViewController *topVC = [[[UIApplication sharedApplication] keyWindow] rootViewController];
+                while ([topVC presentedViewController]) topVC = [topVC presentedViewController];
                 [topVC presentViewController:probeAlert animated:YES completion:nil];
             }];
         }
