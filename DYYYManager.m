@@ -3937,11 +3937,74 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
             }
 
             if (!awemeDetail || ![awemeDetail isKindOfClass:[NSDictionary class]]) {
-                [probeLog appendFormat:@"\n[降级] WebAPI失败，降级本地解析\n"];
-                [[NSNotificationCenter defaultCenter] postNotificationName:@"DYYYProbeNotification" object:nil userInfo:@{@"text": [probeLog copy]}];
-                dispatch_async(dispatch_get_main_queue(), ^{ [DYYYUtils showToast:@"接口4: WebAPI失败，降级本地解析"]; });
-                [DYYYManager localParseFromAwemeModel:awemeModel completion:completion];
-                return;
+                // 降级: 从视频页面HTML提取RENDER_DATA（不需要a_bogus）
+                [probeLog appendFormat:@"\n[Step2.5 页面降级] GET /video/%@\n", awemeId];
+                NSString *pageURL = [NSString stringWithFormat:@"https://www.douyin.com/video/%@", awemeId];
+                NSMutableURLRequest *pageReq = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:pageURL]];
+                [pageReq setValue:@"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36" forHTTPHeaderField:@"User-Agent"];
+                [pageReq setValue:@"https://www.douyin.com/" forHTTPHeaderField:@"Referer"];
+                [pageReq setValue:fullCookieStr forHTTPHeaderField:@"Cookie"];
+                [pageReq setValue:@"text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8" forHTTPHeaderField:@"Accept"];
+                [pageReq setValue:@"zh-CN,zh;q=0.9" forHTTPHeaderField:@"Accept-Language"];
+                __block NSData *pageData = nil;
+                __block NSInteger pageStatus = 0;
+                dispatch_semaphore_t pageSem = dispatch_semaphore_create(0);
+                NSURLSessionDataTask *pageTask = [[NSURLSession sharedSession] dataTaskWithRequest:pageReq completionHandler:^(NSData *pData, NSURLResponse *pResp, NSError *pErr) {
+                    pageData = pData;
+                    if (pResp && [pResp isKindOfClass:[NSHTTPURLResponse class]]) pageStatus = [(NSHTTPURLResponse *)pResp statusCode];
+                    dispatch_semaphore_signal(pageSem);
+                }];
+                [pageTask resume];
+                dispatch_semaphore_wait(pageSem, dispatch_time(DISPATCH_TIME_NOW, 15 * NSEC_PER_SEC));
+                [probeLog appendFormat:@"HTTP %ld body=%lu\n", (long)pageStatus, (unsigned long)(pageData ? pageData.length : 0)];
+                if (pageData && pageStatus == 200) {
+                    NSString *html = [[NSString alloc] initWithData:pageData encoding:NSUTF8StringEncoding];
+                    // 提取RENDER_DATA: <script id="RENDER_DATA" type="application/json">URL_ENCODED_JSON</script>
+                    NSString *renderData = nil;
+                    NSRange startTag = [html rangeOfString:@"<script id=\"RENDER_DATA\""];
+                    if (startTag.location != NSNotFound) {
+                        NSRange closeBracket = [html rangeOfString:@">" options:0 range:NSMakeRange(startTag.location, html.length - startTag.location)];
+                        if (closeBracket.location != NSNotFound) {
+                            NSRange endTag = [html rangeOfString:@"</script>" options:0 range:NSMakeRange(closeBracket.location, html.length - closeBracket.location)];
+                            if (endTag.location != NSNotFound) {
+                                NSUInteger cs = closeBracket.location + 1;
+                                NSUInteger cl = endTag.location - cs;
+                                if (cl > 0 && cs + cl <= html.length) {
+                                    NSString *encoded = [html substringWithRange:NSMakeRange(cs, cl)];
+                                    renderData = [encoded stringByRemovingPercentEncoding];
+                                }
+                            }
+                        }
+                    }
+                    if (renderData && renderData.length > 0) {
+                        [probeLog appendFormat:@"RENDER_DATA len=%lu\n", (unsigned long)renderData.length];
+                        NSDictionary *rj = [NSJSONSerialization JSONObjectWithData:[renderData dataUsingEncoding:NSUTF8StringEncoding] options:0 error:nil];
+                        if ([rj isKindOfClass:[NSDictionary class]]) {
+                            id detail = nil;
+                            @try { detail = rj[@"app"][@"videoDetail"][@"aweme_detail"]; } @catch (NSException *e) {}
+                            if (!detail || ![detail isKindOfClass:[NSDictionary class]]) { @try { detail = rj[@"42"][@"aweme_detail"]; } @catch (NSException *e) {} }
+                            if (!detail || ![detail isKindOfClass:[NSDictionary class]]) { @try { detail = rj[@"app"][@"videoDetail"]; } @catch (NSException *e) {} }
+                            if (detail && [detail isKindOfClass:[NSDictionary class]]) {
+                                awemeDetail = detail;
+                                [probeLog appendFormat:@"RENDER_DATA提取成功!\n"];
+                            } else {
+                                // 打印顶层key辅助调试
+                                [probeLog appendFormat:@"RENDER_DATA未找到aweme_detail, topKeys=%@\n", [rj allKeys]];
+                            }
+                        }
+                    } else {
+                        [probeLog appendFormat:@"HTML中未找到RENDER_DATA\n"];
+                    }
+                }
+                // 页面降级也失败 → 本地解析
+                if (!awemeDetail || ![awemeDetail isKindOfClass:[NSDictionary class]]) {
+                    [probeLog appendFormat:@"\n[降级] 页面降级也失败，降级本地解析\n"];
+                    [[NSNotificationCenter defaultCenter] postNotificationName:@"DYYYProbeNotification" object:nil userInfo:@{@"text": [probeLog copy]}];
+                    dispatch_async(dispatch_get_main_queue(), ^{ [DYYYUtils showToast:@"接口4: 降级本地解析"]; });
+                    [DYYYManager localParseFromAwemeModel:awemeModel completion:completion];
+                    return;
+                }
+                [probeLog appendFormat:@"[Step2.5成功] 页面降级获取4K数据成功\n"];
             }
         }
 
