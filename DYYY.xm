@@ -1271,8 +1271,10 @@ static BOOL DYYYShouldHandleSpeedFeatures(void) {
             userTransparency = 0.9;
         }
 
-        // 找到self.view上方第一个不透明背景的superview（探针显示sup.sup bgA=1.00）
-        // 把blur加到那个superview上，这样blur模糊的是背后的视频，评论区面板完全不动
+        // 标记self.view为blur容器，UICollectionViewCell hook据此判断
+        self.view.tag = 998;
+
+        // 找到self.view上方第一个不透明背景的superview
         UIView *targetView = nil;
         UIView *sv = self.view.superview;
         int lv = 0;
@@ -1293,6 +1295,43 @@ static BOOL DYYYShouldHandleSpeedFeatures(void) {
             // 没找到opaque superview（另一台设备的情况），回退到原有逻辑
             [DYYYUtils applyBlurEffectToView:self.view transparency:userTransparency blurViewTag:999];
         }
+
+        // 立即清一次可见cell背景
+        [self dyyy_clearCommentCellBackgrounds];
+        // 延迟再清一次，覆盖app布局重置
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.2 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            [self dyyy_clearCommentCellBackgrounds];
+        });
+    }
+}
+
+%new
+- (void)dyyy_clearCommentCellBackgrounds {
+    for (UIView *subview in self.view.subviews) {
+        if ([subview isKindOfClass:[UICollectionView class]]) {
+            UICollectionView *cv = (UICollectionView *)subview;
+            cv.backgroundColor = [UIColor clearColor];
+            for (UICollectionViewCell *cell in cv.visibleCells) {
+                cell.backgroundColor = [UIColor clearColor];
+                cell.contentView.backgroundColor = [UIColor clearColor];
+            }
+        }
+    }
+}
+%end
+
+// 评论区cell自动清背景：滚动回收的cell也能透明
+%hook UICollectionViewCell
+- (void)layoutSubviews {
+    %orig;
+    UIView *v = self.superview;
+    while (v) {
+        if (v.tag == 998) {
+            self.backgroundColor = [UIColor clearColor];
+            self.contentView.backgroundColor = [UIColor clearColor];
+            return;
+        }
+        v = v.superview;
     }
 }
 %end
