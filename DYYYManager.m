@@ -3807,23 +3807,8 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
         __block NSMutableString *probeLog = [NSMutableString stringWithString:@"[接口4探针]\n"];
         [probeLog appendFormat:@"awemeId=%@\n", awemeId];
 
-        // Step 0: Cookie预热——GET www.douyin.com刷新web Cookie，确保msToken等不过期
-        {
-            NSMutableURLRequest *warmupReq = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:@"https://www.douyin.com/"]];
-            [warmupReq setValue:@"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36" forHTTPHeaderField:@"User-Agent"];
-            [warmupReq setValue:@"https://www.douyin.com/" forHTTPHeaderField:@"Referer"];
-            dispatch_semaphore_t warmupSem = dispatch_semaphore_create(0);
-            __block NSInteger warmupStatus = 0;
-            __block NSInteger warmupCookieCountBefore = [[NSHTTPCookieStorage sharedHTTPCookieStorage] cookiesForURL:[NSURL URLWithString:@"https://www.douyin.com/"]].count;
-            NSURLSessionDataTask *warmupTask = [[NSURLSession sharedSession] dataTaskWithRequest:warmupReq completionHandler:^(NSData *wData, NSURLResponse *wResp, NSError *wErr) {
-                if (wResp && [wResp isKindOfClass:[NSHTTPURLResponse class]]) warmupStatus = [(NSHTTPURLResponse *)wResp statusCode];
-                dispatch_semaphore_signal(warmupSem);
-            }];
-            [warmupTask resume];
-            dispatch_semaphore_wait(warmupSem, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC));
-            NSInteger warmupCookieCountAfter = [[NSHTTPCookieStorage sharedHTTPCookieStorage] cookiesForURL:[NSURL URLWithString:@"https://www.douyin.com/"]].count;
-            [probeLog appendFormat:@"\n[Step0 预热]\nGET www.douyin.com → HTTP %ld\nCookie: %ld→%ld\n", (long)warmupStatus, (long)warmupCookieCountBefore, (long)warmupCookieCountAfter];
-        }
+        // Step 0: 已移除Cookie预热（预热会污染Cookie导致后续API请求被拒绝）
+        // 关网启动→开网成功的现象证明：预热返回的Set-Cookie覆盖了有效Cookie，使后续请求失败
 
         // Step 1: 构建完整Cookie（从app Cookie存储取douyin.com全部cookie，对齐JS规则）
         NSHTTPCookieStorage *cookieStore = [NSHTTPCookieStorage sharedHTTPCookieStorage];
@@ -4029,7 +4014,7 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                 dispatch_async(dispatch_get_main_queue(), ^{
                     @autoreleasepool {
                         WKWebViewConfiguration *config = [[WKWebViewConfiguration alloc] init];
-                        config.websiteDataStore = [WKWebsiteDataStore defaultDataStore];
+                        config.websiteDataStore = [WKWebsiteDataStore nonPersistentDataStore];
                         WKUserScript *hookScript = [[WKUserScript alloc] initWithSource:@"(function(){window.__DY_ALL_URLS__='';var _f=window.fetch;window.fetch=function(){var u=arguments[0];if(typeof u==='string'){window.__DY_ALL_URLS__+=u.substring(0,80)+'|';if(u.indexOf('aweme')!==-1||u.indexOf('detail')!==-1||u.indexOf('video')!==-1){return _f.apply(this,arguments).then(function(r){var c=r.clone();c.text().then(function(t){window.__DY_API_DATA__=t});return r})}}return _f.apply(this,arguments)};var _o=XMLHttpRequest.prototype.open;var _s=XMLHttpRequest.prototype.send;XMLHttpRequest.prototype.open=function(m,u){this.__u=u;if(typeof u==='string')window.__DY_ALL_URLS__+=u.substring(0,80)+'|';return _o.apply(this,arguments)};XMLHttpRequest.prototype.send=function(){var x=this;if(this.__u&&(this.__u.indexOf('aweme')!==-1||this.__u.indexOf('detail')!==-1||this.__u.indexOf('video')!==-1)){this.addEventListener('load',function(){try{window.__DY_API_DATA__=x.responseText}catch(e){}})}return _s.apply(this,arguments)}})();"
                             injectionTime:WKUserScriptInjectionTimeAtDocumentStart
                             forMainFrameOnly:YES];
