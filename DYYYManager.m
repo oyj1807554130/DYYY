@@ -71,6 +71,7 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
 @property (nonatomic, weak) UIView *container;
 @property (nonatomic, strong) NSTimer *pollTimer;
 @property (nonatomic, assign) int pollCount;
+@property (nonatomic, assign) BOOL isApiData;
 @end
 @implementation DYYYWVHandler
 - (void)dealloc { [_pollTimer invalidate]; }
@@ -88,9 +89,12 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
     }
     WKWebView *wv = self.wvRef;
     if (!wv) { [self.pollTimer invalidate]; self.pollTimer = nil; dispatch_semaphore_signal(self.doneSem); return; }
-    [wv evaluateJavaScript:@"(function(){var e=document.getElementById('RENDER_DATA');return e?e.textContent:''})()" completionHandler:^(id result, NSError *error) {
-        if ([result isKindOfClass:[NSString class]] && [(NSString *)result length] > 10) {
-            self.renderData = [result copy];
+    [wv evaluateJavaScript:@"(function(){var a=window.__DY_API_DATA__;if(a&&a.length>10)return 'API:'+a;var e=document.getElementById('RENDER_DATA');if(e&&e.textContent&&e.textContent.length>10)return 'RD:'+e.textContent;return ''})()" completionHandler:^(id result, NSError *error) {
+        if ([result isKindOfClass:[NSString class]] && [(NSString *)result length] > 14) {
+            NSString *r = (NSString *)result;
+            if ([r hasPrefix:@"API:"]) { self.renderData = [r substringFromIndex:4]; self.isApiData = YES; }
+            else if ([r hasPrefix:@"RD:"]) { self.renderData = [r substringFromIndex:3]; self.isApiData = NO; }
+            else { self.renderData = r; self.isApiData = NO; }
             [self.pollTimer invalidate]; self.pollTimer = nil;
             dispatch_async(dispatch_get_main_queue(), ^{ [self.container removeFromSuperview]; });
             dispatch_semaphore_signal(self.doneSem);
@@ -108,8 +112,13 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
 }
 - (void)doneBtnTapped {
     WKWebView *wv = self.wvRef;
-    [wv evaluateJavaScript:@"(function(){var e=document.getElementById('RENDER_DATA');return e?e.textContent:''})()" completionHandler:^(id result, NSError *error) {
-        if ([result isKindOfClass:[NSString class]] && [(NSString *)result length] > 10) { self.renderData = [result copy]; }
+    [wv evaluateJavaScript:@"(function(){var a=window.__DY_API_DATA__;if(a&&a.length>10)return 'API:'+a;var e=document.getElementById('RENDER_DATA');if(e&&e.textContent&&e.textContent.length>10)return 'RD:'+e.textContent;return ''})()" completionHandler:^(id result, NSError *error) {
+        if ([result isKindOfClass:[NSString class]] && [(NSString *)result length] > 14) {
+            NSString *r = (NSString *)result;
+            if ([r hasPrefix:@"API:"]) { self.renderData = [r substringFromIndex:4]; self.isApiData = YES; }
+            else if ([r hasPrefix:@"RD:"]) { self.renderData = [r substringFromIndex:3]; self.isApiData = NO; }
+            else { self.renderData = r; self.isApiData = NO; }
+        }
         [self.pollTimer invalidate]; self.pollTimer = nil;
         dispatch_async(dispatch_get_main_queue(), ^{ [self.container removeFromSuperview]; });
         dispatch_semaphore_signal(self.doneSem);
@@ -4021,6 +4030,10 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                     @autoreleasepool {
                         WKWebViewConfiguration *config = [[WKWebViewConfiguration alloc] init];
                         config.websiteDataStore = [WKWebsiteDataStore defaultDataStore];
+                        WKUserScript *hookScript = [[WKUserScript alloc] initWithSource:@"(function(){var _f=window.fetch;window.fetch=function(){var u=arguments[0];if(typeof u==='string'&&u.indexOf('/aweme/v1/web/aweme/detail')!==-1){return _f.apply(this,arguments).then(function(r){var c=r.clone();c.text().then(function(t){window.__DY_API_DATA__=t});return r})}return _f.apply(this,arguments)};var _o=XMLHttpRequest.prototype.open;var _s=XMLHttpRequest.prototype.send;XMLHttpRequest.prototype.open=function(m,u){this.__u=u;return _o.apply(this,arguments)};XMLHttpRequest.prototype.send=function(){var x=this;if(this.__u&&this.__u.indexOf('/aweme/v1/web/aweme/detail')!==-1){this.addEventListener('load',function(){try{window.__DY_API_DATA__=x.responseText}catch(e){}})}return _s.apply(this,arguments)}})();"
+                            injectionTime:WKUserScriptInjectionTimeAtDocumentStart
+                            forMainFrameOnly:YES];
+                        [config.userContentController addUserScript:hookScript];
                         UIWindow *keyWin = nil;
                         for (UIWindow *w in [UIApplication sharedApplication].windows) { if (w.isKeyWindow) { keyWin = w; break; } }
                         if (!keyWin) keyWin = [UIApplication sharedApplication].windows.firstObject;
@@ -4068,49 +4081,60 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                     }
                 });
                 dispatch_semaphore_wait(wvSem, dispatch_time(DISPATCH_TIME_NOW, 40 * NSEC_PER_SEC));
-                [probeLog appendFormat:@"WKWebView renderDataLen=%lu navFailed=%d\n", (unsigned long)wvH.renderData.length, wvH.navFailed];
+                [probeLog appendFormat:@"WKWebView renderDataLen=%lu navFailed=%d isApiData=%d\n", (unsigned long)wvH.renderData.length, wvH.navFailed, wvH.isApiData];
                 if (!wvH.navFailed && wvH.renderData.length > 0) {
-                    NSString *renderData = [wvH.renderData stringByRemovingPercentEncoding];
+                    NSString *renderData = wvH.isApiData ? wvH.renderData : [wvH.renderData stringByRemovingPercentEncoding];
                     if (renderData.length > 0) {
                         NSDictionary *rj = [NSJSONSerialization JSONObjectWithData:[renderData dataUsingEncoding:NSUTF8StringEncoding] options:0 error:nil];
                         if ([rj isKindOfClass:[NSDictionary class]]) {
                             id detail = nil;
-                            // 新路径: app.loaderData → video/note page → videoInfoRes → item_list[0]
-                            @try {
-                                NSDictionary *appDict = rj[@"app"];
-                                if ([appDict isKindOfClass:[NSDictionary class]]) {
-                                    NSDictionary *loaderData = appDict[@"loaderData"];
-                                    if ([loaderData isKindOfClass:[NSDictionary class]]) {
-                                        [probeLog appendFormat:@"RENDER_DATA loaderData keys=%@\n", [loaderData allKeys]];
-                                        for (NSString *lk in loaderData) {
-                                            if ([lk containsString:@"video"] || [lk containsString:@"note"]) {
-                                                NSDictionary *pageDict = loaderData[lk];
-                                                if ([pageDict isKindOfClass:[NSDictionary class]]) {
-                                                    NSDictionary *videoInfoRes = pageDict[@"videoInfoRes"];
-                                                    if ([videoInfoRes isKindOfClass:[NSDictionary class]]) {
-                                                        NSArray *itemList = videoInfoRes[@"item_list"];
-                                                        if ([itemList isKindOfClass:[NSArray class]] && [itemList count] > 0) {
-                                                            detail = itemList[0];
-                                                            [probeLog appendFormat:@"RENDER_DATA loaderData[%@]路径命中!\n", lk];
-                                                            break;
+                            // API拦截格式: 直接有aweme_detail
+                            if (wvH.isApiData) {
+                                detail = rj[@"aweme_detail"];
+                                if (detail && [detail isKindOfClass:[NSDictionary class]]) {
+                                    [probeLog appendFormat:@"API拦截提取aweme_detail成功!\n"];
+                                } else {
+                                    [probeLog appendFormat:@"API拦截无aweme_detail, topKeys=%@\n", [rj allKeys]];
+                                }
+                            }
+                            // RENDER_DATA格式: app.loaderData → videoInfoRes → item_list[0]
+                            if (!detail || ![detail isKindOfClass:[NSDictionary class]]) {
+                                @try {
+                                    NSDictionary *appDict = rj[@"app"];
+                                    if ([appDict isKindOfClass:[NSDictionary class]]) {
+                                        NSDictionary *loaderData = appDict[@"loaderData"];
+                                        if ([loaderData isKindOfClass:[NSDictionary class]]) {
+                                            [probeLog appendFormat:@"RENDER_DATA loaderData keys=%@\n", [loaderData allKeys]];
+                                            for (NSString *lk in loaderData) {
+                                                if ([lk containsString:@"video"] || [lk containsString:@"note"]) {
+                                                    NSDictionary *pageDict = loaderData[lk];
+                                                    if ([pageDict isKindOfClass:[NSDictionary class]]) {
+                                                        NSDictionary *videoInfoRes = pageDict[@"videoInfoRes"];
+                                                        if ([videoInfoRes isKindOfClass:[NSDictionary class]]) {
+                                                            NSArray *itemList = videoInfoRes[@"item_list"];
+                                                            if ([itemList isKindOfClass:[NSArray class]] && [itemList count] > 0) {
+                                                                detail = itemList[0];
+                                                                [probeLog appendFormat:@"RENDER_DATA loaderData[%@]路径命中!\n", lk];
+                                                                break;
+                                                            }
                                                         }
                                                     }
                                                 }
                                             }
+                                        } else {
+                                            [probeLog appendFormat:@"RENDER_DATA app keys=%@\n", [appDict allKeys]];
                                         }
-                                    } else {
-                                        [probeLog appendFormat:@"RENDER_DATA app keys=%@\n", [appDict allKeys]];
                                     }
-                                }
-                            } @catch (NSException *exc1) {}
+                                } @catch (NSException *exc1) {}
+                            }
                             // 旧路径兼容
                             if (!detail || ![detail isKindOfClass:[NSDictionary class]]) { @try { detail = rj[@"app"][@"videoDetail"][@"aweme_detail"]; } @catch (NSException *exc2) {} }
                             if (!detail || ![detail isKindOfClass:[NSDictionary class]]) { @try { detail = rj[@"42"][@"aweme_detail"]; } @catch (NSException *exc3) {} }
                             if (detail && [detail isKindOfClass:[NSDictionary class]]) {
                                 awemeDetail = detail;
-                                [probeLog appendFormat:@"RENDER_DATA提取成功!\n"];
+                                [probeLog appendFormat:@"Step2.5提取成功!\n"];
                             } else {
-                                [probeLog appendFormat:@"RENDER_DATA未找到aweme_detail, topKeys=%@\n", [rj allKeys]];
+                                [probeLog appendFormat:@"Step2.5未找到aweme_detail, topKeys=%@\n", [rj allKeys]];
                             }
                         }
                     }
