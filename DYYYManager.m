@@ -3993,7 +3993,7 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                     }
                 });
                 dispatch_semaphore_wait(wvSem, dispatch_time(DISPATCH_TIME_NOW, 20 * NSEC_PER_SEC));
-                [probeLog appendFormat:@"WKWebView navDone=%d failed=%d renderDataLen=%lu\n", wvH.navDone, wvH.failed, (unsigned long)wvH.renderData.length];
+                [probeLog appendFormat:@"WKWebView navDone=%d navFailed=%d renderDataLen=%lu\n", wvH.navDone, wvH.navFailed, (unsigned long)wvH.renderData.length];
                 if (!wvH.navFailed && wvH.renderData.length > 0) {
                     NSString *renderData = [wvH.renderData stringByRemovingPercentEncoding];
                     if (renderData.length > 0) {
