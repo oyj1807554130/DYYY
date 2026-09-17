@@ -3807,7 +3807,30 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
         __block NSMutableString *probeLog = [NSMutableString stringWithString:@"[接口4探针]\n"];
         [probeLog appendFormat:@"awemeId=%@\n", awemeId];
 
-        // Step 0: Cookie预热（隔离session，只补不换——不覆盖已有Cookie）
+        // Step 0: 注入浏览器登录Cookie（有效期至2026-11-16，确保API有登录态）
+        {
+            static NSString *kBrowserCookies = @"enter_pc_once=1; UIFID_TEMP=d9c83d80110ac3c8e785b8c343d751a11fe18d1882e6e45bacc56136cf7b8ae9a45d8e153c319408849ba9e2458cb5e8d84b22ad0aa9d96fffcaa313f87940db463d341a8bdce6a7120b416c6b17fdd54c82822aa2e2aa492142a018c0124ffb1c7c7091d2df72acbae048603d6522b1; s_v_web_id=verify_msufsoal_gMWFtvKl_xOxp_4xqB_9qw7_9aODp6gYPqVg; passport_csrf_token=65c405518d6a19df67007068a9f3fea9; passport_csrf_token_default=65c405518d6a19df67007068a9f3fea9; bd_ticket_guard_ts_sign_id=ts.2.f689f11604217b6; bd_ticket_guard_client_web_domain=2; __ac_nonce=06aab48db00625b1ecf92; __ac_signature=_02B4Z6wo00f013OMZ2QAAIDA.iTe7bIz0i9zrGPAALZT6b; ttwid=1%7CxqGRW_khzvEHlghJMe5nwSX2qACyEOWYf4iyOkIH_AA%7C1789610256%7Cbba4d34f51c8bd1ee69732b10d9645dfca2a4698abebd789089b56e716b1d3fa; d_ticket=b66fc36d192a45e3901b28f8f532e81e3d7b5; n_mh=bBIA0xr6iFWpOMfU0p30qy9YooXiHlFGzXX2ubOIZ3Y; uid_tt=5dd7cd8b4fbccb59247ae881e2a23b0e; uid_tt_ss=5dd7cd8b4fbccb59247ae881e2a23b0e; sid_tt=953d857355d16fc717bc9d3b333e1db0; sessionid=953d857355d16fc717bc9d3b333e1db0; sessionid_ss=953d857355d16fc717bc9d3b333e1db0; is_staff_user=false; has_biz_token=false; login_time=1789610341136; _bd_ticket_crypt_cookie=48a69a437b8d1ecab8f1ad87a4a57f24; sid_guard=953d857355d16fc717bc9d3b333e1db0%7C1789610311%7C5184000%7CMon%2C+16-Nov-2026+01%3A58%3A31+GMT; sid_ucp_v1=1.0.0-KDk2NTZmY2IxY2VhOWEzMDgzZjY5MjJkNDFkZjc3MTcxMDgyZjJhNDYKHwjX_O_PogIQx5Kt1QYY7zEgDDDa6vnQBTgHQPQHSAQaAmxxIiA5NTNkODU3MzU1ZDE2ZmM3MTdiYzlkM2IzMzNlMWRiMA; ssid_ucp_v1=1.0.0-KDk2NTZmY2IxY2VhOWEzMDgzZjY5MjJkNDFkZjc3MTcxMDgyZjJhNDYKHwjX_O_PogIQx5Kt1QYY7zEgDDDa6vnQBTgHQPQHSAQaAmxxIiA5NTNkODU3MzU1ZDE2ZmM3MTdiYzlkM2IzMzNlMWRiMA; is_dbsc=true; x_tt_token=00953d857355d16fc717bc9d3b333e1db000f234e54fefacb6cda6c14cc6b1f1c9dd3bd0cb401701b47da0be47b80766a0083bef5016e3270f4fda8eb946eead9be218ae3f29e5ea92f767855d1b4835211ff8bba9b89339a9e9342f2f555cbc5e34b--0a490a20b6a3efe9dea8bcee43fd7d0fec3e1bcf1aeddf79e30b8ed34581034d12c0523a12208c3116f2c154810726f437344487cc7cd9180a8b0f888a2b41dbfd30b9685bb518f6b4d309-3.0.4; bd_ticket_guard_client_data=eyJiZC10aWNrZXQtZ3VhcmQtdmVyc2lvbiI6MiwiYmQtdGlja2V0LWd1YXJkLWl0ZXJhdGlvbi12ZXJzaW9uIjoxLCJiZC10aWNrZXQtZ3VhcmQtcmVlLXB1YmxpYy1rZXkiOiJCRWRocFJRdUQxMUJhY0o2a2hqU2Z3MHh3MkUvSXFiUUpxdjRGbE9iUktQYXVpMUcvRi82UVlKNXo5ekhuTXg3d2RpUlNQVXl3WkhaR2V1TnN0b2pRTjQ9IiwiYmQtdGlja2V0LWd1YXJkLXdlYi12ZXJzaW9uIjoyfQ%3D%3D; odin_tt=09f29628fd37d13cc15aa43da17d312d78f7978fc5419b02ea7200bfdebb3cea48255a17a9ba4731a74396bf07628ae1; UIFID=d9c83d80110ac3c8e785b8c343d751a11fe18d1882e6e45bacc56136cf7b8ae9a45d8e153c319408849ba9e2458cb5e8d84b22ad0aa9d96fffcaa313f87940db87a9415157340deba9153a0d1b973c2b5636943e08c104b77d995940edf12be759c73f0d6f4c915186b4e5a231b24e245a4483a2e3f4d44cf86b6cdf88bc3ad3cfdb92b14cc31a3f188d78aa68333369e99f1531d4de08bd8338d166d221bcb77eb7a18aea832ede169b68460b01d8f9";
+            NSHTTPCookieStorage *injectStore = [NSHTTPCookieStorage sharedHTTPCookieStorage];
+            NSArray *cookiePairs = [kBrowserCookies componentsSeparatedByString:@"; "];
+            NSInteger injectAdded = 0;
+            NSInteger injectUpdated = 0;
+            for (NSString *pair in cookiePairs) {
+                NSRange eqRange = [pair rangeOfString:@"="];
+                if (eqRange.location != NSNotFound) {
+                    NSString *cName = [pair substringToIndex:eqRange.location];
+                    NSString *cValue = [pair substringFromIndex:eqRange.location + 1];
+                    NSDictionary *cProps = @{NSHTTPCookieName: cName, NSHTTPCookieValue: cValue, NSHTTPCookieDomain: @".douyin.com", NSHTTPCookiePath: @"/"};
+                    NSHTTPCookie *newCookie = [NSHTTPCookie cookieWithProperties:cProps];
+                    if (newCookie) {
+                        [injectStore setCookie:newCookie];
+                        injectAdded++;
+                    }
+                }
+            }
+            [probeLog appendFormat:@"\n[Step0 登录Cookie注入] injected=%ld\n", (long)injectAdded];
+        }
+
+        // Step 0.5: Cookie预热（隔离session，只补不换——补充登录Cookie未覆盖的）
         {
             NSURLSessionConfiguration *ephCfg = [NSURLSessionConfiguration ephemeralSessionConfiguration];
             NSURLSession *ephSes = [NSURLSession sessionWithConfiguration:ephCfg];
