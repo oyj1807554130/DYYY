@@ -8,6 +8,7 @@
 #import <MobileCoreServices/UTCoreTypes.h>
 #import <Photos/Photos.h>
 #import <objc/runtime.h>
+#import <WebKit/WebKit.h>
 
 #import "DYYYToast.h"
 #import "DYYYUtils.h"
@@ -59,6 +60,32 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
 @property(nonatomic, strong) NSMutableArray *serialImageURLs;  // 剩余待下载URL列表
 @property(nonatomic, copy) NSString *serialBatchID;            // 当前串行下载的batchID
 @property(nonatomic, strong) NSMutableDictionary<NSString *, NSNumber *> *serialIndexMap;  // downloadID -> 当前索引
+@end
+
+// WKWebView导航处理器 - Step2.5页面降级用
+@interface DYYYWVHandler : NSObject <WKNavigationDelegate>
+@property (nonatomic, strong) dispatch_semaphore_t doneSem;
+@property (nonatomic, copy) NSString *renderData;
+@property (nonatomic, assign) BOOL navDone;
+@property (nonatomic, assign) BOOL navFailed;
+@end
+@implementation DYYYWVHandler
+- (void)webView:(WKWebView *)webView didFinishNavigation:(WKNavigation *)navigation {
+    if (self.navDone) return;
+    self.navDone = YES;
+    [webView evaluateJavaScript:@"(function(){var e=document.getElementById('RENDER_DATA');return e?e.textContent:''})()" completionHandler:^(id result, NSError *error) {
+        if ([result isKindOfClass:[NSString class]] && [(NSString *)result length] > 0) {
+            self.renderData = [result copy];
+        }
+        dispatch_semaphore_signal(self.doneSem);
+    }];
+}
+- (void)webView:(WKWebView *)webView didFailNavigation:(WKNavigation *)navigation withError:(NSError *)error {
+    if (!self.navDone) { self.navDone = YES; self.navFailed = YES; dispatch_semaphore_signal(self.doneSem); }
+}
+- (void)webView:(WKWebView *)webView didFailProvisionalNavigation:(WKNavigation *)navigation withError:(NSError *)error {
+    if (!self.navDone) { self.navDone = YES; self.navFailed = YES; dispatch_semaphore_signal(self.doneSem); }
+}
 @end
 
 @implementation DYYYManager
@@ -3937,46 +3964,39 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
             }
 
             if (!awemeDetail || ![awemeDetail isKindOfClass:[NSDictionary class]]) {
-                // 降级: 从视频页面HTML提取RENDER_DATA（不需要a_bogus）
-                [probeLog appendFormat:@"\n[Step2.5 页面降级] GET /video/%@\n", awemeId];
+                // 降级: WKWebView加载视频页面提取RENDER_DATA（真浏览器引擎，服务器返回SSR）
+                [probeLog appendFormat:@"\n[Step2.5 WKWebView降级] 加载 /video/%@\n", awemeId];
+                DYYYWVHandler *wvH = [[DYYYWVHandler alloc] init];
+                dispatch_semaphore_t wvSem = dispatch_semaphore_create(0);
+                wvH.doneSem = wvSem;
+                __block WKWebView *wvRef = nil;
                 NSString *pageURL = [NSString stringWithFormat:@"https://www.douyin.com/video/%@", awemeId];
-                NSMutableURLRequest *pageReq = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:pageURL] cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:15];
-                [pageReq setValue:@"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36" forHTTPHeaderField:@"User-Agent"];
-                [pageReq setValue:@"https://www.douyin.com/" forHTTPHeaderField:@"Referer"];
-                [pageReq setValue:fullCookieStr forHTTPHeaderField:@"Cookie"];
-                [pageReq setValue:@"text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8" forHTTPHeaderField:@"Accept"];
-                [pageReq setValue:@"zh-CN,zh;q=0.9" forHTTPHeaderField:@"Accept-Language"];
-                __block NSData *pageData = nil;
-                __block NSInteger pageStatus = 0;
-                dispatch_semaphore_t pageSem = dispatch_semaphore_create(0);
-                NSURLSessionDataTask *pageTask = [[NSURLSession sharedSession] dataTaskWithRequest:pageReq completionHandler:^(NSData *pData, NSURLResponse *pResp, NSError *pErr) {
-                    pageData = pData;
-                    if (pResp && [pResp isKindOfClass:[NSHTTPURLResponse class]]) pageStatus = [(NSHTTPURLResponse *)pResp statusCode];
-                    dispatch_semaphore_signal(pageSem);
-                }];
-                [pageTask resume];
-                dispatch_semaphore_wait(pageSem, dispatch_time(DISPATCH_TIME_NOW, 15 * NSEC_PER_SEC));
-                [probeLog appendFormat:@"HTTP %ld body=%lu\n", (long)pageStatus, (unsigned long)(pageData ? pageData.length : 0)];
-                if (pageData && pageStatus == 200) {
-                    NSString *html = [[NSString alloc] initWithData:pageData encoding:NSUTF8StringEncoding];
-                    // 提取RENDER_DATA: <script id="RENDER_DATA" type="application/json">URL_ENCODED_JSON</script>
-                    NSString *renderData = nil;
-                    NSRange startTag = [html rangeOfString:@"<script id=\"RENDER_DATA\""];
-                    if (startTag.location != NSNotFound) {
-                        NSRange closeBracket = [html rangeOfString:@">" options:0 range:NSMakeRange(startTag.location, html.length - startTag.location)];
-                        if (closeBracket.location != NSNotFound) {
-                            NSRange endTag = [html rangeOfString:@"</script>" options:0 range:NSMakeRange(closeBracket.location, html.length - closeBracket.location)];
-                            if (endTag.location != NSNotFound) {
-                                NSUInteger cs = closeBracket.location + 1;
-                                NSUInteger cl = endTag.location - cs;
-                                if (cl > 0 && cs + cl <= html.length) {
-                                    NSString *encoded = [html substringWithRange:NSMakeRange(cs, cl)];
-                                    renderData = [encoded stringByRemovingPercentEncoding];
-                                }
-                            }
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    @autoreleasepool {
+                        WKWebViewConfiguration *config = [[WKWebViewConfiguration alloc] init];
+                        config.websiteDataStore = [WKWebsiteDataStore defaultDataStore];
+                        WKWebView *wv = [[WKWebView alloc] initWithFrame:CGRectZero configuration:config];
+                        wv.customUserAgent = @"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36";
+                        wv.navigationDelegate = wvH;
+                        wvRef = wv;
+                        NSArray *nsCookies = [[NSHTTPCookieStorage sharedHTTPCookieStorage] cookiesForURL:[NSURL URLWithString:@"https://www.douyin.com"]];
+                        WKHTTPCookieStore *wkStore = config.websiteDataStore.httpCookieStore;
+                        dispatch_group_t cGrp = dispatch_group_create();
+                        for (NSHTTPCookie *c in nsCookies) {
+                            dispatch_group_enter(cGrp);
+                            [wkStore setCookie:c completionHandler:^{ dispatch_group_leave(cGrp); }];
                         }
+                        NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:pageURL] cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:15];
+                        dispatch_group_notify(cGrp, dispatch_get_main_queue(), ^{
+                            [wv loadRequest:req];
+                        });
                     }
-                    if (renderData && renderData.length > 0) {
+                });
+                dispatch_semaphore_wait(wvSem, dispatch_time(DISPATCH_TIME_NOW, 20 * NSEC_PER_SEC));
+                [probeLog appendFormat:@"WKWebView navDone=%d failed=%d renderDataLen=%lu\n", wvH.navDone, wvH.failed, (unsigned long)wvH.renderData.length];
+                if (!wvH.navFailed && wvH.renderData.length > 0) {
+                    NSString *renderData = [wvH.renderData stringByRemovingPercentEncoding];
+                    if (renderData.length > 0) {
                         [probeLog appendFormat:@"RENDER_DATA len=%lu\n", (unsigned long)renderData.length];
                         NSDictionary *rj = [NSJSONSerialization JSONObjectWithData:[renderData dataUsingEncoding:NSUTF8StringEncoding] options:0 error:nil];
                         if ([rj isKindOfClass:[NSDictionary class]]) {
@@ -3988,23 +4008,25 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                                 awemeDetail = detail;
                                 [probeLog appendFormat:@"RENDER_DATA提取成功!\n"];
                             } else {
-                                // 打印顶层key辅助调试
                                 [probeLog appendFormat:@"RENDER_DATA未找到aweme_detail, topKeys=%@\n", [rj allKeys]];
                             }
                         }
-                    } else {
-                        [probeLog appendFormat:@"HTML中未找到RENDER_DATA\n"];
                     }
                 }
-                // 页面降级也失败 → 本地解析
+                // Cleanup WKWebView
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    [wvRef stopLoading];
+                    wvRef.navigationDelegate = nil;
+                });
+                // WKWebView降级也失败 → 本地解析
                 if (!awemeDetail || ![awemeDetail isKindOfClass:[NSDictionary class]]) {
-                    [probeLog appendFormat:@"\n[降级] 页面降级也失败，降级本地解析\n"];
+                    [probeLog appendFormat:@"\n[降级] WKWebView降级也失败，降级本地解析\n"];
                     [[NSNotificationCenter defaultCenter] postNotificationName:@"DYYYProbeNotification" object:nil userInfo:@{@"text": [probeLog copy]}];
                     dispatch_async(dispatch_get_main_queue(), ^{ [DYYYUtils showToast:@"接口4: 降级本地解析"]; });
                     [DYYYManager localParseFromAwemeModel:awemeModel completion:completion];
                     return;
                 }
-                [probeLog appendFormat:@"[Step2.5成功] 页面降级获取4K数据成功\n"];
+                [probeLog appendFormat:@"[Step2.5成功] WKWebView降级获取4K数据成功\n"];
             }
         }
 
