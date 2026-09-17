@@ -3803,9 +3803,6 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
         return;
     }
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-        // ===== 接口4全流程探针 =====
-        __block NSMutableString *probeLog = [NSMutableString stringWithString:@"[接口4探针]\n"];
-        [probeLog appendFormat:@"awemeId=%@\n", awemeId];
 
         // Step 0: 注入浏览器登录Cookie（有效期至2026-11-16，确保API有登录态）
         {
@@ -3827,7 +3824,6 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                     }
                 }
             }
-            [probeLog appendFormat:@"\n[Step0 登录Cookie注入] injected=%ld\n", (long)injectAdded];
         }
 
         // Step 0.5: Cookie预热（隔离session，只补不换——补充登录Cookie未覆盖的）
@@ -3864,7 +3860,6 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                     if (!wFound) { [wStore setCookie:wnc]; wAdded++; } else { wSkipped++; }
                 }
             }
-            [probeLog appendFormat:@"\n[Step0 预热(隔离)] HTTP %ld before=%ld added=%ld skipped=%ld\n", (long)wStatus, (long)wBefore, (long)wAdded, (long)wSkipped];
         }
 
         // Step 1: 构建完整Cookie（从app Cookie存储取douyin.com全部cookie，对齐JS规则）
@@ -3877,14 +3872,7 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
             [fullCookieStr appendFormat:@"%@=%@", [c name], [c value]];
             if ([[c name] isEqualToString:@"ttwid"]) ttwidStr = [c value];
         }
-        // 探针：Cookie信息
-        [probeLog appendFormat:@"\n[Step1 Cookie]\ncount=%lu\n", (unsigned long)appCookies.count];
-        for (NSHTTPCookie *c in appCookies) {
-            NSString *val = [c value];
-            NSString *valPreview = val.length > 20 ? [[val substringToIndex:20] stringByAppendingString:@"..."] : val;
-            [probeLog appendFormat:@"  %@=%@ (domain=%@)\n", [c name], valPreview, [c domain]];
-        }
-        [probeLog appendFormat:@"ttwid=%@\n", ttwidStr.length > 0 ? @"有" : @"无"];
+
         // 降级：如果没有ttwid，从注册接口获取并追加到cookie
         if (!ttwidStr || ttwidStr.length == 0) {
             NSString *ttwidURL = @"https://ttwid.bytedance.com/ttwid/union/register/";
@@ -3951,15 +3939,12 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                 [rtTask resume];
                 dispatch_semaphore_wait(ttwidSem, dispatch_time(DISPATCH_TIME_NOW, 10 * NSEC_PER_SEC));
             }
-            [probeLog appendFormat:@"\n[Step1.5 ttwid注册]\nPOST ttwid.bytedance.com → HTTP %ld\nSet-Cookie ttwid=%@ (len=%lu)\nJSON body ttwid=%@\n最终ttwid=%@\n", (long)ttwidHttpStatus, ttwidFromHeader ? [[ttwidFromHeader substringToIndex:MIN(20, ttwidFromHeader.length)] stringByAppendingString:@"..."] : @"无", (unsigned long)(ttwidFromHeader ? ttwidFromHeader.length : 0), ttwidFromBody ? @"有" : @"无", ttwidStr.length > 0 ? @"有" : @"无"];
             if (ttwidStr && ttwidStr.length > 0) {
                 if (fullCookieStr.length > 0) [fullCookieStr appendString:@"; "];
                 [fullCookieStr appendFormat:@"ttwid=%@", ttwidStr];
             }
         }
         if (fullCookieStr.length == 0) {
-            [probeLog appendFormat:@"\n[降级] Cookie为空，降级本地解析\n"];
-            [[NSNotificationCenter defaultCenter] postNotificationName:@"DYYYProbeNotification" object:nil userInfo:@{@"text": [probeLog copy]}];
             dispatch_async(dispatch_get_main_queue(), ^{ [DYYYUtils showToast:@"接口4: 降级本地解析"]; });
             [DYYYManager localParseFromAwemeModel:awemeModel completion:completion];
             return;
@@ -3988,7 +3973,6 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
         [apiReq setValue:@"?1" forHTTPHeaderField:@"sec-fetch-user"];
         [apiReq setValue:@"1" forHTTPHeaderField:@"upgrade-insecure-requests"];
         [apiReq setValue:fullCookieStr forHTTPHeaderField:@"Cookie"];
-        [probeLog appendFormat:@"\n[Step2 发送Cookie] len=%lu preview=%@...\n", (unsigned long)fullCookieStr.length, [fullCookieStr substringToIndex:MIN(120, fullCookieStr.length)]];
         dispatch_semaphore_t apiSem = dispatch_semaphore_create(0);
         NSURLSessionDataTask *apiTask = [[NSURLSession sharedSession] dataTaskWithRequest:apiReq completionHandler:^(NSData *apiData, NSURLResponse *apiResp, NSError *apiErr) {
             @try {
@@ -3997,15 +3981,10 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                     if ([apiJson isKindOfClass:[NSDictionary class]]) {
                         NSInteger statusCode = [apiJson[@"status_code"] integerValue];
                         if (statusCode == 0) awemeDetail = apiJson[@"aweme_detail"];
-                        // 探针：web API响应
-                        [probeLog appendFormat:@"\n[Step2 WebAPI响应]\nstatus_code=%ld\n", (long)statusCode];
                         NSHTTPURLResponse *httpR = (NSHTTPURLResponse *)apiResp;
-                        [probeLog appendFormat:@"HTTP status=%ld\n", (long)httpR.statusCode];
-                        [probeLog appendFormat:@"responseBody长度=%lu\n", (unsigned long)apiData.length];
                         if (statusCode == 0 && awemeDetail) {
                             NSDictionary *vObj = awemeDetail[@"video"];
                             NSArray *brList = vObj[@"bit_rate"];
-                            [probeLog appendFormat:@"bit_rate条目数=%lu\n", (unsigned long)(brList ? brList.count : 0)];
                             for (NSDictionary *br in (brList ?: @[])) {
                                 NSString *gn = br[@"gear_name"] ?: @"?";
                                 NSInteger brVal = [br[@"bit_rate"] integerValue];
@@ -4014,17 +3993,14 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                                 NSInteger h = [pa[@"height"] integerValue];
                                 NSInteger w = [pa[@"width"] integerValue];
                                 long long ds = [pa[@"data_size"] longLongValue];
-                                [probeLog appendFormat:@"  gear=%@ bitrate=%ld fps=%ld %ldx%ld size=%lld\n", gn, (long)brVal, (long)fps, (long)w, (long)h, ds];
                             }
                         } else {
                             // 截取前200字符看错误
                             NSString *raw = [[NSString alloc] initWithData:apiData encoding:NSUTF8StringEncoding];
                             if (raw.length > 200) raw = [raw substringToIndex:200];
-                            [probeLog appendFormat:@"error响应: %@\n", raw];
                         }
                     }
                 } else {
-                    [probeLog appendFormat:@"\n[Step2 WebAPI响应]\n响应为空! error=%@\n", apiErr.localizedDescription];
                 }
             } @catch (NSException *e) {}
             dispatch_semaphore_signal(apiSem);
@@ -4063,7 +4039,6 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
 
             if (!awemeDetail || ![awemeDetail isKindOfClass:[NSDictionary class]]) {
                 // 降级: WKWebView加载视频页面提取RENDER_DATA（支持验证码交互）
-                [probeLog appendFormat:@"\n[Step2.5 WKWebView降级] 加载 /video/%@\n", awemeId];
                 DYYYWVHandler *wvH = [[DYYYWVHandler alloc] init];
                 dispatch_semaphore_t wvSem = dispatch_semaphore_create(0);
                 wvH.doneSem = wvSem;
@@ -4134,10 +4109,6 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                     }];
                     dispatch_semaphore_wait(urlSem, dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC));
                 }
-                if ([hookUrls isEqualToString:@"HOOK_NOT_FOUND"]) { [probeLog appendFormat:@"[Hook] 脚本未注入!\n"]; }
-                else if (hookUrls.length > 0) { [probeLog appendFormat:@"[Hook] 请求URL: %@\n", hookUrls]; }
-                else { [probeLog appendFormat:@"[Hook] 无请求被拦截\n"]; }
-                [probeLog appendFormat:@"WKWebView renderDataLen=%lu navFailed=%d isApiData=%d\n", (unsigned long)wvH.renderData.length, wvH.navFailed, wvH.isApiData];
                 if (!wvH.navFailed && wvH.renderData.length > 0) {
                     NSString *renderData = wvH.isApiData ? wvH.renderData : [wvH.renderData stringByRemovingPercentEncoding];
                     if (renderData.length > 0) {
@@ -4148,9 +4119,7 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                             if (wvH.isApiData) {
                                 detail = rj[@"aweme_detail"];
                                 if (detail && [detail isKindOfClass:[NSDictionary class]]) {
-                                    [probeLog appendFormat:@"API拦截提取aweme_detail成功!\n"];
                                 } else {
-                                    [probeLog appendFormat:@"API拦截无aweme_detail, topKeys=%@\n", [rj allKeys]];
                                 }
                             }
                             // RENDER_DATA格式: app.loaderData → videoInfoRes → item_list[0]
@@ -4160,7 +4129,6 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                                     if ([appDict isKindOfClass:[NSDictionary class]]) {
                                         NSDictionary *loaderData = appDict[@"loaderData"];
                                         if ([loaderData isKindOfClass:[NSDictionary class]]) {
-                                            [probeLog appendFormat:@"RENDER_DATA loaderData keys=%@\n", [loaderData allKeys]];
                                             for (NSString *lk in loaderData) {
                                                 if ([lk containsString:@"video"] || [lk containsString:@"note"]) {
                                                     NSDictionary *pageDict = loaderData[lk];
@@ -4170,7 +4138,6 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                                                             NSArray *itemList = videoInfoRes[@"item_list"];
                                                             if ([itemList isKindOfClass:[NSArray class]] && [itemList count] > 0) {
                                                                 detail = itemList[0];
-                                                                [probeLog appendFormat:@"RENDER_DATA loaderData[%@]路径命中!\n", lk];
                                                                 break;
                                                             }
                                                         }
@@ -4178,7 +4145,6 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                                                 }
                                             }
                                         } else {
-                                            [probeLog appendFormat:@"RENDER_DATA app keys=%@\n", [appDict allKeys]];
                                         }
                                     }
                                 } @catch (NSException *exc1) {}
@@ -4188,9 +4154,7 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                             if (!detail || ![detail isKindOfClass:[NSDictionary class]]) { @try { detail = rj[@"42"][@"aweme_detail"]; } @catch (NSException *exc3) {} }
                             if (detail && [detail isKindOfClass:[NSDictionary class]]) {
                                 awemeDetail = detail;
-                                [probeLog appendFormat:@"Step2.5提取成功!\n"];
                             } else {
-                                [probeLog appendFormat:@"Step2.5未找到aweme_detail, topKeys=%@\n", [rj allKeys]];
                             }
                         }
                     }
@@ -4199,13 +4163,10 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                 dispatch_async(dispatch_get_main_queue(), ^{ [wvH.container removeFromSuperview]; });
                 // WKWebView降级也失败 → 本地解析
                 if (!awemeDetail || ![awemeDetail isKindOfClass:[NSDictionary class]]) {
-                    [probeLog appendFormat:@"\n[降级] WKWebView降级也失败，降级本地解析\n"];
-                    [[NSNotificationCenter defaultCenter] postNotificationName:@"DYYYProbeNotification" object:nil userInfo:@{@"text": [probeLog copy]}];
                     dispatch_async(dispatch_get_main_queue(), ^{ [DYYYUtils showToast:@"接口4: 降级本地解析"]; });
                     [DYYYManager localParseFromAwemeModel:awemeModel completion:completion];
                     return;
                 }
-                [probeLog appendFormat:@"[Step2.5成功] WKWebView降级获取4K数据成功\n"];
             }
         }
 
@@ -4405,20 +4366,13 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
         result[@"title"] = awemeDetail[@"desc"] ?: @"";
         result[@"author"] = author[@"nickname"] ?: @"";
 
-        // ===== 探针：最终video_list + 弹窗展示 =====
         NSArray *finalVideoList = result[@"video_list"];
-        [probeLog appendFormat:@"\n[最终画质列表] count=%lu\n", (unsigned long)(finalVideoList ? finalVideoList.count : 0)];
         for (NSDictionary *item in (finalVideoList ?: @[])) {
             NSString *lvl = item[@"level"] ?: @"?";
             NSString *u = item[@"url"] ?: @"?";
             NSString *urlPreview = u.length > 60 ? [[u substringToIndex:60] stringByAppendingString:@"..."] : u;
-            [probeLog appendFormat:@"  %@ → %@\n", lvl, urlPreview];
         }
-        [probeLog appendFormat:@"\nvideoURI=%@\n", videoURI ?: @"无"];
         {
-            NSString *probeText = [probeLog copy];
-            // 存储探针结果，通过通知在主线程弹窗
-            [[NSNotificationCenter defaultCenter] postNotificationName:@"DYYYProbeNotification" object:nil userInfo:@{@"text": probeText}];
         }
 
         if (completion) completion(result.count > 0 ? result : nil);
