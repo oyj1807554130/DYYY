@@ -73,12 +73,15 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
 - (void)webView:(WKWebView *)webView didFinishNavigation:(WKNavigation *)navigation {
     if (self.navDone) return;
     self.navDone = YES;
-    [webView evaluateJavaScript:@"(function(){var e=document.getElementById('RENDER_DATA');return e?e.textContent:''})()" completionHandler:^(id result, NSError *error) {
-        if ([result isKindOfClass:[NSString class]] && [(NSString *)result length] > 0) {
-            self.renderData = [result copy];
-        }
-        dispatch_semaphore_signal(self.doneSem);
-    }];
+    // 等3秒让CSR/异步脚本执行完再提取
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+        [webView evaluateJavaScript:@"(function(){var r={};var e=document.getElementById('RENDER_DATA');r.RD=e?e.textContent.length:0;r.WRD=window.__RENDER_DATA__?1:0;r.WIS=window.__INITIAL_STATE__?1:0;r.WAD=window.__APP_DATA__?1:0;var ss=document.querySelectorAll('script');var ids=[];for(var i=0;i<ss.length;i++){if(ss[i].id)ids.push(ss[i].id+':'+ss[i].textContent.length);}r.scripts=ids;r.title=document.title;return JSON.stringify(r)})()" completionHandler:^(id result, NSError *error) {
+            if ([result isKindOfClass:[NSString class]] && [(NSString *)result length] > 2) {
+                self.renderData = [result copy];
+            }
+            dispatch_semaphore_signal(self.doneSem);
+        }];
+    });
 }
 - (void)webView:(WKWebView *)webView didFailNavigation:(WKNavigation *)navigation withError:(NSError *)error {
     if (!self.navDone) { self.navDone = YES; self.navFailed = YES; dispatch_semaphore_signal(self.doneSem); }
@@ -3995,20 +3998,38 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                 dispatch_semaphore_wait(wvSem, dispatch_time(DISPATCH_TIME_NOW, 20 * NSEC_PER_SEC));
                 [probeLog appendFormat:@"WKWebView navDone=%d navFailed=%d renderDataLen=%lu\n", wvH.navDone, wvH.navFailed, (unsigned long)wvH.renderData.length];
                 if (!wvH.navFailed && wvH.renderData.length > 0) {
-                    NSString *renderData = [wvH.renderData stringByRemovingPercentEncoding];
-                    if (renderData.length > 0) {
-                        [probeLog appendFormat:@"RENDER_DATA len=%lu\n", (unsigned long)renderData.length];
-                        NSDictionary *rj = [NSJSONSerialization JSONObjectWithData:[renderData dataUsingEncoding:NSUTF8StringEncoding] options:0 error:nil];
-                        if ([rj isKindOfClass:[NSDictionary class]]) {
-                            id detail = nil;
-                            @try { detail = rj[@"app"][@"videoDetail"][@"aweme_detail"]; } @catch (NSException *e) {}
-                            if (!detail || ![detail isKindOfClass:[NSDictionary class]]) { @try { detail = rj[@"42"][@"aweme_detail"]; } @catch (NSException *e) {} }
-                            if (!detail || ![detail isKindOfClass:[NSDictionary class]]) { @try { detail = rj[@"app"][@"videoDetail"]; } @catch (NSException *e) {} }
-                            if (detail && [detail isKindOfClass:[NSDictionary class]]) {
-                                awemeDetail = detail;
-                                [probeLog appendFormat:@"RENDER_DATA提取成功!\n"];
-                            } else {
-                                [probeLog appendFormat:@"RENDER_DATA未找到aweme_detail, topKeys=%@\n", [rj allKeys]];
+                    // 解析诊断JSON，找到数据源
+                    NSDictionary *diag = [NSJSONSerialization JSONObjectWithData:[wvH.renderData dataUsingEncoding:NSUTF8StringEncoding] options:0 error:nil];
+                    if ([diag isKindOfClass:[NSDictionary class]]) {
+                        [probeLog appendFormat:@"诊断: RD=%@ WRD=%@ WIS=%@ WAD=%@ title=%@ scripts=%@\n", diag[@"RD"], diag[@"WRD"], diag[@"WIS"], diag[@"WAD"], diag[@"title"], diag[@"scripts"]];
+                        // RENDER_DATA存在且非空
+                        NSInteger rdLen = [diag[@"RD"] integerValue];
+                        if (rdLen > 0) {
+                            // 重新提取RENDER_DATA原始内容
+                            __block NSString *rawRD = nil;
+                            dispatch_semaphore_t rdSem = dispatch_semaphore_create(0);
+                            dispatch_async(dispatch_get_main_queue(), ^{
+                                [wvRef evaluateJavaScript:@"document.getElementById('RENDER_DATA').textContent" completionHandler:^(id r, NSError *e) {
+                                    if ([r isKindOfClass:[NSString class]]) rawRD = [r copy];
+                                    dispatch_semaphore_signal(rdSem);
+                                }];
+                            });
+                            dispatch_semaphore_wait(rdSem, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC));
+                            if (rawRD.length > 0) {
+                                NSString *renderData = [rawRD stringByRemovingPercentEncoding];
+                                NSDictionary *rj = [NSJSONSerialization JSONObjectWithData:[renderData dataUsingEncoding:NSUTF8StringEncoding] options:0 error:nil];
+                                if ([rj isKindOfClass:[NSDictionary class]]) {
+                                    id detail = nil;
+                                    @try { detail = rj[@"app"][@"videoDetail"][@"aweme_detail"]; } @catch (NSException *e) {}
+                                    if (!detail || ![detail isKindOfClass:[NSDictionary class]]) { @try { detail = rj[@"42"][@"aweme_detail"]; } @catch (NSException *e) {} }
+                                    if (!detail || ![detail isKindOfClass:[NSDictionary class]]) { @try { detail = rj[@"app"][@"videoDetail"]; } @catch (NSException *e) {} }
+                                    if (detail && [detail isKindOfClass:[NSDictionary class]]) {
+                                        awemeDetail = detail;
+                                        [probeLog appendFormat:@"RENDER_DATA提取成功!\n"];
+                                    } else {
+                                        [probeLog appendFormat:@"RENDER_DATA未找到aweme_detail, topKeys=%@\n", [rj allKeys]];
+                                    }
+                                }
                             }
                         }
                     }
