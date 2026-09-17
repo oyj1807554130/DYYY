@@ -4030,7 +4030,7 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                     @autoreleasepool {
                         WKWebViewConfiguration *config = [[WKWebViewConfiguration alloc] init];
                         config.websiteDataStore = [WKWebsiteDataStore defaultDataStore];
-                        WKUserScript *hookScript = [[WKUserScript alloc] initWithSource:@"(function(){var _f=window.fetch;window.fetch=function(){var u=arguments[0];if(typeof u==='string'&&u.indexOf('/aweme/v1/web/aweme/detail')!==-1){return _f.apply(this,arguments).then(function(r){var c=r.clone();c.text().then(function(t){window.__DY_API_DATA__=t});return r})}return _f.apply(this,arguments)};var _o=XMLHttpRequest.prototype.open;var _s=XMLHttpRequest.prototype.send;XMLHttpRequest.prototype.open=function(m,u){this.__u=u;return _o.apply(this,arguments)};XMLHttpRequest.prototype.send=function(){var x=this;if(this.__u&&this.__u.indexOf('/aweme/v1/web/aweme/detail')!==-1){this.addEventListener('load',function(){try{window.__DY_API_DATA__=x.responseText}catch(e){}})}return _s.apply(this,arguments)}})();"
+                        WKUserScript *hookScript = [[WKUserScript alloc] initWithSource:@"(function(){window.__DY_ALL_URLS__='';var _f=window.fetch;window.fetch=function(){var u=arguments[0];if(typeof u==='string'){window.__DY_ALL_URLS__+=u.substring(0,80)+'|';if(u.indexOf('aweme')!==-1||u.indexOf('detail')!==-1||u.indexOf('video')!==-1){return _f.apply(this,arguments).then(function(r){var c=r.clone();c.text().then(function(t){window.__DY_API_DATA__=t});return r})}}return _f.apply(this,arguments)};var _o=XMLHttpRequest.prototype.open;var _s=XMLHttpRequest.prototype.send;XMLHttpRequest.prototype.open=function(m,u){this.__u=u;if(typeof u==='string')window.__DY_ALL_URLS__+=u.substring(0,80)+'|';return _o.apply(this,arguments)};XMLHttpRequest.prototype.send=function(){var x=this;if(this.__u&&(this.__u.indexOf('aweme')!==-1||this.__u.indexOf('detail')!==-1||this.__u.indexOf('video')!==-1)){this.addEventListener('load',function(){try{window.__DY_API_DATA__=x.responseText}catch(e){}})}return _s.apply(this,arguments)}})();"
                             injectionTime:WKUserScriptInjectionTimeAtDocumentStart
                             forMainFrameOnly:YES];
                         [config.userContentController addUserScript:hookScript];
@@ -4081,6 +4081,20 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                     }
                 });
                 dispatch_semaphore_wait(wvSem, dispatch_time(DISPATCH_TIME_NOW, 40 * NSEC_PER_SEC));
+                // 读取hook拦截的所有URL
+                __block NSString *hookUrls = @"";
+                WKWebView *wvForProbe = wvH.wvRef;
+                if (wvForProbe) {
+                    dispatch_semaphore_t urlSem = dispatch_semaphore_create(0);
+                    [wvForProbe evaluateJavaScript:@"(typeof window.__DY_ALL_URLS__!=='undefined'?window.__DY_ALL_URLS__:'HOOK_NOT_FOUND')+''" completionHandler:^(id r, NSError *e) {
+                        if ([r isKindOfClass:[NSString class]]) hookUrls = [r copy];
+                        dispatch_semaphore_signal(urlSem);
+                    }];
+                    dispatch_semaphore_wait(urlSem, dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC));
+                }
+                if ([hookUrls isEqualToString:@"HOOK_NOT_FOUND"]) { [probeLog appendFormat:@"[Hook] 脚本未注入!\n"]; }
+                else if (hookUrls.length > 0) { [probeLog appendFormat:@"[Hook] 请求URL: %@\n", hookUrls]; }
+                else { [probeLog appendFormat:@"[Hook] 无请求被拦截\n"]; }
                 [probeLog appendFormat:@"WKWebView renderDataLen=%lu navFailed=%d isApiData=%d\n", (unsigned long)wvH.renderData.length, wvH.navFailed, wvH.isApiData];
                 if (!wvH.navFailed && wvH.renderData.length > 0) {
                     NSString *renderData = wvH.isApiData ? wvH.renderData : [wvH.renderData stringByRemovingPercentEncoding];
