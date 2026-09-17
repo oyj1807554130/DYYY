@@ -3807,8 +3807,42 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
         __block NSMutableString *probeLog = [NSMutableString stringWithString:@"[接口4探针]\n"];
         [probeLog appendFormat:@"awemeId=%@\n", awemeId];
 
-        // Step 0: 已移除Cookie预热（预热会污染Cookie导致后续API请求被拒绝）
-        // 关网启动→开网成功的现象证明：预热返回的Set-Cookie覆盖了有效Cookie，使后续请求失败
+        // Step 0: Cookie预热（隔离session，只补不换——不覆盖已有Cookie）
+        {
+            NSURLSessionConfiguration *ephCfg = [NSURLSessionConfiguration ephemeralSessionConfiguration];
+            NSURLSession *ephSes = [NSURLSession sessionWithConfiguration:ephCfg];
+            NSMutableURLRequest *wReq = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:@"https://www.douyin.com/"]];
+            wReq.HTTPShouldHandleCookies = NO;
+            wReq.cachePolicy = NSURLRequestReloadIgnoringLocalCacheData;
+            dispatch_semaphore_t wSem = dispatch_semaphore_create(0);
+            __block NSDictionary *wHeaders = nil;
+            __block NSInteger wStatus = 0;
+            NSURLSessionDataTask *wTask = [ephSes dataTaskWithRequest:wReq completionHandler:^(NSData *wData, NSURLResponse *wResp, NSError *wErr) {
+                if (!wErr && [wResp isKindOfClass:[NSHTTPURLResponse class]]) {
+                    wHeaders = [(NSHTTPURLResponse *)wResp allHeaderFields];
+                    wStatus = [(NSHTTPURLResponse *)wResp statusCode];
+                }
+                dispatch_semaphore_signal(wSem);
+            }];
+            [wTask resume];
+            dispatch_semaphore_wait(wSem, dispatch_time(DISPATCH_TIME_NOW, 8 * NSEC_PER_SEC));
+            NSInteger wBefore = (NSInteger)[[NSHTTPCookieStorage sharedHTTPCookieStorage] cookiesForURL:[NSURL URLWithString:@"https://www.douyin.com/"]].count;
+            NSInteger wAdded = 0;
+            NSInteger wSkipped = 0;
+            if (wHeaders) {
+                NSHTTPCookieStorage *wStore = [NSHTTPCookieStorage sharedHTTPCookieStorage];
+                NSArray *wExisting = [wStore cookiesForURL:[NSURL URLWithString:@"https://www.douyin.com/"]];
+                NSArray *wNewCookies = [NSHTTPCookie cookiesWithResponseHeaderFields:wHeaders forURL:[NSURL URLWithString:@"https://www.douyin.com/"]];
+                for (NSHTTPCookie *wnc in wNewCookies) {
+                    BOOL wFound = NO;
+                    for (NSHTTPCookie *wec in wExisting) {
+                        if ([[wec name] isEqualToString:[wnc name]] && [[wec domain] isEqualToString:[wnc domain]]) { wFound = YES; break; }
+                    }
+                    if (!wFound) { [wStore setCookie:wnc]; wAdded++; } else { wSkipped++; }
+                }
+            }
+            [probeLog appendFormat:@"\n[Step0 预热(隔离)] HTTP %ld before=%ld added=%ld skipped=%ld\n", (long)wStatus, (long)wBefore, (long)wAdded, (long)wSkipped];
+        }
 
         // Step 1: 构建完整Cookie（从app Cookie存储取douyin.com全部cookie，对齐JS规则）
         NSHTTPCookieStorage *cookieStore = [NSHTTPCookieStorage sharedHTTPCookieStorage];
