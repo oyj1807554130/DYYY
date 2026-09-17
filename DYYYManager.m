@@ -1256,11 +1256,6 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                             audio:(NSURL *)audioURL
                          progress:(void (^)(float progress))progressBlock
                        completion:(void (^)(BOOL success, NSURL *fileURL))completion {
-    // 探针：下载URL
-    NSLog(@"[DYYY探针] downloadURL=%@ type=%ld", url, (long)mediaType);
-    dispatch_async(dispatch_get_main_queue(), ^{
-        [DYYYUtils showToast:[NSString stringWithFormat:@"下载: %@ (%@)", url.host, url.path.length > 30 ? [url.path substringToIndex:30] : url.path]];
-    });
     // 创建自定义进度条界面
     dispatch_async(dispatch_get_main_queue(), ^{
       // 创建进度视图
