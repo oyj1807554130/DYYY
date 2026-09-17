@@ -62,32 +62,76 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
 @property(nonatomic, strong) NSMutableDictionary<NSString *, NSNumber *> *serialIndexMap;  // downloadID -> 当前索引
 @end
 
-// WKWebView导航处理器 - Step2.5页面降级用
+// WKWebView导航处理器 - Step2.5页面降级（支持验证码交互）
 @interface DYYYWVHandler : NSObject <WKNavigationDelegate>
 @property (nonatomic, strong) dispatch_semaphore_t doneSem;
 @property (nonatomic, copy) NSString *renderData;
-@property (nonatomic, assign) BOOL navDone;
 @property (nonatomic, assign) BOOL navFailed;
+@property (nonatomic, weak) WKWebView *wvRef;
+@property (nonatomic, weak) UIView *container;
+@property (nonatomic, strong) NSTimer *pollTimer;
+@property (nonatomic, assign) int pollCount;
 @end
 @implementation DYYYWVHandler
+- (void)dealloc { [_pollTimer invalidate]; }
 - (void)webView:(WKWebView *)webView didFinishNavigation:(WKNavigation *)navigation {
-    if (self.navDone) return;
-    self.navDone = YES;
-    // 等3秒让CSR/异步脚本执行完再提取
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
-        [webView evaluateJavaScript:@"(function(){var r={};var e=document.getElementById('RENDER_DATA');r.RD=e?e.textContent.length:0;r.WRD=window.__RENDER_DATA__?1:0;r.WIS=window.__INITIAL_STATE__?1:0;r.WAD=window.__APP_DATA__?1:0;var ss=document.querySelectorAll('script');var ids=[];for(var i=0;i<ss.length;i++){if(ss[i].id)ids.push(ss[i].id+':'+ss[i].textContent.length);}r.scripts=ids;r.title=document.title;return JSON.stringify(r)})()" completionHandler:^(id result, NSError *error) {
-            if ([result isKindOfClass:[NSString class]] && [(NSString *)result length] > 2) {
-                self.renderData = [result copy];
-            }
+    self.wvRef = webView;
+    if (!self.pollTimer) {
+        self.pollTimer = [NSTimer scheduledTimerWithTimeInterval:1.0 target:self selector:@selector(pollTick) userInfo:nil repeats:YES];
+    }
+}
+- (void)pollTick {
+    self.pollCount++;
+    if (self.pollCount > 35 || self.renderData.length > 0) {
+        [self.pollTimer invalidate]; self.pollTimer = nil;
+        dispatch_semaphore_signal(self.doneSem); return;
+    }
+    WKWebView *wv = self.wvRef;
+    if (!wv) { [self.pollTimer invalidate]; self.pollTimer = nil; dispatch_semaphore_signal(self.doneSem); return; }
+    [wv evaluateJavaScript:@"(function(){var e=document.getElementById('RENDER_DATA');return e?e.textContent:''})()" completionHandler:^(id result, NSError *error) {
+        if ([result isKindOfClass:[NSString class]] && [(NSString *)result length] > 10) {
+            self.renderData = [result copy];
+            [self.pollTimer invalidate]; self.pollTimer = nil;
+            dispatch_async(dispatch_get_main_queue(), ^{ [self.container removeFromSuperview]; });
             dispatch_semaphore_signal(self.doneSem);
-        }];
-    });
+        } else if (self.pollCount >= 2) {
+            [wv evaluateJavaScript:@"document.title" completionHandler:^(id r2, NSError *e2) {
+                if ([(NSString *)r2 containsString:@"验证"]) {
+                    UIView *cv = self.container;
+                    if (cv && cv.alpha < 0.5) {
+                        dispatch_async(dispatch_get_main_queue(), ^{ [UIView animateWithDuration:0.3 animations:^{ cv.alpha = 1; }]; });
+                    }
+                }
+            }];
+        }
+    }];
+}
+- (void)doneBtnTapped {
+    WKWebView *wv = self.wvRef;
+    [wv evaluateJavaScript:@"(function(){var e=document.getElementById('RENDER_DATA');return e?e.textContent:''})()" completionHandler:^(id result, NSError *error) {
+        if ([result isKindOfClass:[NSString class]] && [(NSString *)result length] > 10) { self.renderData = [result copy]; }
+        [self.pollTimer invalidate]; self.pollTimer = nil;
+        dispatch_async(dispatch_get_main_queue(), ^{ [self.container removeFromSuperview]; });
+        dispatch_semaphore_signal(self.doneSem);
+    }];
+}
+- (void)cancelBtnTapped {
+    self.navFailed = YES;
+    [self.pollTimer invalidate]; self.pollTimer = nil;
+    dispatch_async(dispatch_get_main_queue(), ^{ [self.container removeFromSuperview]; });
+    dispatch_semaphore_signal(self.doneSem);
 }
 - (void)webView:(WKWebView *)webView didFailNavigation:(WKNavigation *)navigation withError:(NSError *)error {
-    if (!self.navDone) { self.navDone = YES; self.navFailed = YES; dispatch_semaphore_signal(self.doneSem); }
+    self.navFailed = YES;
+    [self.pollTimer invalidate]; self.pollTimer = nil;
+    dispatch_async(dispatch_get_main_queue(), ^{ [self.container removeFromSuperview]; });
+    dispatch_semaphore_signal(self.doneSem);
 }
 - (void)webView:(WKWebView *)webView didFailProvisionalNavigation:(WKNavigation *)navigation withError:(NSError *)error {
-    if (!self.navDone) { self.navDone = YES; self.navFailed = YES; dispatch_semaphore_signal(self.doneSem); }
+    self.navFailed = YES;
+    [self.pollTimer invalidate]; self.pollTimer = nil;
+    dispatch_async(dispatch_get_main_queue(), ^{ [self.container removeFromSuperview]; });
+    dispatch_semaphore_signal(self.doneSem);
 }
 @end
 
@@ -3967,78 +4011,84 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
             }
 
             if (!awemeDetail || ![awemeDetail isKindOfClass:[NSDictionary class]]) {
-                // 降级: WKWebView加载视频页面提取RENDER_DATA（真浏览器引擎，服务器返回SSR）
+                // 降级: WKWebView加载视频页面提取RENDER_DATA（支持验证码交互）
                 [probeLog appendFormat:@"\n[Step2.5 WKWebView降级] 加载 /video/%@\n", awemeId];
                 DYYYWVHandler *wvH = [[DYYYWVHandler alloc] init];
                 dispatch_semaphore_t wvSem = dispatch_semaphore_create(0);
                 wvH.doneSem = wvSem;
-                __block WKWebView *wvRef = nil;
                 NSString *pageURL = [NSString stringWithFormat:@"https://www.douyin.com/video/%@", awemeId];
                 dispatch_async(dispatch_get_main_queue(), ^{
                     @autoreleasepool {
                         WKWebViewConfiguration *config = [[WKWebViewConfiguration alloc] init];
                         config.websiteDataStore = [WKWebsiteDataStore defaultDataStore];
-                        WKWebView *wv = [[WKWebView alloc] initWithFrame:CGRectZero configuration:config];
+                        UIWindow *keyWin = nil;
+                        for (UIWindow *w in [UIApplication sharedApplication].windows) { if (w.isKeyWindow) { keyWin = w; break; } }
+                        if (!keyWin) keyWin = [UIApplication sharedApplication].windows.firstObject;
+                        CGFloat tbH = 44.0;
+                        UIView *ctn = [[UIView alloc] initWithFrame:keyWin.bounds];
+                        ctn.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+                        ctn.backgroundColor = [UIColor colorWithWhite:0 alpha:0.85];
+                        ctn.alpha = 0;
+                        WKWebView *wv = [[WKWebView alloc] initWithFrame:CGRectMake(0, tbH, keyWin.bounds.size.width, keyWin.bounds.size.height - tbH) configuration:config];
+                        wv.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
                         wv.customUserAgent = @"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36";
                         wv.navigationDelegate = wvH;
-                        wvRef = wv;
+                        [ctn addSubview:wv];
+                        UIView *tb = [[UIView alloc] initWithFrame:CGRectMake(0, 0, keyWin.bounds.size.width, tbH)];
+                        tb.backgroundColor = [UIColor colorWithWhite:0.1 alpha:1.0];
+                        [ctn addSubview:tb];
+                        UIButton *cancelBtn = [UIButton buttonWithType:UIButtonTypeSystem];
+                        [cancelBtn setTitle:@"跳过(无4K)" forState:UIControlStateNormal];
+                        [cancelBtn setTintColor:[UIColor whiteColor]];
+                        cancelBtn.frame = CGRectMake(8, 0, 100, tbH);
+                        [cancelBtn addTarget:wvH action:@selector(cancelBtnTapped) forControlEvents:UIControlEventTouchUpInside];
+                        [tb addSubview:cancelBtn];
+                        UIButton *doneBtn = [UIButton buttonWithType:UIButtonTypeSystem];
+                        [doneBtn setTitle:@"验证完成" forState:UIControlStateNormal];
+                        [doneBtn setTintColor:[UIColor colorWithRed:0.2 green:0.8 blue:0.2 alpha:1.0]];
+                        doneBtn.frame = CGRectMake(keyWin.bounds.size.width - 88, 0, 80, tbH);
+                        [doneBtn addTarget:wvH action:@selector(doneBtnTapped) forControlEvents:UIControlEventTouchUpInside];
+                        [tb addSubview:doneBtn];
+                        UILabel *lbl = [[UILabel alloc] initWithFrame:CGRectMake(110, 0, keyWin.bounds.size.width - 210, tbH)];
+                        lbl.text = @"请完成网页验证后点击验证完成";
+                        lbl.textColor = [UIColor whiteColor];
+                        lbl.textAlignment = NSTextAlignmentCenter;
+                        lbl.adjustsFontSizeToFitWidth = YES;
+                        [tb addSubview:lbl];
+                        wvH.container = ctn;
                         NSArray *nsCookies = [[NSHTTPCookieStorage sharedHTTPCookieStorage] cookiesForURL:[NSURL URLWithString:@"https://www.douyin.com"]];
                         WKHTTPCookieStore *wkStore = config.websiteDataStore.httpCookieStore;
                         dispatch_group_t cGrp = dispatch_group_create();
-                        for (NSHTTPCookie *c in nsCookies) {
-                            dispatch_group_enter(cGrp);
-                            [wkStore setCookie:c completionHandler:^{ dispatch_group_leave(cGrp); }];
-                        }
+                        for (NSHTTPCookie *c in nsCookies) { dispatch_group_enter(cGrp); [wkStore setCookie:c completionHandler:^{ dispatch_group_leave(cGrp); }]; }
                         NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:pageURL] cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:15];
                         dispatch_group_notify(cGrp, dispatch_get_main_queue(), ^{
+                            [keyWin addSubview:ctn];
                             [wv loadRequest:req];
                         });
                     }
                 });
-                dispatch_semaphore_wait(wvSem, dispatch_time(DISPATCH_TIME_NOW, 20 * NSEC_PER_SEC));
-                [probeLog appendFormat:@"WKWebView navDone=%d navFailed=%d renderDataLen=%lu\n", wvH.navDone, wvH.navFailed, (unsigned long)wvH.renderData.length];
+                dispatch_semaphore_wait(wvSem, dispatch_time(DISPATCH_TIME_NOW, 40 * NSEC_PER_SEC));
+                [probeLog appendFormat:@"WKWebView renderDataLen=%lu navFailed=%d\n", (unsigned long)wvH.renderData.length, wvH.navFailed];
                 if (!wvH.navFailed && wvH.renderData.length > 0) {
-                    // 解析诊断JSON，找到数据源
-                    NSDictionary *diag = [NSJSONSerialization JSONObjectWithData:[wvH.renderData dataUsingEncoding:NSUTF8StringEncoding] options:0 error:nil];
-                    if ([diag isKindOfClass:[NSDictionary class]]) {
-                        [probeLog appendFormat:@"诊断: RD=%@ WRD=%@ WIS=%@ WAD=%@ title=%@ scripts=%@\n", diag[@"RD"], diag[@"WRD"], diag[@"WIS"], diag[@"WAD"], diag[@"title"], diag[@"scripts"]];
-                        // RENDER_DATA存在且非空
-                        NSInteger rdLen = [diag[@"RD"] integerValue];
-                        if (rdLen > 0) {
-                            // 重新提取RENDER_DATA原始内容
-                            __block NSString *rawRD = nil;
-                            dispatch_semaphore_t rdSem = dispatch_semaphore_create(0);
-                            dispatch_async(dispatch_get_main_queue(), ^{
-                                [wvRef evaluateJavaScript:@"document.getElementById('RENDER_DATA').textContent" completionHandler:^(id r, NSError *e) {
-                                    if ([r isKindOfClass:[NSString class]]) rawRD = [r copy];
-                                    dispatch_semaphore_signal(rdSem);
-                                }];
-                            });
-                            dispatch_semaphore_wait(rdSem, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC));
-                            if (rawRD.length > 0) {
-                                NSString *renderData = [rawRD stringByRemovingPercentEncoding];
-                                NSDictionary *rj = [NSJSONSerialization JSONObjectWithData:[renderData dataUsingEncoding:NSUTF8StringEncoding] options:0 error:nil];
-                                if ([rj isKindOfClass:[NSDictionary class]]) {
-                                    id detail = nil;
-                                    @try { detail = rj[@"app"][@"videoDetail"][@"aweme_detail"]; } @catch (NSException *e) {}
-                                    if (!detail || ![detail isKindOfClass:[NSDictionary class]]) { @try { detail = rj[@"42"][@"aweme_detail"]; } @catch (NSException *e) {} }
-                                    if (!detail || ![detail isKindOfClass:[NSDictionary class]]) { @try { detail = rj[@"app"][@"videoDetail"]; } @catch (NSException *e) {} }
-                                    if (detail && [detail isKindOfClass:[NSDictionary class]]) {
-                                        awemeDetail = detail;
-                                        [probeLog appendFormat:@"RENDER_DATA提取成功!\n"];
-                                    } else {
-                                        [probeLog appendFormat:@"RENDER_DATA未找到aweme_detail, topKeys=%@\n", [rj allKeys]];
-                                    }
-                                }
+                    NSString *renderData = [wvH.renderData stringByRemovingPercentEncoding];
+                    if (renderData.length > 0) {
+                        NSDictionary *rj = [NSJSONSerialization JSONObjectWithData:[renderData dataUsingEncoding:NSUTF8StringEncoding] options:0 error:nil];
+                        if ([rj isKindOfClass:[NSDictionary class]]) {
+                            id detail = nil;
+                            @try { detail = rj[@"app"][@"videoDetail"][@"aweme_detail"]; } @catch (NSException *e) {}
+                            if (!detail || ![detail isKindOfClass:[NSDictionary class]]) { @try { detail = rj[@"42"][@"aweme_detail"]; } @catch (NSException *e) {} }
+                            if (!detail || ![detail isKindOfClass:[NSDictionary class]]) { @try { detail = rj[@"app"][@"videoDetail"]; } @catch (NSException *e) {} }
+                            if (detail && [detail isKindOfClass:[NSDictionary class]]) {
+                                awemeDetail = detail;
+                                [probeLog appendFormat:@"RENDER_DATA提取成功!\n"];
+                            } else {
+                                [probeLog appendFormat:@"RENDER_DATA未找到aweme_detail, topKeys=%@\n", [rj allKeys]];
                             }
                         }
                     }
                 }
-                // Cleanup WKWebView
-                dispatch_async(dispatch_get_main_queue(), ^{
-                    [wvRef stopLoading];
-                    wvRef.navigationDelegate = nil;
-                });
+                // Cleanup
+                dispatch_async(dispatch_get_main_queue(), ^{ [wvH.container removeFromSuperview]; });
                 // WKWebView降级也失败 → 本地解析
                 if (!awemeDetail || ![awemeDetail isKindOfClass:[NSDictionary class]]) {
                     [probeLog appendFormat:@"\n[降级] WKWebView降级也失败，降级本地解析\n"];
