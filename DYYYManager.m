@@ -4075,9 +4075,37 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                         NSDictionary *rj = [NSJSONSerialization JSONObjectWithData:[renderData dataUsingEncoding:NSUTF8StringEncoding] options:0 error:nil];
                         if ([rj isKindOfClass:[NSDictionary class]]) {
                             id detail = nil;
-                            @try { detail = rj[@"app"][@"videoDetail"][@"aweme_detail"]; } @catch (NSException *e) {}
-                            if (!detail || ![detail isKindOfClass:[NSDictionary class]]) { @try { detail = rj[@"42"][@"aweme_detail"]; } @catch (NSException *e) {} }
-                            if (!detail || ![detail isKindOfClass:[NSDictionary class]]) { @try { detail = rj[@"app"][@"videoDetail"]; } @catch (NSException *e) {} }
+                            // 新路径: app.loaderData → video/note page → videoInfoRes → item_list[0]
+                            @try {
+                                NSDictionary *appDict = rj[@"app"];
+                                if ([appDict isKindOfClass:[NSDictionary class]]) {
+                                    NSDictionary *loaderData = appDict[@"loaderData"];
+                                    if ([loaderData isKindOfClass:[NSDictionary class]]) {
+                                        [probeLog appendFormat:@"RENDER_DATA loaderData keys=%@\n", [loaderData allKeys]];
+                                        for (NSString *lk in loaderData) {
+                                            if ([lk containsString:@"video"] || [lk containsString:@"note"]) {
+                                                NSDictionary *pageDict = loaderData[lk];
+                                                if ([pageDict isKindOfClass:[NSDictionary class]]) {
+                                                    NSDictionary *videoInfoRes = pageDict[@"videoInfoRes"];
+                                                    if ([videoInfoRes isKindOfClass:[NSDictionary class]]) {
+                                                        NSArray *itemList = videoInfoRes[@"item_list"];
+                                                        if ([itemList isKindOfClass:[NSArray class]] && [itemList count] > 0) {
+                                                            detail = itemList[0];
+                                                            [probeLog appendFormat:@"RENDER_DATA loaderData[%@]路径命中!\n", lk];
+                                                            break;
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    } else {
+                                        [probeLog appendFormat:@"RENDER_DATA app keys=%@\n", [appDict allKeys]];
+                                    }
+                                }
+                            } @catch (NSException *exc1) {}
+                            // 旧路径兼容
+                            if (!detail || ![detail isKindOfClass:[NSDictionary class]]) { @try { detail = rj[@"app"][@"videoDetail"][@"aweme_detail"]; } @catch (NSException *exc2) {} }
+                            if (!detail || ![detail isKindOfClass:[NSDictionary class]]) { @try { detail = rj[@"42"][@"aweme_detail"]; } @catch (NSException *exc3) {} }
                             if (detail && [detail isKindOfClass:[NSDictionary class]]) {
                                 awemeDetail = detail;
                                 [probeLog appendFormat:@"RENDER_DATA提取成功!\n"];
