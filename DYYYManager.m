@@ -3940,7 +3940,7 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
             }
         }
         if (fullCookieStr.length == 0) {
-            [DYYYManager localParseFromAwemeModel:awemeModel completion:completion];
+            if (completion) completion(@{});
             return;
         }
         // 存储ttwid供后续CDN下载使用
@@ -4155,9 +4155,9 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                 }
                 // Cleanup
                 dispatch_async(dispatch_get_main_queue(), ^{ [wvH.container removeFromSuperview]; });
-                // WKWebView降级也失败 → 本地解析
+                // WKWebView降级也失败，不再触发本地解析
                 if (!awemeDetail || ![awemeDetail isKindOfClass:[NSDictionary class]]) {
-                    [DYYYManager localParseFromAwemeModel:awemeModel completion:completion];
+                    if (completion) completion(@{});
                     return;
                 }
             }
