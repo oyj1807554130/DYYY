@@ -3940,7 +3940,6 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
             }
         }
         if (fullCookieStr.length == 0) {
-            dispatch_async(dispatch_get_main_queue(), ^{ [DYYYUtils showToast:@"接口4: 降级本地解析"]; });
             [DYYYManager localParseFromAwemeModel:awemeModel completion:completion];
             return;
         }
@@ -4158,7 +4157,6 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                 dispatch_async(dispatch_get_main_queue(), ^{ [wvH.container removeFromSuperview]; });
                 // WKWebView降级也失败 → 本地解析
                 if (!awemeDetail || ![awemeDetail isKindOfClass:[NSDictionary class]]) {
-                    dispatch_async(dispatch_get_main_queue(), ^{ [DYYYUtils showToast:@"接口4: 降级本地解析"]; });
                     [DYYYManager localParseFromAwemeModel:awemeModel completion:completion];
                     return;
                 }
