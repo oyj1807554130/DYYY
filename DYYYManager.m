@@ -4049,6 +4049,13 @@ static void dyyyNetProbeInstall(void) {
 }
 
 // 本地解析全画质：从awemeModel取awemeId，走ttwid+web API+bit_rate全画质（JS规则）
++ (void)persistProbeLog:(NSString *)text {
+    @try {
+        NSString *p = [NSHomeDirectory() stringByAppendingPathComponent:@"Documents/dyyy_probe.log"];
+        if (text.length > 0) [text writeToFile:p atomically:YES encoding:NSUTF8StringEncoding error:nil];
+    } @catch (NSException *e) {}
+}
+
 + (void)localParseFullFromAwemeModel:(id)awemeModel completion:(void(^)(NSDictionary *result))completion {
     if (!awemeModel || !completion) {
         if (completion) completion(nil);
@@ -4077,6 +4084,13 @@ static void dyyyNetProbeInstall(void) {
         // ===== 接口4全流程探针 =====
         __block NSMutableString *probeLog = [NSMutableString stringWithString:@"[接口4探针V7.2]\n"];
         [probeLog appendFormat:@"awemeId=%@\n", awemeId];
+        // V7.3: 读取上次闪退前的落盘日志(实时写Documents/dyyy_probe.log), 崩溃后重启回溯崩点
+        NSString *prevLogPath = [NSHomeDirectory() stringByAppendingPathComponent:@"Documents/dyyy_probe.log"];
+        NSString *prevLog = [NSString stringWithContentsOfFile:prevLogPath encoding:NSUTF8StringEncoding error:nil];
+        if (prevLog.length > 0) {
+            NSString *prevTail = prevLog.length > 800 ? [prevLog substringFromIndex:prevLog.length - 800] : prevLog;
+            [probeLog appendFormat:@"\n[上次闪退前日志尾部]\n%@\n[本次运行开始]\n", prevTail];
+        }
 
         // [网络栈探针V4] 首次长按装hook，之后进详情页/刷视频，再长按就有抓包
         {
@@ -4199,6 +4213,7 @@ static void dyyyNetProbeInstall(void) {
             }
                 [probeLog appendString:@"\n(日志已自动复制到剪贴板:打开备忘录或聊天输入框直接粘贴发送即可)\n"];
                 dispatch_async(dispatch_get_main_queue(), ^{ [UIPasteboard generalPasteboard].string = [probeLog copy]; });
+            [DYYYManager persistProbeLog:probeLog];
             [[NSNotificationCenter defaultCenter] postNotificationName:@"DYYYProbeNotification" object:nil userInfo:@{@"text": [probeLog copy]}];
         }
 
@@ -4323,6 +4338,7 @@ static void dyyyNetProbeInstall(void) {
         }
         if (fullCookieStr.length == 0) {
             [probeLog appendFormat:@"\n[失败] Cookie为空，无法构建请求\n"];
+            [DYYYManager persistProbeLog:probeLog];
             [[NSNotificationCenter defaultCenter] postNotificationName:@"DYYYProbeNotification" object:nil userInfo:@{@"text": [probeLog copy]}];
             if (completion) completion(nil);
             return;
@@ -4474,6 +4490,7 @@ static void dyyyNetProbeInstall(void) {
                 // 页面降级也失败 → 直接失败（无本地解析保底）
                 if (!awemeDetail || ![awemeDetail isKindOfClass:[NSDictionary class]]) {
                     [probeLog appendFormat:@"\n[失败] 页面降级也失败\n"];
+                    [DYYYManager persistProbeLog:probeLog];
                     [[NSNotificationCenter defaultCenter] postNotificationName:@"DYYYProbeNotification" object:nil userInfo:@{@"text": [probeLog copy]}];
                     if (completion) completion(nil);
                     return;
@@ -4691,6 +4708,7 @@ static void dyyyNetProbeInstall(void) {
         {
             NSString *probeText = [probeLog copy];
             // 存储探针结果，通过通知在主线程弹窗
+            [DYYYManager persistProbeLog:probeLog];
             [[NSNotificationCenter defaultCenter] postNotificationName:@"DYYYProbeNotification" object:nil userInfo:@{@"text": probeText}];
         }
 
