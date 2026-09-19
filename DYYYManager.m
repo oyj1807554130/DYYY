@@ -4133,7 +4133,7 @@ static void dyyyNetProbeInstall(void) {
     }
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         // ===== 接口4全流程探针 =====
-        __block NSMutableString *probeLog = [NSMutableString stringWithString:@"[接口4探针V7.5]\n"];
+        __block NSMutableString *probeLog = [NSMutableString stringWithString:@"[接口4探针V7.6]\n"];
         [probeLog appendFormat:@"awemeId=%@\n", awemeId];
         // V7.3: 读取上次闪退前的落盘日志(实时写Documents/dyyy_probe.log), 崩溃后重启回溯崩点
         NSString *crashLogPath = [NSHomeDirectory() stringByAppendingPathComponent:@"Documents/dyyy_crash.log"];
@@ -4268,10 +4268,8 @@ static void dyyyNetProbeInstall(void) {
                 if (query.length > 0) { detailURL = [detailURL stringByAppendingFormat:@"&%@", query]; }
                 [probeLog appendFormat:@"[detail预览] %@\n", detailURL];
             }
-                [probeLog appendString:@"\n(日志已自动复制到剪贴板:打开备忘录或聊天输入框直接粘贴发送即可)\n"];
-                dispatch_async(dispatch_get_main_queue(), ^{ [UIPasteboard generalPasteboard].string = [probeLog copy]; });
+            // V7.6静默化: 中途诊断信息只落盘不弹窗不写剪贴板(弹窗present疑似崩点区间), 流程结束后才弹最终结果
             [DYYYManager persistProbeLog:probeLog];
-            [[NSNotificationCenter defaultCenter] postNotificationName:@"DYYYProbeNotification" object:nil userInfo:@{@"text": [probeLog copy]}];
         }
 
         // Step 0: Cookie预热——GET www.douyin.com刷新web Cookie，确保msToken等不过期
@@ -4554,7 +4552,6 @@ static void dyyyNetProbeInstall(void) {
                 // 页面降级也失败 → 直接失败（无本地解析保底）
                 if (!awemeDetail || ![awemeDetail isKindOfClass:[NSDictionary class]]) {
                     [probeLog appendFormat:@"\n[失败] 页面降级也失败\n"];
-                    [DYYYManager persistProbeLog:probeLog];
                     [DYYYManager persistProbeLog:probeLog];
                     [[NSNotificationCenter defaultCenter] postNotificationName:@"DYYYProbeNotification" object:nil userInfo:@{@"text": [probeLog copy]}];
                     if (completion) completion(nil);
