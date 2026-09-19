@@ -3861,7 +3861,7 @@ static void dyyyNetProbeCapture(id request) {
                         NSString *low = hk2.lowercaseString;
                         if ([low containsString:@"argus"] || [low containsString:@"ladon"] || [low containsString:@"khronos"] || [low containsString:@"gorgon"] || [low containsString:@"stub"] || [low containsString:@"helios"]) { [hits addObject:hk2]; }
                     }
-                    hinfo = [NSString stringWithFormat:@"%@ 共%lu头 签名头:%@", hk, (unsigned long)hv.count, hits.count > 0 ? [hits componentsJoinedByString:@","] : @"无"];
+                    hinfo = [NSString stringWithFormat:@"%@ 共%lu头 签名头:%@", hk, (unsigned long)[(NSDictionary *)hv count], hits.count > 0 ? [hits componentsJoinedByString:@","] : @"无"];
                     break;
                 }
             } @catch (NSException *e3) {}
