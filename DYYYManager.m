@@ -4133,7 +4133,7 @@ static void dyyyNetProbeInstall(void) {
     }
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         // ===== 接口4全流程探针 =====
-        __block NSMutableString *probeLog = [NSMutableString stringWithString:@"[接口4探针V7.6]\n"];
+        __block NSMutableString *probeLog = [NSMutableString stringWithString:@"[接口4探针V7.7]\n"];
         [probeLog appendFormat:@"awemeId=%@\n", awemeId];
         // V7.3: 读取上次闪退前的落盘日志(实时写Documents/dyyy_probe.log), 崩溃后重启回溯崩点
         NSString *crashLogPath = [NSHomeDirectory() stringByAppendingPathComponent:@"Documents/dyyy_crash.log"];

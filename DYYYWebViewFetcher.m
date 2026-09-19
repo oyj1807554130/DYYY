@@ -7,6 +7,7 @@
 @property (copy) void (^doneBlock)(NSDictionary *);
 @property (copy) NSMutableString *log;
 @property (assign) BOOL finished;
+@property (assign) BOOL webContentReloaded;
 @end
 
 static DYYYWebViewFetcher *_dyyyActiveWV = nil;
@@ -43,25 +44,25 @@ static DYYYWebViewFetcher *_dyyyActiveWV = nil;
         "})();";
     [self.log appendString:@"[Step2 WebView] 准备创建WKWebView...\n"];
     [DYYYManager persistProbeLog:self.log];
-    WKWebViewConfiguration *cfg = [[WKWebViewConfiguration alloc] init];
-    WKUserContentController *ucc = [[WKUserContentController alloc] init];
-    [ucc addUserScript:[[WKUserScript alloc] initWithSource:hookJS injectionTime:WKUserScriptInjectionTimeAtDocumentStart forMainFrameOnly:NO]];
-    [ucc addScriptMessageHandler:self name:@"dyyyDetail"];
-    cfg.userContentController = ucc;
-    self.wv = [[WKWebView alloc] initWithFrame:CGRectMake(-2000, -2000, 1280, 800) configuration:cfg];
-    [self.log appendString:@"[Step2 WebView] WKWebView创建成功\n"];
-    [DYYYManager persistProbeLog:self.log];
-    self.wv.navigationDelegate = self;
-    self.wv.customUserAgent = @"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36";
-    // 挂到keyWindow屏幕外位置: 避免离屏节流, 且用户不可见
     @try {
-        NSArray *wins = [UIApplication sharedApplication].windows;
-        UIWindow *kw = nil;
-        for (UIWindow *w in wins) { if (w.isKeyWindow) { kw = w; break; } }
-        if (!kw && wins.count > 0) kw = wins.firstObject;
-        if (kw) [kw addSubview:self.wv];
-    } @catch (NSException *e) {}
-    [self.log appendString:@"[Step2 WebView] UA设置完成\n"];
+        WKWebViewConfiguration *cfg = [[WKWebViewConfiguration alloc] init];
+        WKUserContentController *ucc = [[WKUserContentController alloc] init];
+        [ucc addUserScript:[[WKUserScript alloc] initWithSource:hookJS injectionTime:WKUserScriptInjectionTimeAtDocumentStart forMainFrameOnly:NO]];
+        [ucc addScriptMessageHandler:self name:@"dyyyDetail"];
+        cfg.userContentController = ucc;
+        // V7.7: 隔离存储, 不碰抖音持久化web数据
+        cfg.websiteDataStore = [WKWebsiteDataStore nonPersistentDataStore];
+        self.wv = [[WKWebView alloc] initWithFrame:CGRectMake(-2000, -2000, 1280, 800) configuration:cfg];
+        self.wv.navigationDelegate = self;
+        self.wv.customUserAgent = @"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36";
+        // V7.7: 不再addSubview挂载到抖音window(Scene化窗口冲突风险源), WKWebView离屏加载与JS执行不依赖view层级
+    } @catch (NSException *e) {
+        [self.log appendFormat:@"[Step2 WebView] WebView创建异常 %@ 降级\n", e.name ?: @"?"];
+        [DYYYManager persistProbeLog:self.log];
+        [self finishWith:nil];
+        return;
+    }
+    [self.log appendString:@"[Step2 WebView] WKWebView创建成功(UA完成,未挂载window)\n"];
     [DYYYManager persistProbeLog:self.log];
     [self.log appendFormat:@"[Step2 WebView] WKWebView就绪(PC UA) 开始加载页面\n"];
     [DYYYManager persistProbeLog:self.log];
@@ -138,6 +139,20 @@ static DYYYWebViewFetcher *_dyyyActiveWV = nil;
     if (self.finished) return;
     [self.log appendFormat:@"[Step2 WebView] 页面加载失败 %@\n", error.localizedDescription ?: @"?"];
     [DYYYManager persistProbeLog:self.log];
+}
+
+// V7.7: WebContent进程崩溃自愈(注入环境下常见), reload一次后仍终止则按超时处理
+- (void)webViewWebContentProcessDidTerminate:(WKWebView *)webView {
+    if (self.finished) return;
+    [self.log appendString:@"[Step2 WebView] WebContent进程终止 尝试reload\n"];
+    [DYYYManager persistProbeLog:self.log];
+    if (!self.webContentReloaded) {
+        self.webContentReloaded = YES;
+        [webView reload];
+    } else {
+        [self fireTimeout];
+    }
+
 }
 
 @end
