@@ -4227,6 +4227,29 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
         NSMutableSet *seen = [NSMutableSet set];
         NSArray *qualities = @[@[@"2160p", @"【极致】4K"], @[@"1440p", @"【高清】2K"], @[@"default", @"原画【最高画质】"], @[@"1080p", @"【清晰】1080P"], @[@"720p", @"【标准】720P"], @[@"540p", @"【模糊】540P"]];
 
+        // ratio并发预探测：主线程串行等待8s×N触发watchdog闪退，改为并发+总等待上限10s
+        NSMutableDictionary *ratioProbeResult = [NSMutableDictionary dictionary];
+        BOOL needRatioProbe = (byQuality.count == 0);
+        if (videoURI.length > 0) {
+            dispatch_group_t probeGroup = dispatch_group_create();
+            NSArray *probeList = needRatioProbe ? @[@[@"default", @"default"], @[@"2160p", @"4k"], @[@"1440p", @"2k"], @[@"1080p", @"1080p"], @[@"720p", @"720p"], @[@"540p", @"540p"]] : @[@[@"default", @"default"]];
+            for (NSArray *pq in probeList) {
+                NSString *storeKey = pq[0];
+                NSString *ratioParam = pq[1];
+                dispatch_group_enter(probeGroup);
+                dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+                    long long ps = 0;
+                    NSString *pu = [DYYYManager dyyyProbePlayURL:videoURI ratio:ratioParam ttwid:ttwidCookie size:&ps];
+                    if (pu.length > 0) {
+                        @synchronized (ratioProbeResult) { ratioProbeResult[storeKey] = @{@"url": pu, @"size": @(ps)}; }
+                    }
+                    dispatch_group_leave(probeGroup);
+                });
+            }
+            dispatch_group_wait(probeGroup, dispatch_time(DISPATCH_TIME_NOW, 10 * NSEC_PER_SEC));
+            [probeLog appendFormat:@"ratio预探测完成 need=%d 命中=%@\n", needRatioProbe, ratioProbeResult.allKeys];
+        }
+
         for (NSArray *q in qualities) {
             NSString *qCode = q[0];
             NSString *label = q[1];
@@ -4235,9 +4258,8 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
             NSInteger fps = 30;
             if ([qCode isEqualToString:@"default"]) {
                 if (videoURI.length > 0) {
-                    long long pSize = 0;
-                    NSString *cdnURL = [DYYYManager dyyyProbePlayURL:videoURI ratio:@"default" ttwid:ttwidCookie size:&pSize];
-                    if (cdnURL.length > 0) { url = cdnURL; size = pSize; }
+                    NSDictionary *pr = ratioProbeResult[@"default"];
+                    if (pr) { url = pr[@"url"]; size = [pr[@"size"] longLongValue]; }
                 }
                 if (!url || url.length == 0) {
                     NSString *bestKey = nil;
@@ -4248,20 +4270,11 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
             } else {
                 NSDictionary *qi = byQuality[qCode];
                 if (qi) { url = qi[@"url"]; size = [qi[@"size"] longLongValue]; fps = [qi[@"fps"] integerValue]; }
-                else if (videoURI.length > 0) {
-                    // bit_rate无数据(分享页SSR bit_rate=null占位)→play API ratio探测构造档位
-                    NSString *ratioParam = nil;
-                    if ([qCode isEqualToString:@"2160p"]) ratioParam = @"4k";
-                    else if ([qCode isEqualToString:@"1440p"]) ratioParam = @"2k";
-                    else if ([qCode isEqualToString:@"1080p"]) ratioParam = @"1080p";
-                    else if ([qCode isEqualToString:@"720p"]) ratioParam = @"720p";
-                    else if ([qCode isEqualToString:@"540p"]) ratioParam = @"540p";
-                    if (ratioParam) {
-                        long long pSize = 0;
-                        NSString *cdnURL = [DYYYManager dyyyProbePlayURL:videoURI ratio:ratioParam ttwid:ttwidCookie size:&pSize];
-                        [probeLog appendFormat:@"ratio探测 %@(%@): %@\n", qCode, ratioParam, (cdnURL.length > 0) ? @"成功" : @"失败"];
-                        if (cdnURL.length > 0) { url = cdnURL; size = pSize; }
-                    }
+                else if (needRatioProbe) {
+                    // bit_rate无数据(分享页SSR bit_rate=null占位)→用并发预探测结果构造档位
+                    NSDictionary *pr = ratioProbeResult[qCode];
+                    [probeLog appendFormat:@"ratio探测 %@: %@\n", qCode, pr ? @"成功" : @"失败"];
+                    if (pr) { url = pr[@"url"]; size = [pr[@"size"] longLongValue]; }
                 }
             }
             if (!url || url.length == 0 || [seen containsObject:url]) continue;
