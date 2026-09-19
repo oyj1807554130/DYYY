@@ -22,6 +22,8 @@ static JSValue *_dyyyAbCtor = nil;
         NSLog(@"[DYYYABogus] JS异常: %@", [e toString]);
     };
     [ctx evaluateScript:src];
+    // FIX: 严格模式下顶层class声明不挂全局, 必须从module.exports显式挂到globalThis, 否则ctx["ABogus"]永远undefined
+    [ctx evaluateScript:@"globalThis.ABogus = module.exports.ABogus;"];
     JSValue *ctor = ctx[@"ABogus"];
     if (!ctor || ctor.isUndefined) {
         NSLog(@"[DYYYABogus] 未找到ABogus构造器");
