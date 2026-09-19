@@ -4188,6 +4188,47 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
             [probeLog appendFormat:@"bit_rate为NSDictionary，keys=%@ → %@\n", [bd allKeys], bitRateList ? [NSString stringWithFormat:@"Array %lu条", (unsigned long)bitRateList.count] : @"未解出"];
         }
         if (!bitRateList) bitRateList = @[];
+
+        // Step 2.7: feed接口降级（bit_rate=null时，带App登录态Cookie请求v1/feed拿全档bit_rate）
+        if (bitRateList.count == 0 && awemeId.length > 0) {
+            NSString *feedURL = [NSString stringWithFormat:@"https://aweme.snssdk.com/aweme/v1/feed/?aweme_id=%@&version_code=26.0.4&app_name=aweme&channel=App%%20Store&device_platform=iphone&device_type=iPhone15,3&os_version=18.0&aid=1128", awemeId];
+            NSMutableURLRequest *feedReq = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:feedURL]];
+            feedReq.timeoutInterval = 8;
+            [feedReq setValue:@"Aweme/260400 CFNetwork/1498 Darwin/23.0.0" forHTTPHeaderField:@"User-Agent"];
+            [feedReq setValue:cookieHeader forHTTPHeaderField:@"Cookie"];
+            __block NSData *feedData = nil;
+            __block NSInteger feedStatus = 0;
+            dispatch_semaphore_t feedSem = dispatch_semaphore_create(0);
+            NSURLSessionDataTask *feedTask = [[NSURLSession sharedSession] dataTaskWithRequest:feedReq completionHandler:^(NSData *fd, NSURLResponse *fr, NSError *fe) {
+                if (fd) feedData = fd;
+                if ([fr isKindOfClass:[NSHTTPURLResponse class]]) feedStatus = ((NSHTTPURLResponse *)fr).statusCode;
+                dispatch_semaphore_signal(feedSem);
+            }];
+            [feedTask resume];
+            dispatch_semaphore_wait(feedSem, dispatch_time(DISPATCH_TIME_NOW, 8 * NSEC_PER_SEC));
+            [probeLog appendFormat:@"\n[Step2.7 feed降级] HTTP %ld body=%lu\n", (long)feedStatus, (unsigned long)feedData.length];
+            if (feedData.length > 1000) {
+                @try {
+                    id fjson = [NSJSONSerialization JSONObjectWithData:feedData options:0 error:nil];
+                    id fitem = nil;
+                    if ([fjson isKindOfClass:[NSDictionary class]]) {
+                        NSArray *flist = fjson[@"aweme_list"];
+                        if ([flist isKindOfClass:[NSArray class]] && flist.count > 0) fitem = flist[0];
+                        if (!fitem) fitem = fjson[@"aweme_detail"];
+                    }
+                    NSDictionary *fvideo = [fitem isKindOfClass:[NSDictionary class]] ? fitem[@"video"] : nil;
+                    NSArray *fbr = [fvideo isKindOfClass:[NSDictionary class]] ? fvideo[@"bit_rate"] : nil;
+                    if ([fbr isKindOfClass:[NSArray class]] && fbr.count > 0) {
+                        bitRateList = fbr;
+                        NSMutableArray *gearNames = [NSMutableArray array];
+                        for (NSDictionary *fb in fbr) [gearNames addObject:[NSString stringWithFormat:@"%@(%@)", fb[@"gear_name"] ?: @"?", fb[@"play_addr"][@"uri"] ?: @"?"]];
+                        [probeLog appendFormat:@"feed拿到bit_rate %lu条 gears=%@\n", (unsigned long)fbr.count, gearNames];
+                    } else {
+                        [probeLog appendFormat:@"feed无bit_rate数据\n"];
+                    }
+                } @catch (NSException *fe2) { [probeLog appendFormat:@"feed解析异常: %@\n", fe2]; }
+            }
+        }
         NSMutableDictionary *byQuality = [NSMutableDictionary dictionary];
         for (NSDictionary *b in bitRateList) {
             NSDictionary *playAddr = b[@"play_addr"] ?: @{};
@@ -4247,7 +4288,25 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                 });
             }
             dispatch_group_wait(probeGroup, dispatch_time(DISPATCH_TIME_NOW, 10 * NSEC_PER_SEC));
-            [probeLog appendFormat:@"ratio预探测完成 need=%d 命中=%@\n", needRatioProbe, ratioProbeResult.allKeys];
+            // 按size去重：同size(±1%)保留档位最低的标签（webapp play接口ratio=4k/2k会被降级为1080p源，假档不显示）
+            NSArray *dedupOrder = @[@"540p", @"720p", @"1080p", @"1440p", @"2160p"];
+            NSMutableSet *dedupedSize = [NSMutableSet set];
+            NSMutableArray *fakeLabels = [NSMutableArray array];
+            for (NSString *dk in dedupOrder) {
+                NSDictionary *pr = ratioProbeResult[dk];
+                if (!pr) continue;
+                long long dSize = [pr[@"size"] longLongValue];
+                BOOL dup = NO;
+                if (dSize > 0) {
+                    for (NSNumber *seenSize in dedupedSize) {
+                        long long sv = seenSize.longLongValue;
+                        if (labs(sv - dSize) * 100 <= sv) { dup = YES; break; }
+                    }
+                }
+                if (dup) { [fakeLabels addObject:dk]; [ratioProbeResult removeObjectForKey:dk]; }
+                else if (dSize > 0) { [dedupedSize addObject:@(dSize)]; }
+            }
+            [probeLog appendFormat:@"ratio预探测完成 need=%d 命中=%@ 假档剔除=%@\n", needRatioProbe, ratioProbeResult.allKeys, fakeLabels];
         }
 
         for (NSArray *q in qualities) {
