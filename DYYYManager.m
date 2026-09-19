@@ -4054,6 +4054,15 @@ static void dyyyNetProbeInstall(void) {
         if (completion) completion(nil);
         return;
     }
+    // V7.1修复: 面板action在主线程调用本函数, 而Step2(WebView主线程创建+回调)/Step2.5/2.6(semaphore等待)
+    // 若跑在主线程 -> dispatch_async(main)的WebView创建block永远不执行 -> 主线程空等90秒 -> ANR杀进程=闪退。
+    // 主线程调用时整体切后台执行; completion由调用方自行dispatch回主线程更新UI。
+    if ([NSThread isMainThread]) {
+        dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+            [self localParseFullFromAwemeModel:awemeModel completion:completion];
+        });
+        return;
+    }
     NSString *awemeId = nil;
     @try { awemeId = [awemeModel valueForKey:@"awemeID"]; } @catch (NSException *e) {}
     if (!awemeId || awemeId.length == 0) {
