@@ -3783,52 +3783,88 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                 }
                 if (lpIvars) free(lpIvars);
                 [probeLog appendFormat:@"video画质相关ivar(%lu): %@\n", (unsigned long)lpHits.count, [lpHits componentsJoinedByString:@", "]];
-                NSArray *lpKeys = @[@"bit_rate", @"bitRateList", @"bit_rate_list", @"bitrateModels", @"bitrate_models", @"play_addr", @"playAddr", @"download_addr", @"downloadAddr", @"play_addr_h264", @"play_addr_265", @"play_addr_h265", @"video_text"];
+                NSArray *lpKeys = @[@"bitrateRawData", @"bitrateModels_origin", @"manualBitrateModels", @"switchableGears", @"coverBitRateModelArray", @"miscDownloadAddrs", @"playLowBitURL", @"bitrateModels"];
                 for (NSString *lpK in lpKeys) {
                     id lpV = nil;
                     @try { lpV = [lpVideo valueForKey:lpK]; } @catch (NSException *lke) { lpV = nil; }
                     if (!lpV) continue;
                     if ([lpV isKindOfClass:[NSArray class]]) {
-                        if ([lpV count] == 0) { [probeLog appendFormat:@"%@: 空数组\n", lpK]; continue; }
                         [probeLog appendFormat:@"%@: %lu档\n", lpK, (unsigned long)[lpV count]];
                         int lpIdx = 0;
                         for (id lpIt in lpV) {
-                            if (lpIdx >= 12) { [probeLog appendString:@"  ...(截断)\n"]; break; }
-                            id lpG = nil; id lpQ = nil; id lpSz = nil;
-                            @try { lpG = [lpIt valueForKey:@"gear_name"]; } @catch(NSException *lge) {}
-                            if (!lpG) @try { lpG = [lpIt valueForKey:@"gearName"]; } @catch(NSException *lge) {}
-                            @try { lpQ = [lpIt valueForKey:@"quality_type"]; } @catch(NSException *lqe) {}
-                            if (!lpQ) @try { lpQ = [lpIt valueForKey:@"qualityType"]; } @catch(NSException *lqe) {}
-                            @try { lpSz = [lpIt valueForKey:@"band_width"]; } @catch(NSException *lbe) {}
-                            id lpPa = nil;
-                            @try { lpPa = [lpIt valueForKey:@"play_addr"]; } @catch(NSException *lpe2) {}
-                            if (!lpPa) @try { lpPa = [lpIt valueForKey:@"playAddr"]; } @catch(NSException *lpe2) {}
-                            id lpUrls = nil;
-                            if (lpPa) {
-                                @try { lpUrls = [lpPa valueForKey:@"url_list"]; } @catch(NSException *lue) {}
-                                if (!lpUrls) @try { lpUrls = [lpPa valueForKey:@"urlList"]; } @catch(NSException *lue) {}
-                                id lpDs = nil;
-                                @try { lpDs = [lpPa valueForKey:@"data_size"]; } @catch(NSException *lde) {}
-                                if (!lpDs) @try { lpDs = [lpPa valueForKey:@"dataSize"]; } @catch(NSException *lde) {}
-                                if (lpDs) lpSz = lpDs;
+                            if (lpIdx >= 6) { [probeLog appendString:@"  ...(截断)\n"]; break; }
+                            [probeLog appendFormat:@"  [%d]<%@>:\n", lpIdx, [lpIt class]);
+                            unsigned int lpCnt = 0;
+                            Ivar *lpIvs = class_copyIvarList([lpIt class], &lpCnt);
+                            int lpShown = 0;
+                            for (unsigned int i = 0; i < lpCnt && lpShown < 10; i++) {
+                                const char *lpNm = ivar_getName(lpIvs[i]);
+                                if (!lpNm) continue;
+                                NSString *lpNs = [NSString stringWithUTF8String:lpNm];
+                                if ([lpNs hasPrefix:@"_"]) lpNs = [lpNs substringFromIndex:1];
+                                id lpVal = nil;
+                                @try { lpVal = [lpIt valueForKey:lpNs]; } @catch (NSException *lve) { continue; }
+                                if (!lpVal) continue;
+                                if ([lpVal isKindOfClass:[NSNumber class]] || [lpVal isKindOfClass:[NSString class]]) {
+                                    NSString *lpPrev = [NSString stringWithFormat:@"%@", lpVal];
+                                    if (lpPrev.length > 80) lpPrev = [[lpPrev substringToIndex:80] stringByAppendingString:@"..."];
+                                    [probeLog appendFormat:@"    %@=%@\n", lpNs, lpPrev];
+                                    lpShown++;
+                                } else if ([lpVal isKindOfClass:[NSArray class]]) {
+                                    [probeLog appendFormat:@"    %@: 数组%lu\n", lpNs, (unsigned long)[lpVal count]];
+                                    if ([lpVal count] > 0) {
+                                        NSString *lpPrev = [NSString stringWithFormat:@"%@", [lpVal firstObject]];
+                                        if (lpPrev.length > 100) lpPrev = [[lpPrev substringToIndex:100] stringByAppendingString:@"..."];
+                                        [probeLog appendFormat:@"      first=%@\n", lpPrev];
+                                    }
+                                    lpShown++;
+                                } else if ([lpVal isKindOfClass:[NSDictionary class]]) {
+                                    NSString *lpPrev = [NSString stringWithFormat:@"%@", lpVal];
+                                    if (lpPrev.length > 150) lpPrev = [[lpPrev substringToIndex:150] stringByAppendingString:@"..."];
+                                    [probeLog appendFormat:@"    %@: %@\n", lpNs, lpPrev];
+                                    lpShown++;
+                                }
                             }
-                            id lpU0 = ([lpUrls isKindOfClass:[NSArray class]] && [lpUrls count] > 0) ? [lpUrls firstObject] : nil;
-                            NSString *lpUprev = lpU0 ? [NSString stringWithFormat:@"%@", lpU0] : @"无";
-                            if (lpUprev.length > 90) lpUprev = [[lpUprev substringToIndex:90] stringByAppendingString:@"..."];
-                            [probeLog appendFormat:@"  [%d] gear=%@ qt=%@ size=%@\n      url=%@\n", lpIdx, lpG, lpQ, lpSz, lpUprev];
+                            if (lpIvs) free(lpIvs);
+                            if (lpShown == 0) [probeLog appendString:@"    (无非空基础字段)\n"];
                             lpIdx++;
                         }
                     } else if ([lpV isKindOfClass:[NSDictionary class]]) {
-                        id lpUrls = nil; @try { lpUrls = [lpV valueForKey:@"url_list"]; } @catch(NSException *lue) {}
-                        if (!lpUrls) @try { lpUrls = [lpV valueForKey:@"urlList"]; } @catch(NSException *lue) {}
-                        id lpDs = nil; @try { lpDs = [lpV valueForKey:@"data_size"]; } @catch(NSException *lde) {}
-                        if (!lpDs) @try { lpDs = [lpV valueForKey:@"dataSize"]; } @catch(NSException *lde) {}
-                        NSString *lpUprev = lpUrls ? [NSString stringWithFormat:@"%@", lpUrls] : @"无";
-                        if (lpUprev.length > 90) lpUprev = [[lpUprev substringToIndex:90] stringByAppendingString:@"..."];
-                        [probeLog appendFormat:@"%@: dict size=%@ urls=%@\n", lpK, lpDs, lpUprev];
+                        [probeLog appendFormat:@"%@: dict keys=%@\n", lpK, [[lpV allKeys] componentsJoinedByString:@","]];
+                        id lpBr = [lpV objectForKey:@"bit_rate"];
+                        if ([lpBr isKindOfClass:[NSArray class]]) {
+                            [probeLog appendFormat:@"  bit_rate: %lu档\n", (unsigned long)[lpBr count]];
+                            int lpIdx2 = 0;
+                            for (id lpIt2 in lpBr) {
+                                if (lpIdx2 >= 8) { [probeLog appendString:@"  ...(截断)\n"]; break; }
+                                if ([lpIt2 isKindOfClass:[NSDictionary class]]) {
+                                    id lpGear = [lpIt2 objectForKey:@"gear_name"];
+                                    id lpQt = [lpIt2 objectForKey:@"quality_type"];
+                                    id lpPa = [lpIt2 objectForKey:@"play_addr"];
+                                    id lpUrls = nil; id lpDs = nil;
+                                    if ([lpPa isKindOfClass:[NSDictionary class]]) {
+                                        lpUrls = [lpPa objectForKey:@"url_list"];
+                                        lpDs = [lpPa objectForKey:@"data_size"];
+                                    }
+                                    id lpU0 = ([lpUrls isKindOfClass:[NSArray class]] && [lpUrls count] > 0) ? [lpUrls firstObject] : nil;
+                                    NSString *lpUprev = lpU0 ? [NSString stringWithFormat:@"%@", lpU0] : @"无";
+                                    if (lpUprev.length > 80) lpUprev = [[lpUprev substringToIndex:80] stringByAppendingString:@"..."];
+                                    [probeLog appendFormat:@"  [%d] gear=%@ qt=%@ size=%@ url=%@\n", lpIdx2, lpGear, lpQt, lpDs, lpUprev];
+                                }
+                                lpIdx2++;
+                            }
+                        } else {
+                            NSString *lpPrev = [NSString stringWithFormat:@"%@", lpBr];
+                            if (lpPrev.length > 120) lpPrev = [[lpPrev substringToIndex:120] stringByAppendingString:@"..."];
+                            [probeLog appendFormat:@"  bit_rate=%@\n", lpPrev];
+                        }
                     } else if ([lpV isKindOfClass:[NSString class]]) {
-                        NSString *lpSprev = [lpV length] > 90 ? [[lpV substringToIndex:90] stringByAppendingString:@"..."] : lpV;
+                        NSString *lpSprev = [lpV length] > 120 ? [[lpV substringToIndex:120] stringByAppendingString:@"..."] : lpV;
                         [probeLog appendFormat:@"%@: %@\n", lpK, lpSprev];
+                    } else if ([lpV isKindOfClass:[NSData class]]) {
+                        NSString *lpS = [[NSString alloc] initWithData:lpV encoding:NSUTF8StringEncoding];
+                        NSString *lpSprev = (lpS.length > 300) ? [[lpS substringToIndex:300] stringByAppendingString:@"..."] : lpS;
+                        [probeLog appendFormat:@"%@: data=%@\n", lpK, lpSprev];
                     } else {
                         [probeLog appendFormat:@"%@: <%@>\n", lpK, [lpV class]];
                     }
