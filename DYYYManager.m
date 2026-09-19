@@ -3880,10 +3880,14 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                 [probeLog appendFormat:@"\n[Step2 WebAPI响应] HTTP %ld body=%lu字节\n", (long)(step2Http ? step2Http.statusCode : 0), (unsigned long)apiData.length];
                 NSDictionary *apiJson = apiData.length > 0 ? [NSJSONSerialization JSONObjectWithData:apiData options:0 error:nil] : nil;
                 if (!apiJson) {
-                    NSString *rawBody = [[NSString alloc] initWithData:apiData encoding:NSUTF8StringEncoding];
-                    if (rawBody.length > 200) rawBody = [rawBody substringToIndex:200];
-                    if (rawBody.length == 0) rawBody = [NSString stringWithFormat:@"<非UTF8二进制 %lu字节>", (unsigned long)apiData.length];
-                    [probeLog appendFormat:@"⚠️响应非JSON! body前200字:\n%@\n", rawBody];
+                    if (apiData.length == 0) {
+                        [probeLog appendFormat:@"\n[Step2 WebAPI响应]\n响应为空! error=%@\n", apiErr.localizedDescription];
+                    } else {
+                        NSString *rawBody = [[NSString alloc] initWithData:apiData encoding:NSUTF8StringEncoding];
+                        if (rawBody.length > 200) rawBody = [rawBody substringToIndex:200];
+                        if (rawBody.length == 0) rawBody = [NSString stringWithFormat:@"<非UTF8二进制 %lu字节>", (unsigned long)apiData.length];
+                        [probeLog appendFormat:@"\n[Step2 WebAPI响应]\n⚠️响应非JSON! body前200字:\n%@\n", rawBody];
+                    }
                 }
                 if ([apiJson isKindOfClass:[NSDictionary class]]) {
                         NSInteger statusCode = [apiJson[@"status_code"] integerValue];
@@ -3914,9 +3918,6 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                             [probeLog appendFormat:@"error响应: %@\n", raw];
                         }
                     }
-                } else {
-                    [probeLog appendFormat:@"\n[Step2 WebAPI响应]\n响应为空! error=%@\n", apiErr.localizedDescription];
-                }
             } @catch (NSException *e) {}
             dispatch_semaphore_signal(apiSem);
         }];
