@@ -4082,7 +4082,7 @@ static void dyyyNetProbeInstall(void) {
     }
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         // ===== 接口4全流程探针 =====
-        __block NSMutableString *probeLog = [NSMutableString stringWithString:@"[接口4探针V7.2]\n"];
+        __block NSMutableString *probeLog = [NSMutableString stringWithString:@"[接口4探针V7.4]\n"];
         [probeLog appendFormat:@"awemeId=%@\n", awemeId];
         // V7.3: 读取上次闪退前的落盘日志(实时写Documents/dyyy_probe.log), 崩溃后重启回溯崩点
         NSString *prevLogPath = [NSHomeDirectory() stringByAppendingPathComponent:@"Documents/dyyy_probe.log"];
@@ -4233,6 +4233,7 @@ static void dyyyNetProbeInstall(void) {
             dispatch_semaphore_wait(warmupSem, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC));
             NSInteger warmupCookieCountAfter = [[NSHTTPCookieStorage sharedHTTPCookieStorage] cookiesForURL:[NSURL URLWithString:@"https://www.douyin.com/"]].count;
             [probeLog appendFormat:@"\n[Step0 预热]\nGET www.douyin.com → HTTP %ld\nCookie: %ld→%ld\n", (long)warmupStatus, (long)warmupCookieCountBefore, (long)warmupCookieCountAfter];
+            [DYYYManager persistProbeLog:probeLog];
         }
 
         // Step 1: 构建完整Cookie（从app Cookie存储取douyin.com全部cookie，对齐JS规则）
@@ -4263,6 +4264,7 @@ static void dyyyNetProbeInstall(void) {
                 if ([t hasPrefix:@"ttwid="]) ttwidStr = [t substringFromIndex:6];
             }
             [probeLog appendFormat:@"[自定义Cookie生效] len=%lu ttwid=%@\n", (unsigned long)customCookie.length, ttwidStr.length > 0 ? @"已提取" : @"无(将自动注册)"];
+            [DYYYManager persistProbeLog:probeLog];
         }
         // 降级：如果没有ttwid，从注册接口获取并追加到cookie
         if (!ttwidStr || ttwidStr.length == 0) {
@@ -4331,6 +4333,7 @@ static void dyyyNetProbeInstall(void) {
                 dispatch_semaphore_wait(ttwidSem, dispatch_time(DISPATCH_TIME_NOW, 10 * NSEC_PER_SEC));
             }
             [probeLog appendFormat:@"\n[Step1.5 ttwid注册]\nPOST ttwid.bytedance.com → HTTP %ld\nSet-Cookie ttwid=%@ (len=%lu)\nJSON body ttwid=%@\n最终ttwid=%@\n", (long)ttwidHttpStatus, ttwidFromHeader ? [[ttwidFromHeader substringToIndex:MIN(20, ttwidFromHeader.length)] stringByAppendingString:@"..."] : @"无", (unsigned long)(ttwidFromHeader ? ttwidFromHeader.length : 0), ttwidFromBody ? @"有" : @"无", ttwidStr.length > 0 ? @"有" : @"无"];
+            [DYYYManager persistProbeLog:probeLog];
             if (ttwidStr && ttwidStr.length > 0) {
                 if (fullCookieStr.length > 0) [fullCookieStr appendString:@"; "];
                 [fullCookieStr appendFormat:@"ttwid=%@", ttwidStr];
@@ -4350,6 +4353,7 @@ static void dyyyNetProbeInstall(void) {
         __block NSDictionary *awemeDetail = nil;
         dispatch_semaphore_t wvSem = dispatch_semaphore_create(0);
         [probeLog appendFormat:@"\n[Step2 WebView] 加载 douyin.com/video/%@ 拦截页面detail请求...\n", awemeId];
+        [DYYYManager persistProbeLog:probeLog];
         [DYYYWebViewFetcher fetchDetail:awemeId probeLog:probeLog completion:^(NSDictionary *detail) {
             awemeDetail = detail;
             dispatch_semaphore_signal(wvSem);
@@ -4359,8 +4363,10 @@ static void dyyyNetProbeInstall(void) {
             NSDictionary *wvV = awemeDetail[@"video"];
             NSArray *wvBr = [wvV isKindOfClass:[NSDictionary class]] ? wvV[@"bit_rate"] : nil;
             [probeLog appendFormat:@"[Step2 WebView] 结果=成功 bit_rate=%lu条\n", (unsigned long)(wvBr ? [wvBr count] : 0)];
+            [DYYYManager persistProbeLog:probeLog];
         } else {
             [probeLog appendFormat:@"[Step2 WebView] 结果=未拦截到(超时/风控页/页面异常)\n"];
+            [DYYYManager persistProbeLog:probeLog];
         }
 
         if (!awemeDetail || ![awemeDetail isKindOfClass:[NSDictionary class]]) {
@@ -4374,6 +4380,7 @@ static void dyyyNetProbeInstall(void) {
             }];
             dispatch_semaphore_wait(wvSem2, dispatch_time(DISPATCH_TIME_NOW, 20 * NSEC_PER_SEC));
             [probeLog appendFormat:@"[Step2 WebView重试] 结果=%@\n", ([awemeDetail isKindOfClass:[NSDictionary class]]) ? @"成功" : @"仍失败"];
+            [DYYYManager persistProbeLog:probeLog];
             if (!awemeDetail || ![awemeDetail isKindOfClass:[NSDictionary class]]) {
                 // 降级: 从视频页面HTML提取RENDER_DATA（不需要a_bogus）
                 [probeLog appendFormat:@"\n[Step2.5 页面降级] GET /video/%@\n", awemeId];
@@ -4491,11 +4498,13 @@ static void dyyyNetProbeInstall(void) {
                 if (!awemeDetail || ![awemeDetail isKindOfClass:[NSDictionary class]]) {
                     [probeLog appendFormat:@"\n[失败] 页面降级也失败\n"];
                     [DYYYManager persistProbeLog:probeLog];
+                    [DYYYManager persistProbeLog:probeLog];
                     [[NSNotificationCenter defaultCenter] postNotificationName:@"DYYYProbeNotification" object:nil userInfo:@{@"text": [probeLog copy]}];
                     if (completion) completion(nil);
                     return;
                 }
                 [probeLog appendFormat:@"[Step2.5成功] 页面降级获取4K数据成功\n"];
+                [DYYYManager persistProbeLog:probeLog];
             }
         }
 
