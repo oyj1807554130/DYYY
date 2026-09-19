@@ -9464,6 +9464,26 @@ static void findTargetViewInView(UIView *view) {
                                                           }
                                                       }
                                                     }];
+        // 接口4探针日志弹窗（诊断用：展示Step0~2.5各阶段状态）
+        [center addObserverForName:@"DYYYProbeNotification"
+                            object:nil
+                             queue:[NSOperationQueue mainQueue]
+                        usingBlock:^(NSNotification *note) {
+          NSString *text = note.userInfo[@"text"];
+          if (![text isKindOfClass:[NSString class]] || text.length == 0) return;
+          UIWindow *win = [DYYYUtils getActiveWindow];
+          if (!win || !win.rootViewController) return;
+          NSString *tail = text.length > 1200 ? [text substringFromIndex:text.length - 1200] : text;
+          NSString *header = text.length > 1200 ? [NSString stringWithFormat:@"[日志共%lu字，显示末尾1200字]\n", (unsigned long)text.length] : @"";
+          UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"接口4探针"
+                                                                         message:[NSString stringWithFormat:@"%@%@", header, tail]
+                                                                  preferredStyle:UIAlertControllerStyleAlert];
+          [alert addAction:[UIAlertAction actionWithTitle:@"复制完整日志" style:UIAlertActionStyleDefault handler:^(UIAlertAction *act) {
+              [UIPasteboard generalPasteboard].string = text;
+          }]];
+          [alert addAction:[UIAlertAction actionWithTitle:@"关闭" style:UIAlertActionStyleCancel handler:nil]];
+          [win.rootViewController presentViewController:alert animated:YES completion:nil];
+        }];
     }
 }
 
