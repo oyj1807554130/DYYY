@@ -11,7 +11,7 @@
 
 #import "DYYYToast.h"
 #import "DYYYUtils.h"
-#import "DYYYABogus.h"
+#import "DYYYWebViewFetcher.h"
 
 // MARK: - API 类型定义
 typedef NS_ENUM(NSInteger, DYYYAPIType) {
@@ -4321,127 +4321,34 @@ static void dyyyNetProbeInstall(void) {
         // 存储ttwid供后续CDN下载使用
         if (ttwidStr && ttwidStr.length > 0) [DYYYManager shared].localParseTtwid = ttwidStr;
 
-        // Step 2: web API（完整URL参数+浏览器指纹header+全Cookie，对齐JS规则）
+        // Step 2: web detail —— 隐藏WKWebView加载PC版详情页, 拦截页面自身发出的detail请求(签名/cookie/指纹全真, Argus无法拒绝)
         __block NSDictionary *awemeDetail = nil;
-        NSString *detailParams = [NSString stringWithFormat:@"aweme_id=%@&device_platform=webapp&aid=6383&channel=channel_pc_web&update_version_code=170400&pc_client_type=1&version_code=190500&version_name=19.5.0&cookie_enabled=true&screen_width=2560&screen_height=1440&browser_language=zh-CN&browser_platform=Win32&browser_name=Chrome&browser_version=150.0.0.0&browser_online=true&engine_name=Blink&engine_version=150.0.0.0&os_name=Windows&os_version=10&cpu_core_num=12&device_memory=8&platform=PC&downlink=4.75&effective_type=4g&round_trip_time=150", awemeId];
-        NSString *signUA = @"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36";
-        NSString *signedParams = [DYYYABogus signedQueryForParams:detailParams body:nil ua:signUA];
-        [probeLog appendFormat:@"[Step2签名] ready=%d signed=%@\n", [DYYYABogus isReady] ? 1 : 0, (signedParams.length > 0) ? [NSString stringWithFormat:@"有 len=%lu 尾40=%@", (unsigned long)signedParams.length, signedParams.length > 40 ? [signedParams substringFromIndex:signedParams.length - 40] : signedParams] : @"无(裸参数!)"];
-        NSString *apiURL = [NSString stringWithFormat:@"https://www.douyin.com/aweme/v1/web/aweme/detail/?%@", signedParams ?: detailParams];
-        NSMutableURLRequest *apiReq = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:apiURL]];
-        [apiReq setValue:@"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36" forHTTPHeaderField:@"User-Agent"];
-        [apiReq setValue:@"https://www.douyin.com/" forHTTPHeaderField:@"Referer"];
-        [apiReq setValue:@"text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7" forHTTPHeaderField:@"Accept"];
-        [apiReq setValue:@"zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6" forHTTPHeaderField:@"Accept-Language"];
-        [apiReq setValue:@"no-cache" forHTTPHeaderField:@"Cache-Control"];
-        [apiReq setValue:@"no-cache" forHTTPHeaderField:@"Pragma"];
-        NSString *secChUa = [NSString stringWithFormat:@"%cChromium%c;v=%c150%c, %cGoogle Chrome%c;v=%c150%c", 34, 34, 34, 34, 34, 34, 34, 34];
-        [apiReq setValue:secChUa forHTTPHeaderField:@"sec-ch-ua"];
-        [apiReq setValue:@"?0" forHTTPHeaderField:@"sec-ch-ua-mobile"];
-        NSString *secChPlatform = [NSString stringWithFormat:@"%cWindows%c", 34, 34];
-        [apiReq setValue:secChPlatform forHTTPHeaderField:@"sec-ch-ua-platform"];
-        [apiReq setValue:@"document" forHTTPHeaderField:@"sec-fetch-dest"];
-        [apiReq setValue:@"navigate" forHTTPHeaderField:@"sec-fetch-mode"];
-        [apiReq setValue:@"same-origin" forHTTPHeaderField:@"sec-fetch-site"];
-        [apiReq setValue:@"?1" forHTTPHeaderField:@"sec-fetch-user"];
-        [apiReq setValue:@"1" forHTTPHeaderField:@"upgrade-insecure-requests"];
-        [apiReq setValue:fullCookieStr forHTTPHeaderField:@"Cookie"];
-        // Argus风控要求uifid请求头（值取自Cookie中UIFID字段，抖音web端XHR均携带）
-        NSString *uifidVal = nil;
-        NSRange ur = [fullCookieStr rangeOfString:@"UIFID="];
-        if (ur.location != NSNotFound) {
-            NSUInteger us = ur.location + ur.length;
-            NSRange ueR = [fullCookieStr rangeOfString:@";" options:0 range:NSMakeRange(us, fullCookieStr.length - us)];
-            NSUInteger ue = (ueR.location == NSNotFound) ? fullCookieStr.length : ueR.location;
-            uifidVal = [fullCookieStr substringWithRange:NSMakeRange(us, ue - us)];
-        }
-        if (uifidVal.length > 10) {
-            [apiReq setValue:uifidVal forHTTPHeaderField:@"uifid"];
-            [probeLog appendFormat:@"[uifid请求头] len=%lu\n", (unsigned long)uifidVal.length];
-        } else {
-            [probeLog appendFormat:@"[uifid请求头] 未找到UIFID\n"];
-        }
-        [probeLog appendFormat:@"\n[Step2 发送Cookie] len=%lu preview=%@...\n", (unsigned long)fullCookieStr.length, [fullCookieStr substringToIndex:MIN(120, fullCookieStr.length)]];
-        dispatch_semaphore_t apiSem = dispatch_semaphore_create(0);
-        NSURLSessionDataTask *apiTask = [[NSURLSession sharedSession] dataTaskWithRequest:apiReq completionHandler:^(NSData *apiData, NSURLResponse *apiResp, NSError *apiErr) {
-            @try {
-                NSHTTPURLResponse *step2Http = (NSHTTPURLResponse *)apiResp;
-                [probeLog appendFormat:@"\n[Step2 WebAPI响应] HTTP %ld body=%lu字节\n", (long)(step2Http ? step2Http.statusCode : 0), (unsigned long)apiData.length];
-                NSDictionary *apiJson = apiData.length > 0 ? [NSJSONSerialization JSONObjectWithData:apiData options:0 error:nil] : nil;
-                if (!apiJson) {
-                    if (apiData.length == 0) {
-                        [probeLog appendFormat:@"\n[Step2 WebAPI响应]\n响应为空! error=%@\n", apiErr.localizedDescription];
-                    } else {
-                        NSString *rawBody = [[NSString alloc] initWithData:apiData encoding:NSUTF8StringEncoding];
-                        if (rawBody.length > 200) rawBody = [rawBody substringToIndex:200];
-                        if (rawBody.length == 0) rawBody = [NSString stringWithFormat:@"<非UTF8二进制 %lu字节>", (unsigned long)apiData.length];
-                        [probeLog appendFormat:@"\n[Step2 WebAPI响应]\n⚠️响应非JSON! body前200字:\n%@\n", rawBody];
-                    }
-                }
-                if ([apiJson isKindOfClass:[NSDictionary class]]) {
-                        NSInteger statusCode = [apiJson[@"status_code"] integerValue];
-                        if (statusCode == 0) awemeDetail = apiJson[@"aweme_detail"];
-                        // 探针：web API响应
-                        [probeLog appendFormat:@"\n[Step2 WebAPI响应]\nstatus_code=%ld\n", (long)statusCode];
-                        NSHTTPURLResponse *httpR = (NSHTTPURLResponse *)apiResp;
-                        [probeLog appendFormat:@"HTTP status=%ld\n", (long)httpR.statusCode];
-                        [probeLog appendFormat:@"responseBody长度=%lu\n", (unsigned long)apiData.length];
-                        if (statusCode == 0 && awemeDetail) {
-                            NSDictionary *vObj = awemeDetail[@"video"];
-                            NSArray *brList = vObj[@"bit_rate"];
-                            [probeLog appendFormat:@"bit_rate条目数=%lu\n", (unsigned long)(brList ? brList.count : 0)];
-                            for (NSDictionary *br in (brList ?: @[])) {
-                                NSString *gn = br[@"gear_name"] ?: @"?";
-                                NSInteger brVal = [br[@"bit_rate"] integerValue];
-                                NSInteger fps = [br[@"FPS"] integerValue];
-                                NSDictionary *pa = br[@"play_addr"] ?: @{};
-                                NSInteger h = [pa[@"height"] integerValue];
-                                NSInteger w = [pa[@"width"] integerValue];
-                                long long ds = [pa[@"data_size"] longLongValue];
-                                [probeLog appendFormat:@"  gear=%@ bitrate=%ld fps=%ld %ldx%ld size=%lld\n", gn, (long)brVal, (long)fps, (long)w, (long)h, ds];
-                            }
-                        } else {
-                            // 截取前200字符看错误
-                            NSString *raw = [[NSString alloc] initWithData:apiData encoding:NSUTF8StringEncoding];
-                            if (raw.length > 200) raw = [raw substringToIndex:200];
-                            [probeLog appendFormat:@"error响应: %@\n", raw];
-                        }
-                    }
-            } @catch (NSException *e) {}
-            dispatch_semaphore_signal(apiSem);
+        dispatch_semaphore_t wvSem = dispatch_semaphore_create(0);
+        [probeLog appendFormat:@"\n[Step2 WebView] 加载 douyin.com/video/%@ 拦截页面detail请求...\n", awemeId];
+        [DYYYWebViewFetcher fetchDetail:awemeId probeLog:probeLog completion:^(NSDictionary *detail) {
+            awemeDetail = detail;
+            dispatch_semaphore_signal(wvSem);
         }];
-        [apiTask resume];
-        dispatch_semaphore_wait(apiSem, dispatch_time(DISPATCH_TIME_NOW, 15 * NSEC_PER_SEC));
+        dispatch_semaphore_wait(wvSem, dispatch_time(DISPATCH_TIME_NOW, 20 * NSEC_PER_SEC));
+        if ([awemeDetail isKindOfClass:[NSDictionary class]]) {
+            NSDictionary *wvV = awemeDetail[@"video"];
+            NSArray *wvBr = [wvV isKindOfClass:[NSDictionary class]] ? wvV[@"bit_rate"] : nil;
+            [probeLog appendFormat:@"[Step2 WebView] 结果=成功 bit_rate=%lu条\n", (unsigned long)(wvBr ? [wvBr count] : 0)];
+        } else {
+            [probeLog appendFormat:@"[Step2 WebView] 结果=未拦截到(超时/风控页/页面异常)\n"];
+        }
 
         if (!awemeDetail || ![awemeDetail isKindOfClass:[NSDictionary class]]) {
-            // Cookie可能过期，重新从app读取全Cookie重试一次
-            NSHTTPCookieStorage *retryCookieStore = [NSHTTPCookieStorage sharedHTTPCookieStorage];
-            NSArray *retryCookies = [retryCookieStore cookiesForURL:[NSURL URLWithString:@"https://www.douyin.com/"]];
-            NSMutableString *retryCookieStr = [NSMutableString string];
-            for (NSHTTPCookie *rc in retryCookies) {
-                if (retryCookieStr.length > 0) [retryCookieStr appendString:@"; "];
-                [retryCookieStr appendFormat:@"%@=%@", [rc name], [rc value]];
-            }
-            if (retryCookieStr.length > 0) {
-                [apiReq setValue:retryCookieStr forHTTPHeaderField:@"Cookie"];
-                dispatch_semaphore_t apiSem2 = dispatch_semaphore_create(0);
-                awemeDetail = nil;
-                NSURLSessionDataTask *apiTask2 = [[NSURLSession sharedSession] dataTaskWithRequest:apiReq completionHandler:^(NSData *aD2, NSURLResponse *aR2, NSError *aE2) {
-                    @try {
-                        if (aD2.length > 0) {
-                            NSDictionary *aJ2 = [NSJSONSerialization JSONObjectWithData:aD2 options:0 error:nil];
-                            if ([aJ2 isKindOfClass:[NSDictionary class]]) {
-                                NSInteger sc2 = [aJ2[@"status_code"] integerValue];
-                                if (sc2 == 0) awemeDetail = aJ2[@"aweme_detail"];
-                            }
-                        }
-                    } @catch (NSException *ex3) {}
-                    dispatch_semaphore_signal(apiSem2);
-                }];
-                [apiTask2 resume];
-                dispatch_semaphore_wait(apiSem2, dispatch_time(DISPATCH_TIME_NOW, 15 * NSEC_PER_SEC));
-            }
-
+            // WebView首试失败, 重试一次(偶发页面加载失败/弱网)
+            [probeLog appendFormat:@"\n[Step2 WebView重试] 再次加载页面...\n"];
+            dispatch_semaphore_t wvSem2 = dispatch_semaphore_create(0);
+            awemeDetail = nil;
+            [DYYYWebViewFetcher fetchDetail:awemeId probeLog:probeLog completion:^(NSDictionary *detail2) {
+                awemeDetail = detail2;
+                dispatch_semaphore_signal(wvSem2);
+            }];
+            dispatch_semaphore_wait(wvSem2, dispatch_time(DISPATCH_TIME_NOW, 20 * NSEC_PER_SEC));
+            [probeLog appendFormat:@"[Step2 WebView重试] 结果=%@\n", ([awemeDetail isKindOfClass:[NSDictionary class]]) ? @"成功" : @"仍失败"];
             if (!awemeDetail || ![awemeDetail isKindOfClass:[NSDictionary class]]) {
                 // 降级: 从视频页面HTML提取RENDER_DATA（不需要a_bogus）
                 [probeLog appendFormat:@"\n[Step2.5 页面降级] GET /video/%@\n", awemeId];
@@ -4452,8 +4359,7 @@ static void dyyyNetProbeInstall(void) {
                 // 登录态页面不嵌视频数据(返回首页shell)，降级页必须用游客态Cookie(仅ttwid)
                 NSString *guestCookie = (ttwidStr.length > 0) ? [NSString stringWithFormat:@"ttwid=%@", ttwidStr] : @"ttwid=";
                 [pageReq setValue:guestCookie forHTTPHeaderField:@"Cookie"];
-                if (uifidVal.length > 10) [pageReq setValue:uifidVal forHTTPHeaderField:@"uifid"];
-                [probeLog appendFormat:@"游客Cookie len=%lu uifid头=%@\n", (unsigned long)guestCookie.length, (uifidVal.length > 10) ? @"有" : @"无"];
+                [probeLog appendFormat:@"游客Cookie len=%lu\n", (unsigned long)guestCookie.length];
                 [pageReq setValue:@"text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8" forHTTPHeaderField:@"Accept"];
                 [pageReq setValue:@"zh-CN,zh;q=0.9" forHTTPHeaderField:@"Accept-Language"];
                 __block NSData *pageData = nil;
