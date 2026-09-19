@@ -3872,6 +3872,21 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
         [apiReq setValue:@"?1" forHTTPHeaderField:@"sec-fetch-user"];
         [apiReq setValue:@"1" forHTTPHeaderField:@"upgrade-insecure-requests"];
         [apiReq setValue:fullCookieStr forHTTPHeaderField:@"Cookie"];
+        // Argus风控要求uifid请求头（值取自Cookie中UIFID字段，抖音web端XHR均携带）
+        NSString *uifidVal = nil;
+        NSRange ur = [fullCookieStr rangeOfString:@"UIFID="];
+        if (ur.location != NSNotFound) {
+            NSUInteger us = ur.location + ur.length;
+            NSRange ueR = [fullCookieStr rangeOfString:@";" options:0 range:NSMakeRange(us, fullCookieStr.length - us)];
+            NSUInteger ue = (ueR.location == NSNotFound) ? fullCookieStr.length : ueR.location;
+            uifidVal = [fullCookieStr substringWithRange:NSMakeRange(us, ue - us)];
+        }
+        if (uifidVal.length > 10) {
+            [apiReq setValue:uifidVal forHTTPHeaderField:@"uifid"];
+            [probeLog appendFormat:@"[uifid请求头] len=%lu\n", (unsigned long)uifidVal.length];
+        } else {
+            [probeLog appendFormat:@"[uifid请求头] 未找到UIFID\n"];
+        }
         [probeLog appendFormat:@"\n[Step2 发送Cookie] len=%lu preview=%@...\n", (unsigned long)fullCookieStr.length, [fullCookieStr substringToIndex:MIN(120, fullCookieStr.length)]];
         dispatch_semaphore_t apiSem = dispatch_semaphore_create(0);
         NSURLSessionDataTask *apiTask = [[NSURLSession sharedSession] dataTaskWithRequest:apiReq completionHandler:^(NSData *apiData, NSURLResponse *apiResp, NSError *apiErr) {
