@@ -3996,7 +3996,11 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                 NSMutableURLRequest *pageReq = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:pageURL]];
                 [pageReq setValue:@"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36" forHTTPHeaderField:@"User-Agent"];
                 [pageReq setValue:@"https://www.douyin.com/" forHTTPHeaderField:@"Referer"];
-                [pageReq setValue:fullCookieStr forHTTPHeaderField:@"Cookie"];
+                // 登录态页面不嵌视频数据(返回首页shell)，降级页必须用游客态Cookie(仅ttwid)
+                NSString *guestCookie = (ttwidStr.length > 0) ? [NSString stringWithFormat:@"ttwid=%@", ttwidStr] : @"ttwid=";
+                [pageReq setValue:guestCookie forHTTPHeaderField:@"Cookie"];
+                if (uifidVal.length > 10) [pageReq setValue:uifidVal forHTTPHeaderField:@"uifid"];
+                [probeLog appendFormat:@"游客Cookie len=%lu uifid头=%@\n", (unsigned long)guestCookie.length, (uifidVal.length > 10) ? @"有" : @"无"];
                 [pageReq setValue:@"text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8" forHTTPHeaderField:@"Accept"];
                 [pageReq setValue:@"zh-CN,zh;q=0.9" forHTTPHeaderField:@"Accept-Language"];
                 __block NSData *pageData = nil;
