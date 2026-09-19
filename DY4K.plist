@@ -1,7 +1,8 @@
 {
     Filter =     {
         Bundles =         (
-            "com.ss.iphone.ugc.Aweme"
+            "com.ss.iphone.ugc.Aweme",
+            "com.ss.iphone.ugc.Awemex"
         );
     };
 }

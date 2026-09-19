@@ -430,13 +430,22 @@ static void DY4KShowMenu(void) {
 #pragma mark - 悬浮球
 
 @interface DY4KBallWindow : UIWindow
+@property (nonatomic, weak) UIView *allowedView;
+@property (nonatomic, weak) UIViewController *hostRef;
 @end
 
 @implementation DY4KBallWindow
 - (UIView *)hitTest:(CGPoint)p withEvent:(UIEvent *)event {
     UIView *hit = [super hitTest:p withEvent:event];
-    if (hit == self || hit == nil) return nil;
-    return hit;
+    if (hit == nil || hit == self) return nil;
+    UIView *v = hit;
+    while (v && v != self) {
+        if (v == self.allowedView) return hit;
+        v = v.superview;
+    }
+    UIViewController *pres = self.hostRef.presentedViewController;
+    if (pres && pres.isViewLoaded && [hit isDescendantOfView:pres.view]) return hit;
+    return nil;
 }
 @end
 
@@ -488,6 +497,8 @@ static void DY4KShowMenu(void) {
     _win.hidden = NO;
     _hostVC = [UIViewController new];
     _win.rootViewController = _hostVC;
+    _win.hostRef = _hostVC;
+    _win.allowedView = nil;
     _btn = [UIButton buttonWithType:UIButtonTypeCustom];
     _btn.frame = CGRectMake(x, y, 44, 44);
     _btn.layer.cornerRadius = 22;
@@ -498,6 +509,7 @@ static void DY4KShowMenu(void) {
     [_btn addTarget:self action:@selector(tapped) forControlEvents:UIControlEventTouchUpInside];
     UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(panned:)];
     [_btn addGestureRecognizer:pan];
+    _win.allowedView = _btn;
     [_win addSubview:_btn];
 }
 
@@ -532,14 +544,17 @@ static void DY4KShowMenu(void) {
 
 #pragma mark - 入口
 
+static id dy4kNetObs = nil;
+static id dy4kActiveObs = nil;
+
 %ctor {
     @autoreleasepool {
         dy4kCache = [NSMutableDictionary dictionary];
         dy4kParseQueue = dispatch_queue_create("com.omega.dy4k.parse", DISPATCH_QUEUE_SERIAL);
-        [[NSNotificationCenter defaultCenter] addObserverForName:@"kTTNetworkManagerMonitorFinishNotification" object:nil queue:nil usingBlock:^(NSNotification *note) {
+        dy4kNetObs = [[NSNotificationCenter defaultCenter] addObserverForName:@"kTTNetworkManagerMonitorFinishNotification" object:nil queue:nil usingBlock:^(NSNotification *note) {
             DY4KInspectResponse(note.userInfo);
         }];
-        [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationDidBecomeActiveNotification object:nil queue:nil usingBlock:^(__unused NSNotification *note) {
+        dy4kActiveObs = [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationDidBecomeActiveNotification object:nil queue:nil usingBlock:^(__unused NSNotification *note) {
             dispatch_async(dispatch_get_main_queue(), ^{
                 [[DY4KBall shared] mount];
             });
