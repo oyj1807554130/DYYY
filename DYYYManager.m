@@ -85,6 +85,29 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
     return nil;
 }
 
+// 递归搜索_ROUTER_DATA中的item_list（取第一个含video的item）
++ (id)dyyyFindItemList:(id)node depth:(NSInteger)depth {
+    if (depth > 8 || !node) return nil;
+    if ([node isKindOfClass:[NSDictionary class]]) {
+        NSDictionary *dict = (NSDictionary *)node;
+        id il = dict[@"item_list"];
+        if ([il isKindOfClass:[NSArray class]] && [(NSArray *)il count] > 0) {
+            id first = ((NSArray *)il)[0];
+            if ([first isKindOfClass:[NSDictionary class]] && [first[@"video"] isKindOfClass:[NSDictionary class]]) return first;
+        }
+        for (NSString *key in dict) {
+            id found = [DYYYManager dyyyFindItemList:dict[key] depth:depth + 1];
+            if (found) return found;
+        }
+    } else if ([node isKindOfClass:[NSArray class]]) {
+        for (id item2 in (NSArray *)node) {
+            id found = [DYYYManager dyyyFindItemList:item2 depth:depth + 1];
+            if (found) return found;
+        }
+    }
+    return nil;
+}
+
 #pragma mark - API 适配器实现
 
 + (DYYYAPIType)detectAPIType:(NSString *)apiKey {
@@ -4055,6 +4078,50 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                         }
                     } else {
                         [probeLog appendFormat:@"HTML中未找到RENDER_DATA\n"];
+                    }
+                }
+                // Step2.6: 分享页降级(iesdouyin游客SSR数据,无需签名,不受Argus拦截)
+                if (!awemeDetail || ![awemeDetail isKindOfClass:[NSDictionary class]]) {
+                    [probeLog appendFormat:@"\n[Step2.6 分享页降级] GET iesdouyin.com/share/video/%@\n", awemeId];
+                    NSString *shareURL = [NSString stringWithFormat:@"https://www.iesdouyin.com/share/video/%@", awemeId];
+                    NSMutableURLRequest *shareReq = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:shareURL]];
+                    [shareReq setValue:@"Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1" forHTTPHeaderField:@"User-Agent"];
+                    __block NSData *sData = nil;
+                    __block NSInteger sStatus = 0;
+                    dispatch_semaphore_t sSem = dispatch_semaphore_create(0);
+                    NSURLSessionDataTask *sTask = [[NSURLSession sharedSession] dataTaskWithRequest:shareReq completionHandler:^(NSData *sd, NSURLResponse *sr, NSError *se) {
+                        sData = sd;
+                        if (sr && [sr isKindOfClass:[NSHTTPURLResponse class]]) sStatus = [(NSHTTPURLResponse *)sr statusCode];
+                        dispatch_semaphore_signal(sSem);
+                    }];
+                    [sTask resume];
+                    dispatch_semaphore_wait(sSem, dispatch_time(DISPATCH_TIME_NOW, 15 * NSEC_PER_SEC));
+                    [probeLog appendFormat:@"HTTP %ld body=%lu\n", (long)sStatus, (unsigned long)(sData ? sData.length : 0)];
+                    if (sData && sStatus == 200) {
+                        NSString *sh = [[NSString alloc] initWithData:sData encoding:NSUTF8StringEncoding];
+                        NSRange rStart = [sh rangeOfString:@"window._ROUTER_DATA"];
+                        if (rStart.location != NSNotFound) {
+                            NSRange eq = [sh rangeOfString:@"=" options:0 range:NSMakeRange(rStart.location, sh.length - rStart.location)];
+                            if (eq.location != NSNotFound) {
+                                NSRange endTag = [sh rangeOfString:@"</script>" options:0 range:NSMakeRange(eq.location, sh.length - eq.location)];
+                                if (endTag.location != NSNotFound) {
+                                    NSUInteger js = eq.location + 1;
+                                    NSUInteger jl = endTag.location - js;
+                                    NSString *jsonStr = [[sh substringWithRange:NSMakeRange(js, jl)] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+                                    if ([jsonStr hasSuffix:@";"]) jsonStr = [jsonStr substringToIndex:jsonStr.length - 1];
+                                    NSDictionary *rdj = [NSJSONSerialization JSONObjectWithData:[jsonStr dataUsingEncoding:NSUTF8StringEncoding] options:0 error:nil];
+                                    id item = [DYYYManager dyyyFindItemList:rdj depth:0];
+                                    if (item && [item isKindOfClass:[NSDictionary class]]) {
+                                        awemeDetail = item;
+                                        [probeLog appendFormat:@"分享页提取成功! video keys=%@\n", [item[@"video"] allKeys]];
+                                    } else {
+                                        [probeLog appendFormat:@"_ROUTER_DATA解析成功但未找到item_list\n"];
+                                    }
+                                }
+                            }
+                        } else {
+                            [probeLog appendFormat:@"分享页无_ROUTER_DATA\n"];
+                        }
                     }
                 }
                 // 页面降级也失败 → 直接失败（无本地解析保底）
