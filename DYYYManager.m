@@ -4118,12 +4118,35 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
         if (!rawImages || ![rawImages isKindOfClass:[NSArray class]]) rawImages = @[];
         if (rawImages.count > 0) isImagePost = YES;
 
-        // bit_rate字段名三兼容（web RENDER_DATA/移动端SSR/app端字段名不同：bit_rate/bit_rate_list/bitRateList）
-        NSArray *bitRateList = videoObj[@"bit_rate"];
-        if (!bitRateList || ![bitRateList isKindOfClass:[NSArray class]]) bitRateList = videoObj[@"bit_rate_list"];
-        if (!bitRateList || ![bitRateList isKindOfClass:[NSArray class]]) bitRateList = videoObj[@"bitRateList"];
-        if (!bitRateList || ![bitRateList isKindOfClass:[NSArray class]]) bitRateList = @[];
-        [probeLog appendFormat:@"\n[Step3 码率字段诊断] bit_rate=%lu条 bit_rate_list=%lu条 bitRateList=%lu条 实际采用=%lu条 videoKeys=%@\n", (unsigned long)([videoObj[@"bit_rate"] isKindOfClass:[NSArray class]] ? [(NSArray *)videoObj[@"bit_rate"] count] : 0), (unsigned long)([videoObj[@"bit_rate_list"] isKindOfClass:[NSArray class]] ? [(NSArray *)videoObj[@"bit_rate_list"] count] : 0), (unsigned long)([videoObj[@"bitRateList"] isKindOfClass:[NSArray class]] ? [(NSArray *)videoObj[@"bitRateList"] count] : 0), (unsigned long)bitRateList.count, [videoObj allKeys]];
+        // bit_rate字段名三兼容+类型自适应（分享页SSR的bit_rate可能被双重编码为NSString或包装为NSDictionary）
+        id brRaw = videoObj[@"bit_rate"];
+        if (!brRaw) brRaw = videoObj[@"bit_rate_list"];
+        if (!brRaw) brRaw = videoObj[@"bitRateList"];
+        [probeLog appendFormat:@"\n[Step3 码率字段诊断] rawClass=%@ videoKeys=%@\n", brRaw ? NSStringFromClass([brRaw class]) : @"nil", [videoObj allKeys]];
+        NSArray *bitRateList = nil;
+        if ([brRaw isKindOfClass:[NSArray class]]) {
+            bitRateList = brRaw;
+        } else if ([brRaw isKindOfClass:[NSString class]]) {
+            id p = [NSJSONSerialization JSONObjectWithData:[(NSString *)brRaw dataUsingEncoding:NSUTF8StringEncoding] options:0 error:nil];
+            if ([p isKindOfClass:[NSArray class]]) bitRateList = p;
+            [probeLog appendFormat:@"bit_rate为NSString，JSON解析→%@\n", [p isKindOfClass:[NSArray class]] ? [NSString stringWithFormat:@"Array %lu条", (unsigned long)[(NSArray *)p count]] : (p ? NSStringFromClass([p class]) : @"失败")];
+        } else if ([brRaw isKindOfClass:[NSDictionary class]]) {
+            NSDictionary *bd = (NSDictionary *)brRaw;
+            id inner = bd[@"bit_rate"];
+            if (![inner isKindOfClass:[NSArray class]]) {
+                if (bd[@"play_addr"] || bd[@"gear_name"]) {
+                    inner = @[bd];
+                } else {
+                    NSArray *vals = [bd allValues];
+                    BOOL allDict = (vals.count > 0);
+                    for (id v in vals) { if (![v isKindOfClass:[NSDictionary class]]) { allDict = NO; break; } }
+                    inner = allDict ? vals : nil;
+                }
+            }
+            if ([inner isKindOfClass:[NSArray class]]) bitRateList = inner;
+            [probeLog appendFormat:@"bit_rate为NSDictionary，keys=%@ → %@\n", [bd allKeys], bitRateList ? [NSString stringWithFormat:@"Array %lu条", (unsigned long)bitRateList.count] : @"未解出"];
+        }
+        if (!bitRateList) bitRateList = @[];
         NSMutableDictionary *byQuality = [NSMutableDictionary dictionary];
         for (NSDictionary *b in bitRateList) {
             NSDictionary *playAddr = b[@"play_addr"] ?: @{};
@@ -4145,10 +4168,10 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                 else if ([gn containsString:@"720"]) qCode = @"720p";
                 else if ([gn containsString:@"540"]) qCode = @"540p";
             }
-            if (!qCode) continue;
+            if (!qCode) { [probeLog appendFormat:@"档位跳过(qCode=nil): gear=%@ w=%ld h=%ld\n", [b[@"gear_name"] isKindOfClass:[NSString class]] ? b[@"gear_name"] : @"?", (long)width, (long)height]; continue; }
             NSArray *urlList = playAddr[@"url_list"];
             NSString *url = (urlList && urlList.count > 0) ? urlList[0] : nil;
-            if (!url || url.length == 0) continue;
+            if (!url || url.length == 0) { [probeLog appendFormat:@"档位跳过(url空): %@\n", qCode]; continue; }
             NSInteger bitRate = [b[@"bit_rate"] integerValue];
             NSDictionary *existing = byQuality[qCode];
             if (!existing || bitRate > [existing[@"bitRate"] integerValue]) {
