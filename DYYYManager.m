@@ -44,25 +44,6 @@ static void _dyyy_uncaught_handler(NSException *exc) {
     NSSetUncaughtExceptionHandler(NULL);
 }
 
-+ (void)installCrashHandler {
-    if (_dyyyCrashInstalled) return;
-    _dyyyCrashInstalled = YES;
-    NSString *p = [NSHomeDirectory() stringByAppendingPathComponent:@"Documents/dyyy_crash.log"];
-    _dyyyCrashPathNS = p;
-    [p getCString:_dyyyCrashPathC maxLength:sizeof(_dyyyCrashPathC) encoding:NSUTF8StringEncoding];
-    NSSetUncaughtExceptionHandler(&_dyyy_uncaught_handler);
-    struct sigaction sa;
-    memset(&sa, 0, sizeof(sa));
-    sa.sa_sigaction = _dyyy_signal_handler;
-    sa.sa_flags = SA_SIGINFO;
-    sigaction(SIGABRT, &sa, NULL);
-    sigaction(SIGSEGV, &sa, NULL);
-    sigaction(SIGBUS, &sa, NULL);
-    sigaction(SIGILL, &sa, NULL);
-    sigaction(SIGTRAP, &sa, NULL);
-    sigaction(SIGFPE, &sa, NULL);
-}
-
 // MARK: - API 类型定义
 typedef NS_ENUM(NSInteger, DYYYAPIType) {
     DYYYAPITypeTikHub,     // TikHub API
@@ -4099,6 +4080,25 @@ static void dyyyNetProbeInstall(void) {
 }
 
 // 本地解析全画质：从awemeModel取awemeId，走ttwid+web API+bit_rate全画质（JS规则）
++ (void)installCrashHandler {
+    if (_dyyyCrashInstalled) return;
+    _dyyyCrashInstalled = YES;
+    NSString *p = [NSHomeDirectory() stringByAppendingPathComponent:@"Documents/dyyy_crash.log"];
+    _dyyyCrashPathNS = p;
+    [p getCString:_dyyyCrashPathC maxLength:sizeof(_dyyyCrashPathC) encoding:NSUTF8StringEncoding];
+    NSSetUncaughtExceptionHandler(&_dyyy_uncaught_handler);
+    struct sigaction sa;
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_sigaction = _dyyy_signal_handler;
+    sa.sa_flags = SA_SIGINFO;
+    sigaction(SIGABRT, &sa, NULL);
+    sigaction(SIGSEGV, &sa, NULL);
+    sigaction(SIGBUS, &sa, NULL);
+    sigaction(SIGILL, &sa, NULL);
+    sigaction(SIGTRAP, &sa, NULL);
+    sigaction(SIGFPE, &sa, NULL);
+}
+
 + (void)persistProbeLog:(NSString *)text {
     @try {
         NSString *p = [NSHomeDirectory() stringByAppendingPathComponent:@"Documents/dyyy_probe.log"];
