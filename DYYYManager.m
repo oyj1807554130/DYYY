@@ -3814,7 +3814,7 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
     return [parts componentsJoinedByString:@"; "];
 }
 
-#pragma mark - [网络栈探针V4] 借App网络栈自动签名的前置侦察：枚举TTNetworkManager+swizzle抓包真实请求
+#pragma mark - [网络栈探针V4] 网络栈侦察：首次长按时才安装hook(启动阶段零改动)，白名单方法+参数类型校验
 static NSMutableArray *dyyyNetProbeCaptured = nil;
 static NSMutableArray *dyyyNetProbeURLs = nil;
 static NSMutableDictionary *dyyyNetProbeOrigMap = nil;
@@ -3825,8 +3825,12 @@ static void dyyyNetProbeCapture(id request) {
     @try {
         if (!dyyyNetProbeCaptured) { dyyyNetProbeCaptured = [[NSMutableArray alloc] init]; }
         if (!dyyyNetProbeURLs) { dyyyNetProbeURLs = [[NSMutableArray alloc] init]; }
-        if (!dyyyNetProbeOrigMap) { dyyyNetProbeOrigMap = [[NSMutableDictionary alloc] init]; }
         if (dyyyNetProbeCaptured.count >= 16) { return; }
+        if (!request) { return; }
+        const char *cn = object_getClassName(request);
+        if (!cn) { return; }
+        NSString *clsName = [NSString stringWithUTF8String:cn];
+        if (![clsName containsString:@"Request"] && ![clsName containsString:@"URL"]) { return; }
         NSString *url = nil;
         for (NSString *k in @[@"urlString", @"URL", @"url"]) {
             @try {
@@ -3896,8 +3900,8 @@ static void dyyyNetProbeCapture(id request) {
 }
 
 static id dyyy_net_swz_start(id self, SEL _cmd, id request) {
-    dyyyNetProbeCapture(request);
-    NSValue *ov = [dyyyNetProbeOrigMap objectForKey:NSStringFromSelector(_cmd)];
+    if (request) { dyyyNetProbeCapture(request); }
+    NSValue *ov = dyyyNetProbeOrigMap ? [dyyyNetProbeOrigMap objectForKey:NSStringFromSelector(_cmd)] : nil;
     if (ov) {
         IMP orig = (IMP)[ov pointerValue];
         if (orig) { return ((id (*)(id, SEL, id))orig)(self, _cmd, request); }
@@ -3911,13 +3915,17 @@ static void dyyyNetProbeInstall(void) {
         dyyyNetProbeInstalled = YES;
         Class cls = NSClassFromString(@"TTNetworkManager");
         if (!cls) { return; }
+        NSArray *want = @[@"startRequest:", @"startRequestSync:", @"sendRequest:", @"addRequest:"];
         unsigned int mc = 0;
         Method *ml = class_copyMethodList(cls, &mc);
         for (unsigned int i = 0; i < mc; i++) {
             NSString *n = NSStringFromSelector(method_getName(ml[i]));
-            BOOL match = [n hasPrefix:@"startRequest"] || [n hasPrefix:@"sendRequest"] || [n hasPrefix:@"addRequest"];
-            if (!match) { continue; }
+            if (![want containsObject:n]) { continue; }
             if (method_getNumberOfArguments(ml[i]) != 3) { continue; }
+            char *at = method_copyArgumentType(ml[i], 2);
+            BOOL isObj = (at != NULL && at[0] == '@');
+            if (at) { free(at); }
+            if (!isObj) { continue; }
             IMP o = method_getImplementation(ml[i]);
             if (!dyyyNetProbeOrigMap) { dyyyNetProbeOrigMap = [[NSMutableDictionary alloc] init]; }
             [dyyyNetProbeOrigMap setObject:[NSValue valueWithPointer:(void *)o] forKey:n];
@@ -3926,12 +3934,6 @@ static void dyyyNetProbeInstall(void) {
         }
         if (ml) { free(ml); }
     } @catch (NSException *e) {}
-}
-
-__attribute__((constructor)) static void dyyyNetProbeBootstrap(void) {
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        dyyyNetProbeInstall();
-    });
 }
 
 // 本地解析全画质：从awemeModel取awemeId，走ttwid+web API+bit_rate全画质（JS规则）
@@ -3955,10 +3957,13 @@ __attribute__((constructor)) static void dyyyNetProbeBootstrap(void) {
         __block NSMutableString *probeLog = [NSMutableString stringWithString:@"[接口4探针]\n"];
         [probeLog appendFormat:@"awemeId=%@\n", awemeId];
 
-        // [网络栈探针V4] 本地模型已确认"有档位无URL"(manualBitrateModels 4档全空链接)——转网络栈侦察
+        // [网络栈探针V4] 首次长按装hook，之后进详情页/刷视频，再长按就有抓包
         {
             [probeLog appendString:@"\n[网络栈探针V4]\n"];
+            BOOL wasInstalled = dyyyNetProbeInstalled;
+            dyyyNetProbeInstall();
             [probeLog appendFormat:@"[安装] %d hook=%@\n", dyyyNetProbeInstalled ? 1 : 0, dyyyNetProbeHookSel ?: @"无"];
+            if (!wasInstalled) { [probeLog appendString:@"(首次长按,hook刚装,更早的历史请求抓不到)\n"]; }
             Class ttnm = NSClassFromString(@"TTNetworkManager");
             if (!ttnm) {
                 [probeLog appendString:@"[TTNetworkManager] 类不存在!\n"];
@@ -4002,6 +4007,9 @@ __attribute__((constructor)) static void dyyyNetProbeBootstrap(void) {
             }
             [probeLog appendFormat:@"[抓包%lu条]\n", (unsigned long)snap.count];
             for (NSString *rec in snap) { [probeLog appendString:rec]; }
+            if (snap.count == 0) {
+                [probeLog appendString:@"[提示] 0条→现在去任意作者主页点开一条视频再返回(可多刷一两个视频),然后再次长按保存,就有抓包了\n"];
+            }
             {
                 NSMutableArray *cpn = [NSMutableArray array];
                 int cn = 0;
@@ -4013,6 +4021,21 @@ __attribute__((constructor)) static void dyyyNetProbeBootstrap(void) {
                 }
                 if (cl) { free(cl); }
                 [probeLog appendFormat:@"[CommonParams类] %@\n", cpn.count > 0 ? [cpn componentsJoinedByString:@", "] : @"无"];
+            }
+            {
+                NSDictionary *ud = [[NSUserDefaults standardUserDefaults] dictionaryRepresentation];
+                NSMutableArray *uh = [NSMutableArray array];
+                for (NSString *k in ud) {
+                    NSString *low = k.lowercaseString;
+                    if ([low containsString:@"device_id"] || [low containsString:@"openudid"] || [low isEqualToString:@"iid"] || [low containsString:@"version_code"]) {
+                        id v = [ud objectForKey:k];
+                        NSString *s = [v isKindOfClass:[NSString class]] ? (NSString *)v : [NSString stringWithFormat:@"%@", v];
+                        if (s.length > 80) { s = [s substringToIndex:80]; }
+                        [uh addObject:[NSString stringWithFormat:@"%@=%@", k, s]];
+                        if (uh.count >= 10) { break; }
+                    }
+                }
+                [probeLog appendFormat:@"[UD参数] %@\n", uh.count > 0 ? [uh componentsJoinedByString:@" | "] : @"无"];
             }
             NSString *fu = nil;
             for (NSString *u in snapURLs) {
