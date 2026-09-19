@@ -4195,7 +4195,7 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
             NSMutableURLRequest *feedReq = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:feedURL]];
             feedReq.timeoutInterval = 8;
             [feedReq setValue:@"Aweme/260400 CFNetwork/1498 Darwin/23.0.0" forHTTPHeaderField:@"User-Agent"];
-            [feedReq setValue:cookieHeader forHTTPHeaderField:@"Cookie"];
+            [feedReq setValue:fullCookieStr forHTTPHeaderField:@"Cookie"];
             __block NSData *feedData = nil;
             __block NSInteger feedStatus = 0;
             dispatch_semaphore_t feedSem = dispatch_semaphore_create(0);
