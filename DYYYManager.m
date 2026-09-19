@@ -4288,23 +4288,29 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                 });
             }
             dispatch_group_wait(probeGroup, dispatch_time(DISPATCH_TIME_NOW, 10 * NSEC_PER_SEC));
-            // 按size去重：同size(±1%)保留档位最低的标签（webapp play接口ratio=4k/2k会被降级为1080p源，假档不显示）
+            // 按br参数去重(302 Location自带br=比特率,同br即同源) br缺失时退回size±1%：webapp play接口ratio=4k/2k会被降级为1080p源，假档不显示
             NSArray *dedupOrder = @[@"540p", @"720p", @"1080p", @"1440p", @"2160p"];
+            NSMutableSet *dedupedBr = [NSMutableSet set];
             NSMutableSet *dedupedSize = [NSMutableSet set];
             NSMutableArray *fakeLabels = [NSMutableArray array];
             for (NSString *dk in dedupOrder) {
                 NSDictionary *pr = ratioProbeResult[dk];
                 if (!pr) continue;
+                NSString *dBr = nil;
+                NSURLComponents *dcp = [NSURLComponents componentsWithString:pr[@"url"]];
+                for (NSURLQueryItem *qi in dcp.queryItems) { if ([qi.name isEqualToString:@"br"]) { dBr = qi.value; break; } }
                 long long dSize = [pr[@"size"] longLongValue];
                 BOOL dup = NO;
-                if (dSize > 0) {
+                if (dBr.length > 0) {
+                    if ([dedupedBr containsObject:dBr]) dup = YES;
+                } else if (dSize > 0) {
                     for (NSNumber *seenSize in dedupedSize) {
                         long long sv = seenSize.longLongValue;
                         if (labs(sv - dSize) * 100 <= sv) { dup = YES; break; }
                     }
                 }
                 if (dup) { [fakeLabels addObject:dk]; [ratioProbeResult removeObjectForKey:dk]; }
-                else if (dSize > 0) { [dedupedSize addObject:@(dSize)]; }
+                else { if (dBr.length > 0) [dedupedBr addObject:dBr]; if (dSize > 0) [dedupedSize addObject:@(dSize)]; }
             }
             [probeLog appendFormat:@"ratio预探测完成 need=%d 命中=%@ 假档剔除=%@\n", needRatioProbe, ratioProbeResult.allKeys, fakeLabels];
         }
