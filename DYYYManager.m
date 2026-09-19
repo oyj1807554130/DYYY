@@ -3715,63 +3715,26 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
         return;
     }
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+        // ===== 接口4全流程探针 =====
+        __block NSMutableString *probeLog = [NSMutableString stringWithString:@"[接口4探针]\n"];
+        [probeLog appendFormat:@"awemeId=%@\n", awemeId];
 
-        // Step 0: 注入浏览器登录Cookie（有效期至2026-11-16，确保API有登录态）
+        // Step 0: Cookie预热——GET www.douyin.com刷新web Cookie，确保msToken等不过期
         {
-            static NSString *kBrowserCookies = @"enter_pc_once=1; UIFID_TEMP=d9c83d80110ac3c8e785b8c343d751a11fe18d1882e6e45bacc56136cf7b8ae9a45d8e153c319408849ba9e2458cb5e8d84b22ad0aa9d96fffcaa313f87940db463d341a8bdce6a7120b416c6b17fdd54c82822aa2e2aa492142a018c0124ffb1c7c7091d2df72acbae048603d6522b1; s_v_web_id=verify_msufsoal_gMWFtvKl_xOxp_4xqB_9qw7_9aODp6gYPqVg; passport_csrf_token=65c405518d6a19df67007068a9f3fea9; passport_csrf_token_default=65c405518d6a19df67007068a9f3fea9; bd_ticket_guard_ts_sign_id=ts.2.f689f11604217b6; bd_ticket_guard_client_web_domain=2; __ac_nonce=06aab48db00625b1ecf92; __ac_signature=_02B4Z6wo00f013OMZ2QAAIDA.iTe7bIz0i9zrGPAALZT6b; ttwid=1%7CxqGRW_khzvEHlghJMe5nwSX2qACyEOWYf4iyOkIH_AA%7C1789610256%7Cbba4d34f51c8bd1ee69732b10d9645dfca2a4698abebd789089b56e716b1d3fa; d_ticket=b66fc36d192a45e3901b28f8f532e81e3d7b5; n_mh=bBIA0xr6iFWpOMfU0p30qy9YooXiHlFGzXX2ubOIZ3Y; uid_tt=5dd7cd8b4fbccb59247ae881e2a23b0e; uid_tt_ss=5dd7cd8b4fbccb59247ae881e2a23b0e; sid_tt=953d857355d16fc717bc9d3b333e1db0; sessionid=953d857355d16fc717bc9d3b333e1db0; sessionid_ss=953d857355d16fc717bc9d3b333e1db0; is_staff_user=false; has_biz_token=false; login_time=1789610341136; _bd_ticket_crypt_cookie=48a69a437b8d1ecab8f1ad87a4a57f24; sid_guard=953d857355d16fc717bc9d3b333e1db0%7C1789610311%7C5184000%7CMon%2C+16-Nov-2026+01%3A58%3A31+GMT; sid_ucp_v1=1.0.0-KDk2NTZmY2IxY2VhOWEzMDgzZjY5MjJkNDFkZjc3MTcxMDgyZjJhNDYKHwjX_O_PogIQx5Kt1QYY7zEgDDDa6vnQBTgHQPQHSAQaAmxxIiA5NTNkODU3MzU1ZDE2ZmM3MTdiYzlkM2IzMzNlMWRiMA; ssid_ucp_v1=1.0.0-KDk2NTZmY2IxY2VhOWEzMDgzZjY5MjJkNDFkZjc3MTcxMDgyZjJhNDYKHwjX_O_PogIQx5Kt1QYY7zEgDDDa6vnQBTgHQPQHSAQaAmxxIiA5NTNkODU3MzU1ZDE2ZmM3MTdiYzlkM2IzMzNlMWRiMA; is_dbsc=true; x_tt_token=00953d857355d16fc717bc9d3b333e1db000f234e54fefacb6cda6c14cc6b1f1c9dd3bd0cb401701b47da0be47b80766a0083bef5016e3270f4fda8eb946eead9be218ae3f29e5ea92f767855d1b4835211ff8bba9b89339a9e9342f2f555cbc5e34b--0a490a20b6a3efe9dea8bcee43fd7d0fec3e1bcf1aeddf79e30b8ed34581034d12c0523a12208c3116f2c154810726f437344487cc7cd9180a8b0f888a2b41dbfd30b9685bb518f6b4d309-3.0.4; bd_ticket_guard_client_data=eyJiZC10aWNrZXQtZ3VhcmQtdmVyc2lvbiI6MiwiYmQtdGlja2V0LWd1YXJkLWl0ZXJhdGlvbi12ZXJzaW9uIjoxLCJiZC10aWNrZXQtZ3VhcmQtcmVlLXB1YmxpYy1rZXkiOiJCRWRocFJRdUQxMUJhY0o2a2hqU2Z3MHh3MkUvSXFiUUpxdjRGbE9iUktQYXVpMUcvRi82UVlKNXo5ekhuTXg3d2RpUlNQVXl3WkhaR2V1TnN0b2pRTjQ9IiwiYmQtdGlja2V0LWd1YXJkLXdlYi12ZXJzaW9uIjoyfQ%3D%3D; odin_tt=09f29628fd37d13cc15aa43da17d312d78f7978fc5419b02ea7200bfdebb3cea48255a17a9ba4731a74396bf07628ae1; UIFID=d9c83d80110ac3c8e785b8c343d751a11fe18d1882e6e45bacc56136cf7b8ae9a45d8e153c319408849ba9e2458cb5e8d84b22ad0aa9d96fffcaa313f87940db87a9415157340deba9153a0d1b973c2b5636943e08c104b77d995940edf12be759c73f0d6f4c915186b4e5a231b24e245a4483a2e3f4d44cf86b6cdf88bc3ad3cfdb92b14cc31a3f188d78aa68333369e99f1531d4de08bd8338d166d221bcb77eb7a18aea832ede169b68460b01d8f9";
-            NSHTTPCookieStorage *injectStore = [NSHTTPCookieStorage sharedHTTPCookieStorage];
-            NSArray *cookiePairs = [kBrowserCookies componentsSeparatedByString:@"; "];
-            NSInteger injectAdded = 0;
-            NSInteger injectUpdated = 0;
-            for (NSString *pair in cookiePairs) {
-                NSRange eqRange = [pair rangeOfString:@"="];
-                if (eqRange.location != NSNotFound) {
-                    NSString *cName = [pair substringToIndex:eqRange.location];
-                    NSString *cValue = [pair substringFromIndex:eqRange.location + 1];
-                    NSDictionary *cProps = @{NSHTTPCookieName: cName, NSHTTPCookieValue: cValue, NSHTTPCookieDomain: @".douyin.com", NSHTTPCookiePath: @"/"};
-                    NSHTTPCookie *newCookie = [NSHTTPCookie cookieWithProperties:cProps];
-                    if (newCookie) {
-                        [injectStore setCookie:newCookie];
-                        injectAdded++;
-                    }
-                }
-            }
-        }
-
-        // Step 0.5: Cookie预热（隔离session，只补不换——补充登录Cookie未覆盖的）
-        {
-            NSURLSessionConfiguration *ephCfg = [NSURLSessionConfiguration ephemeralSessionConfiguration];
-            NSURLSession *ephSes = [NSURLSession sessionWithConfiguration:ephCfg];
-            NSMutableURLRequest *wReq = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:@"https://www.douyin.com/"]];
-            wReq.HTTPShouldHandleCookies = NO;
-            wReq.cachePolicy = NSURLRequestReloadIgnoringLocalCacheData;
-            dispatch_semaphore_t wSem = dispatch_semaphore_create(0);
-            __block NSDictionary *wHeaders = nil;
-            __block NSInteger wStatus = 0;
-            NSURLSessionDataTask *wTask = [ephSes dataTaskWithRequest:wReq completionHandler:^(NSData *wData, NSURLResponse *wResp, NSError *wErr) {
-                if (!wErr && [wResp isKindOfClass:[NSHTTPURLResponse class]]) {
-                    wHeaders = [(NSHTTPURLResponse *)wResp allHeaderFields];
-                    wStatus = [(NSHTTPURLResponse *)wResp statusCode];
-                }
-                dispatch_semaphore_signal(wSem);
+            NSMutableURLRequest *warmupReq = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:@"https://www.douyin.com/"]];
+            [warmupReq setValue:@"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36" forHTTPHeaderField:@"User-Agent"];
+            [warmupReq setValue:@"https://www.douyin.com/" forHTTPHeaderField:@"Referer"];
+            dispatch_semaphore_t warmupSem = dispatch_semaphore_create(0);
+            __block NSInteger warmupStatus = 0;
+            __block NSInteger warmupCookieCountBefore = [[NSHTTPCookieStorage sharedHTTPCookieStorage] cookiesForURL:[NSURL URLWithString:@"https://www.douyin.com/"]].count;
+            NSURLSessionDataTask *warmupTask = [[NSURLSession sharedSession] dataTaskWithRequest:warmupReq completionHandler:^(NSData *wData, NSURLResponse *wResp, NSError *wErr) {
+                if (wResp && [wResp isKindOfClass:[NSHTTPURLResponse class]]) warmupStatus = [(NSHTTPURLResponse *)wResp statusCode];
+                dispatch_semaphore_signal(warmupSem);
             }];
-            [wTask resume];
-            dispatch_semaphore_wait(wSem, dispatch_time(DISPATCH_TIME_NOW, 8 * NSEC_PER_SEC));
-            NSInteger wBefore = (NSInteger)[[NSHTTPCookieStorage sharedHTTPCookieStorage] cookiesForURL:[NSURL URLWithString:@"https://www.douyin.com/"]].count;
-            NSInteger wAdded = 0;
-            NSInteger wSkipped = 0;
-            if (wHeaders) {
-                NSHTTPCookieStorage *wStore = [NSHTTPCookieStorage sharedHTTPCookieStorage];
-                NSArray *wExisting = [wStore cookiesForURL:[NSURL URLWithString:@"https://www.douyin.com/"]];
-                NSArray *wNewCookies = [NSHTTPCookie cookiesWithResponseHeaderFields:wHeaders forURL:[NSURL URLWithString:@"https://www.douyin.com/"]];
-                for (NSHTTPCookie *wnc in wNewCookies) {
-                    BOOL wFound = NO;
-                    for (NSHTTPCookie *wec in wExisting) {
-                        if ([[wec name] isEqualToString:[wnc name]] && [[wec domain] isEqualToString:[wnc domain]]) { wFound = YES; break; }
-                    }
-                    if (!wFound) { [wStore setCookie:wnc]; wAdded++; } else { wSkipped++; }
-                }
-            }
+            [warmupTask resume];
+            dispatch_semaphore_wait(warmupSem, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC));
+            NSInteger warmupCookieCountAfter = [[NSHTTPCookieStorage sharedHTTPCookieStorage] cookiesForURL:[NSURL URLWithString:@"https://www.douyin.com/"]].count;
+            [probeLog appendFormat:@"\n[Step0 预热]\nGET www.douyin.com → HTTP %ld\nCookie: %ld→%ld\n", (long)warmupStatus, (long)warmupCookieCountBefore, (long)warmupCookieCountAfter];
         }
 
         // Step 1: 构建完整Cookie（从app Cookie存储取douyin.com全部cookie，对齐JS规则）
@@ -3784,7 +3747,14 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
             [fullCookieStr appendFormat:@"%@=%@", [c name], [c value]];
             if ([[c name] isEqualToString:@"ttwid"]) ttwidStr = [c value];
         }
-
+        // 探针：Cookie信息
+        [probeLog appendFormat:@"\n[Step1 Cookie]\ncount=%lu\n", (unsigned long)appCookies.count];
+        for (NSHTTPCookie *c in appCookies) {
+            NSString *val = [c value];
+            NSString *valPreview = val.length > 20 ? [[val substringToIndex:20] stringByAppendingString:@"..."] : val;
+            [probeLog appendFormat:@"  %@=%@ (domain=%@)\n", [c name], valPreview, [c domain]];
+        }
+        [probeLog appendFormat:@"ttwid=%@\n", ttwidStr.length > 0 ? @"有" : @"无"];
         // 降级：如果没有ttwid，从注册接口获取并追加到cookie
         if (!ttwidStr || ttwidStr.length == 0) {
             NSString *ttwidURL = @"https://ttwid.bytedance.com/ttwid/union/register/";
@@ -3851,13 +3821,17 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                 [rtTask resume];
                 dispatch_semaphore_wait(ttwidSem, dispatch_time(DISPATCH_TIME_NOW, 10 * NSEC_PER_SEC));
             }
+            [probeLog appendFormat:@"\n[Step1.5 ttwid注册]\nPOST ttwid.bytedance.com → HTTP %ld\nSet-Cookie ttwid=%@ (len=%lu)\nJSON body ttwid=%@\n最终ttwid=%@\n", (long)ttwidHttpStatus, ttwidFromHeader ? [[ttwidFromHeader substringToIndex:MIN(20, ttwidFromHeader.length)] stringByAppendingString:@"..."] : @"无", (unsigned long)(ttwidFromHeader ? ttwidFromHeader.length : 0), ttwidFromBody ? @"有" : @"无", ttwidStr.length > 0 ? @"有" : @"无"];
             if (ttwidStr && ttwidStr.length > 0) {
                 if (fullCookieStr.length > 0) [fullCookieStr appendString:@"; "];
                 [fullCookieStr appendFormat:@"ttwid=%@", ttwidStr];
             }
         }
         if (fullCookieStr.length == 0) {
-            if (completion) completion(@{});
+            [probeLog appendFormat:@"\n[失败] Cookie为空，无法构建请求\n"];
+            [[NSNotificationCenter defaultCenter] postNotificationName:@"DYYYProbeNotification" object:nil userInfo:@{@"text": [probeLog copy]}];
+            dispatch_async(dispatch_get_main_queue(), ^{ [DYYYUtils showToast:@"接口4解析失败: 无法获取Cookie"]; });
+            if (completion) completion(nil);
             return;
         }
         // 存储ttwid供后续CDN下载使用
@@ -3866,7 +3840,7 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
         // Step 2: web API（完整URL参数+浏览器指纹header+全Cookie，对齐JS规则）
         __block NSDictionary *awemeDetail = nil;
         NSString *apiURL = [NSString stringWithFormat:@"https://www.douyin.com/aweme/v1/web/aweme/detail/?aweme_id=%@&device_platform=webapp&aid=6383&channel=channel_pc_web&update_version_code=170400&pc_client_type=1&version_code=190500&version_name=19.5.0&cookie_enabled=true&screen_width=2560&screen_height=1440&browser_language=zh-CN&browser_platform=Win32&browser_name=Chrome&browser_version=150.0.0.0&browser_online=true&engine_name=Blink&engine_version=150.0.0.0&os_name=Windows&os_version=10&cpu_core_num=12&device_memory=8&platform=PC&downlink=4.75&effective_type=4g&round_trip_time=150", awemeId];
-        NSMutableURLRequest *apiReq = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:apiURL] cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:15];
+        NSMutableURLRequest *apiReq = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:apiURL]];
         [apiReq setValue:@"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36" forHTTPHeaderField:@"User-Agent"];
         [apiReq setValue:@"https://www.douyin.com/" forHTTPHeaderField:@"Referer"];
         [apiReq setValue:@"text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7" forHTTPHeaderField:@"Accept"];
@@ -3884,6 +3858,7 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
         [apiReq setValue:@"?1" forHTTPHeaderField:@"sec-fetch-user"];
         [apiReq setValue:@"1" forHTTPHeaderField:@"upgrade-insecure-requests"];
         [apiReq setValue:fullCookieStr forHTTPHeaderField:@"Cookie"];
+        [probeLog appendFormat:@"\n[Step2 发送Cookie] len=%lu preview=%@...\n", (unsigned long)fullCookieStr.length, [fullCookieStr substringToIndex:MIN(120, fullCookieStr.length)]];
         dispatch_semaphore_t apiSem = dispatch_semaphore_create(0);
         NSURLSessionDataTask *apiTask = [[NSURLSession sharedSession] dataTaskWithRequest:apiReq completionHandler:^(NSData *apiData, NSURLResponse *apiResp, NSError *apiErr) {
             @try {
@@ -3892,10 +3867,15 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                     if ([apiJson isKindOfClass:[NSDictionary class]]) {
                         NSInteger statusCode = [apiJson[@"status_code"] integerValue];
                         if (statusCode == 0) awemeDetail = apiJson[@"aweme_detail"];
+                        // 探针：web API响应
+                        [probeLog appendFormat:@"\n[Step2 WebAPI响应]\nstatus_code=%ld\n", (long)statusCode];
                         NSHTTPURLResponse *httpR = (NSHTTPURLResponse *)apiResp;
+                        [probeLog appendFormat:@"HTTP status=%ld\n", (long)httpR.statusCode];
+                        [probeLog appendFormat:@"responseBody长度=%lu\n", (unsigned long)apiData.length];
                         if (statusCode == 0 && awemeDetail) {
                             NSDictionary *vObj = awemeDetail[@"video"];
                             NSArray *brList = vObj[@"bit_rate"];
+                            [probeLog appendFormat:@"bit_rate条目数=%lu\n", (unsigned long)(brList ? brList.count : 0)];
                             for (NSDictionary *br in (brList ?: @[])) {
                                 NSString *gn = br[@"gear_name"] ?: @"?";
                                 NSInteger brVal = [br[@"bit_rate"] integerValue];
@@ -3904,14 +3884,17 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                                 NSInteger h = [pa[@"height"] integerValue];
                                 NSInteger w = [pa[@"width"] integerValue];
                                 long long ds = [pa[@"data_size"] longLongValue];
+                                [probeLog appendFormat:@"  gear=%@ bitrate=%ld fps=%ld %ldx%ld size=%lld\n", gn, (long)brVal, (long)fps, (long)w, (long)h, ds];
                             }
                         } else {
                             // 截取前200字符看错误
                             NSString *raw = [[NSString alloc] initWithData:apiData encoding:NSUTF8StringEncoding];
                             if (raw.length > 200) raw = [raw substringToIndex:200];
+                            [probeLog appendFormat:@"error响应: %@\n", raw];
                         }
                     }
                 } else {
+                    [probeLog appendFormat:@"\n[Step2 WebAPI响应]\n响应为空! error=%@\n", apiErr.localizedDescription];
                 }
             } @catch (NSException *e) {}
             dispatch_semaphore_signal(apiSem);
@@ -3949,7 +3932,9 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
             }
 
             if (!awemeDetail || ![awemeDetail isKindOfClass:[NSDictionary class]]) {
-                if (completion) completion(@{});
+                [probeLog appendFormat:@"\n[失败] 重试后仍无aweme_detail，API响应无效\n"];
+                [[NSNotificationCenter defaultCenter] postNotificationName:@"DYYYProbeNotification" object:nil userInfo:@{@"text": [probeLog copy]}];
+                if (completion) completion(nil);
                 return;
             }
         }
@@ -4150,13 +4135,20 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
         result[@"title"] = awemeDetail[@"desc"] ?: @"";
         result[@"author"] = author[@"nickname"] ?: @"";
 
+        // ===== 探针：最终video_list + 弹窗展示 =====
         NSArray *finalVideoList = result[@"video_list"];
+        [probeLog appendFormat:@"\n[最终画质列表] count=%lu\n", (unsigned long)(finalVideoList ? finalVideoList.count : 0)];
         for (NSDictionary *item in (finalVideoList ?: @[])) {
             NSString *lvl = item[@"level"] ?: @"?";
             NSString *u = item[@"url"] ?: @"?";
             NSString *urlPreview = u.length > 60 ? [[u substringToIndex:60] stringByAppendingString:@"..."] : u;
+            [probeLog appendFormat:@"  %@ → %@\n", lvl, urlPreview];
         }
+        [probeLog appendFormat:@"\nvideoURI=%@\n", videoURI ?: @"无"];
         {
+            NSString *probeText = [probeLog copy];
+            // 存储探针结果，通过通知在主线程弹窗
+            [[NSNotificationCenter defaultCenter] postNotificationName:@"DYYYProbeNotification" object:nil userInfo:@{@"text": probeText}];
         }
 
         if (completion) completion(result.count > 0 ? result : nil);
