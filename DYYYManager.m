@@ -3823,6 +3823,7 @@ static NSString *dyyyNetProbeHookSel = nil;
 static NSMutableArray *dyyyNetProbeHookInfo = nil;
 static id dyyyNetProbeSelfMgr = nil;
 static id dyyyNetProbeSelfQueue = nil;
+static BOOL dyyyNetProbeHookedSession = NO;
 
 static void dyyyNetProbeCapture(id request) {
     @try {
@@ -3917,6 +3918,74 @@ static id dyyy_net_swz_start(id self, SEL _cmd, id request) {
     return nil;
 }
 
+static void dyyyNetProbeCaptureURLReq(NSURLRequest *req) {
+    @try {
+        if (!req) { return; }
+        if (!dyyyNetProbeCaptured) { dyyyNetProbeCaptured = [[NSMutableArray alloc] init]; }
+        if (!dyyyNetProbeURLs) { dyyyNetProbeURLs = [[NSMutableArray alloc] init]; }
+        if (dyyyNetProbeCaptured.count >= 16) { return; }
+        NSURL *uu = [req URL];
+        if (!uu) { return; }
+        NSString *url = [uu absoluteString];
+        if (url.length == 0) { return; }
+        if (![url containsString:@"aweme"]) { return; }
+        if ([url containsString:@"douyinvod"] || [url containsString:@"douyinpic"] || [url containsString:@"zjcdn"] || [url containsString:@"bytecdn"] || [url containsString:@"byteimg"]) { return; }
+        NSString *path = url;
+        NSRange qr = [url rangeOfString:@"?"];
+        if (qr.location != NSNotFound) { path = [url substringToIndex:qr.location]; }
+        NSMutableString *rec = [NSMutableString stringWithFormat:@"◆[S] %@\n", url];
+        NSString *method = [req HTTPMethod] ?: @"";
+        if (method.length > 0) { [rec appendFormat:@"  method=%@\n", method]; }
+        NSDictionary *hh = [req allHTTPHeaderFields];
+        if (hh) {
+            NSMutableArray *hits = [NSMutableArray array];
+            for (NSString *hk2 in hh) {
+                NSString *low = hk2.lowercaseString;
+                if ([low containsString:@"argus"] || [low containsString:@"ladon"] || [low containsString:@"khronos"] || [low containsString:@"gorgon"] || [low containsString:@"stub"] || [low containsString:@"helios"]) { [hits addObject:hk2]; }
+            }
+            [rec appendFormat:@"  headers 共%lu头 签名头:%@\n", (unsigned long)[(NSDictionary *)hh count], hits.count > 0 ? [hits componentsJoinedByString:@","] : @"无"];
+        }
+        if ([method isEqualToString:@"POST"]) {
+            NSData *bd = [req HTTPBody];
+            if (bd.length > 0) {
+                NSString *bs = [[NSString alloc] initWithData:bd encoding:NSUTF8StringEncoding];
+                if (bs.length > 600) { bs = [bs substringToIndex:600]; }
+                [rec appendFormat:@"  body: %@\n", bs ?: @""];
+            }
+        }
+        @synchronized (dyyyNetProbeCaptured) {
+            BOOL dup = NO;
+            for (NSString *old in dyyyNetProbeURLs) {
+                if ([old hasPrefix:path]) { dup = YES; break; }
+            }
+            if (!dup && dyyyNetProbeCaptured.count < 16) {
+                [dyyyNetProbeCaptured addObject:rec];
+                [dyyyNetProbeURLs addObject:url.length > 2400 ? [url substringToIndex:2400] : url];
+            }
+        }
+    } @catch (NSException *e) {}
+}
+
+static id dyyy_net_swz_ns3(id self, SEL _cmd, id req) {
+    if (req) { dyyyNetProbeCaptureURLReq(req); }
+    NSValue *ov = dyyyNetProbeOrigMap ? [dyyyNetProbeOrigMap objectForKey:[NSString stringWithFormat:@"S_%@", NSStringFromSelector(_cmd)]] : nil;
+    if (ov) {
+        IMP orig = (IMP)[ov pointerValue];
+        if (orig) { return ((id (*)(id, SEL, id))orig)(self, _cmd, req); }
+    }
+    return nil;
+}
+
+static id dyyy_net_swz_ns4(id self, SEL _cmd, id req, id cb) {
+    if (req) { dyyyNetProbeCaptureURLReq(req); }
+    NSValue *ov = dyyyNetProbeOrigMap ? [dyyyNetProbeOrigMap objectForKey:[NSString stringWithFormat:@"S_%@", NSStringFromSelector(_cmd)]] : nil;
+    if (ov) {
+        IMP orig = (IMP)[ov pointerValue];
+        if (orig) { return ((id (*)(id, SEL, id, id))orig)(self, _cmd, req, cb); }
+    }
+    return nil;
+}
+
 static void dyyyNetProbeInstall(void) {
     @try {
         if (dyyyNetProbeInstalled) { return; }
@@ -3930,6 +3999,29 @@ static void dyyyNetProbeInstall(void) {
         while (c0 && depth < 5) { [targets addObject:c0]; c0 = class_getSuperclass(c0); depth++; }
         Class qc = NSClassFromString(@"TTHttpRequestQueue");
         if (qc) { [targets addObject:qc]; }
+        // NSURLSession系统层hook(公开API,签名固定,系统类不受抖音内部重构影响)
+        Class sc = [NSURLSession class];
+        if (sc) {
+            for (NSString *wn in @[@"dataTaskWithRequest:", @"dataTaskWithRequest:completionHandler:"]) {
+                if ([dyyyNetProbeHookInfo containsObject:wn]) { continue; }
+                SEL ws = NSSelectorFromString(wn);
+                Method m = class_getInstanceMethod(sc, ws);
+                if (!m) { continue; }
+                unsigned int na = method_getNumberOfArguments(m);
+                if (na != 3 && na != 4) { continue; }
+                char *rt = method_copyReturnType(m);
+                BOOL rtOK = (rt != NULL && rt[0] == '@');
+                if (rt) { free(rt); }
+                if (!rtOK) { continue; }
+                IMP o = method_getImplementation(m);
+                [dyyyNetProbeOrigMap setObject:[NSValue valueWithPointer:(void *)o] forKey:[NSString stringWithFormat:@"S_%@", wn]];
+                method_setImplementation(m, na == 3 ? (IMP)dyyy_net_swz_ns3 : (IMP)dyyy_net_swz_ns4);
+                [dyyyNetProbeHookInfo addObject:wn];
+                dyyyNetProbeHookedSession = YES;
+                NSString *line2 = [NSString stringWithFormat:@"NSURLSession %@", wn];
+                dyyyNetProbeHookSel = dyyyNetProbeHookSel.length > 0 ? [dyyyNetProbeHookSel stringByAppendingFormat:@"\n%@", line2] : line2;
+            }
+        }
         for (Class tc in targets) {
             for (NSString *wn in want) {
                 if ([dyyyNetProbeHookInfo containsObject:wn]) { continue; }
@@ -4039,6 +4131,7 @@ static void dyyyNetProbeInstall(void) {
                     [probeLog appendFormat:@"[Queue] 存在 shared=%@ 本类%lu方法 相关%lu:%@\n", qshared ?: @"未找到", (unsigned long)qmc, (unsigned long)qn.count, qn.count > 0 ? [qn componentsJoinedByString:@","] : @"无"];
                 }
                 [probeLog appendFormat:@"[self] Mgr=%@ Queue=%@\n", dyyyNetProbeSelfMgr ? @"有" : @"无", dyyyNetProbeSelfQueue ? @"有" : @"无"];
+                [probeLog appendFormat:@"[Session] %@\n", dyyyNetProbeHookedSession ? @"已hook" : @"未hook"];
             }
             NSArray *snap = nil;
             NSArray *snapURLs = nil;
@@ -4095,6 +4188,8 @@ static void dyyyNetProbeInstall(void) {
                 if (query.length > 0) { detailURL = [detailURL stringByAppendingFormat:@"&%@", query]; }
                 [probeLog appendFormat:@"[detail预览] %@\n", detailURL];
             }
+                [probeLog appendString:@"\n(日志已自动复制到剪贴板:打开备忘录或聊天输入框直接粘贴发送即可)\n"];
+                dispatch_async(dispatch_get_main_queue(), ^{ [UIPasteboard generalPasteboard].string = [probeLog copy]; });
             [[NSNotificationCenter defaultCenter] postNotificationName:@"DYYYProbeNotification" object:nil userInfo:@{@"text": [probeLog copy]}];
         }
 
