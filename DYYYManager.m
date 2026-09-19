@@ -3698,6 +3698,63 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
     return [parts componentsJoinedByString:@"; "];
 }
 
+// 探针日志落地：写文件 + 复制剪贴板（原DYYYProbeNotification通知无监听者，改为可直接取用）
++ (void)dyyyDeliverProbeLog:(NSString *)text {
+    @try {
+        if (text.length == 0) return;
+        NSString *p = [NSHomeDirectory() stringByAppendingPathComponent:@"Documents/dyyy_probe.log"];
+        [text writeToFile:p atomically:YES encoding:NSUTF8StringEncoding error:nil];
+        NSString *copy = [text copy];
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [UIPasteboard generalPasteboard].string = copy;
+        });
+    } @catch (NSException *e) {}
+}
+
+// 递归搜索RENDER_DATA/页面JSON中的视频详情字典（优先aweme_detail格式，其次含bit_rate的dict）
++ (id)dyyyFindDetailDict:(id)node depth:(NSInteger)depth {
+    if (depth > 8 || !node) return nil;
+    if ([node isKindOfClass:[NSDictionary class]]) {
+        NSDictionary *dict = (NSDictionary *)node;
+        id ad = dict[@"aweme_detail"];
+        if ([ad isKindOfClass:[NSDictionary class]]) return ad;
+        if ([dict[@"bit_rate"] isKindOfClass:[NSArray class]] && [dict[@"video"] isKindOfClass:[NSDictionary class]]) return dict;
+        for (NSString *key in dict) {
+            id found = [DYYYManager dyyyFindDetailDict:dict[key] depth:depth + 1];
+            if (found) return found;
+        }
+    } else if ([node isKindOfClass:[NSArray class]]) {
+        for (id item in (NSArray *)node) {
+            id found = [DYYYManager dyyyFindDetailDict:item depth:depth + 1];
+            if (found) return found;
+        }
+    }
+    return nil;
+}
+
+// 递归搜索_ROUTER_DATA中的item_list（取第一个含video的item）
++ (id)dyyyFindItemList:(id)node depth:(NSInteger)depth {
+    if (depth > 8 || !node) return nil;
+    if ([node isKindOfClass:[NSDictionary class]]) {
+        NSDictionary *dict = (NSDictionary *)node;
+        id il = dict[@"item_list"];
+        if ([il isKindOfClass:[NSArray class]] && [(NSArray *)il count] > 0) {
+            id first = ((NSArray *)il)[0];
+            if ([first isKindOfClass:[NSDictionary class]] && [first[@"video"] isKindOfClass:[NSDictionary class]]) return first;
+        }
+        for (NSString *key in dict) {
+            id found = [DYYYManager dyyyFindItemList:dict[key] depth:depth + 1];
+            if (found) return found;
+        }
+    } else if ([node isKindOfClass:[NSArray class]]) {
+        for (id item2 in (NSArray *)node) {
+            id found = [DYYYManager dyyyFindItemList:item2 depth:depth + 1];
+            if (found) return found;
+        }
+    }
+    return nil;
+}
+
 // 本地解析全画质：从awemeModel取awemeId，走ttwid+web API+bit_rate全画质（JS规则）
 + (void)localParseFullFromAwemeModel:(id)awemeModel completion:(void(^)(NSDictionary *result))completion {
     if (!awemeModel || !completion) {
@@ -3829,7 +3886,7 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
         }
         if (fullCookieStr.length == 0) {
             [probeLog appendFormat:@"\n[失败] Cookie为空，无法构建请求\n"];
-            [[NSNotificationCenter defaultCenter] postNotificationName:@"DYYYProbeNotification" object:nil userInfo:@{@"text": [probeLog copy]}];
+            [DYYYManager dyyyDeliverProbeLog:probeLog];
             if (completion) completion(nil);
             return;
         }
@@ -3878,7 +3935,7 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                             for (NSDictionary *br in (brList ?: @[])) {
                                 NSString *gn = br[@"gear_name"] ?: @"?";
                                 NSInteger brVal = [br[@"bit_rate"] integerValue];
-                                NSInteger fps = [br[@"FPS"] integerValue];
+                                NSInteger fps = [br[@"fps"] integerValue] ?: [br[@"FPS"] integerValue];
                                 NSDictionary *pa = br[@"play_addr"] ?: @{};
                                 NSInteger h = [pa[@"height"] integerValue];
                                 NSInteger w = [pa[@"width"] integerValue];
@@ -3937,7 +3994,10 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                 NSMutableURLRequest *pageReq = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:pageURL]];
                 [pageReq setValue:@"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36" forHTTPHeaderField:@"User-Agent"];
                 [pageReq setValue:@"https://www.douyin.com/" forHTTPHeaderField:@"Referer"];
-                [pageReq setValue:fullCookieStr forHTTPHeaderField:@"Cookie"];
+                // 登录态页面不嵌视频数据(返回首页shell)，降级页必须用游客态Cookie(仅ttwid)
+                NSString *guestCookie = (ttwidStr.length > 0) ? [NSString stringWithFormat:@"ttwid=%@", ttwidStr] : @"ttwid=";
+                [pageReq setValue:guestCookie forHTTPHeaderField:@"Cookie"];
+                [probeLog appendFormat:@"游客Cookie len=%lu\n", (unsigned long)guestCookie.length];
                 [pageReq setValue:@"text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8" forHTTPHeaderField:@"Accept"];
                 [pageReq setValue:@"zh-CN,zh;q=0.9" forHTTPHeaderField:@"Accept-Language"];
                 __block NSData *pageData = nil;
@@ -3974,15 +4034,12 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                         [probeLog appendFormat:@"RENDER_DATA len=%lu\n", (unsigned long)renderData.length];
                         NSDictionary *rj = [NSJSONSerialization JSONObjectWithData:[renderData dataUsingEncoding:NSUTF8StringEncoding] options:0 error:nil];
                         if ([rj isKindOfClass:[NSDictionary class]]) {
-                            id detail = nil;
-                            @try { detail = rj[@"app"][@"videoDetail"][@"aweme_detail"]; } @catch (NSException *e) {}
-                            if (!detail || ![detail isKindOfClass:[NSDictionary class]]) { @try { detail = rj[@"42"][@"aweme_detail"]; } @catch (NSException *e) {} }
-                            if (!detail || ![detail isKindOfClass:[NSDictionary class]]) { @try { detail = rj[@"app"][@"videoDetail"]; } @catch (NSException *e) {} }
+                            // 实际结构在app数字键下且多变，递归搜索更稳
+                            id detail = [DYYYManager dyyyFindDetailDict:rj depth:0];
                             if (detail && [detail isKindOfClass:[NSDictionary class]]) {
                                 awemeDetail = detail;
-                                [probeLog appendFormat:@"RENDER_DATA提取成功!\n"];
+                                [probeLog appendFormat:@"RENDER_DATA提取成功! keys=%@\n", [(NSDictionary *)detail allKeys]];
                             } else {
-                                // 打印顶层key辅助调试
                                 [probeLog appendFormat:@"RENDER_DATA未找到aweme_detail, topKeys=%@\n", [rj allKeys]];
                             }
                         }
@@ -3990,10 +4047,55 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                         [probeLog appendFormat:@"HTML中未找到RENDER_DATA\n"];
                     }
                 }
-                // 页面降级也失败 → 直接失败（无本地解析保底）
+                // Step2.6: 分享页降级(iesdouyin游客SSR数据,无需签名,不受Argus拦截)
                 if (!awemeDetail || ![awemeDetail isKindOfClass:[NSDictionary class]]) {
-                    [probeLog appendFormat:@"\n[失败] 页面降级也失败\n"];
-                    [[NSNotificationCenter defaultCenter] postNotificationName:@"DYYYProbeNotification" object:nil userInfo:@{@"text": [probeLog copy]}];
+                    [probeLog appendFormat:@"\n[Step2.6 分享页降级] GET iesdouyin.com/share/video/%@\n", awemeId];
+                    NSString *shareURL = [NSString stringWithFormat:@"https://www.iesdouyin.com/share/video/%@", awemeId];
+                    NSMutableURLRequest *shareReq = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:shareURL]];
+                    [shareReq setValue:@"Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1" forHTTPHeaderField:@"User-Agent"];
+                    __block NSData *sData = nil;
+                    __block NSInteger sStatus = 0;
+                    dispatch_semaphore_t sSem = dispatch_semaphore_create(0);
+                    NSURLSessionDataTask *sTask = [[NSURLSession sharedSession] dataTaskWithRequest:shareReq completionHandler:^(NSData *sd, NSURLResponse *sr, NSError *se) {
+                        sData = sd;
+                        if (sr && [sr isKindOfClass:[NSHTTPURLResponse class]]) sStatus = [(NSHTTPURLResponse *)sr statusCode];
+                        dispatch_semaphore_signal(sSem);
+                    }];
+                    [sTask resume];
+                    dispatch_semaphore_wait(sSem, dispatch_time(DISPATCH_TIME_NOW, 15 * NSEC_PER_SEC));
+                    [probeLog appendFormat:@"HTTP %ld body=%lu\n", (long)sStatus, (unsigned long)(sData ? sData.length : 0)];
+                    if (sData && sStatus == 200) {
+                        NSString *sh = [[NSString alloc] initWithData:sData encoding:NSUTF8StringEncoding];
+                        NSRange rStart = [sh rangeOfString:@"window._ROUTER_DATA"];
+                        if (rStart.location != NSNotFound) {
+                            NSRange eq = [sh rangeOfString:@"=" options:0 range:NSMakeRange(rStart.location, sh.length - rStart.location)];
+                            if (eq.location != NSNotFound) {
+                                NSRange endTag = [sh rangeOfString:@"</script>" options:0 range:NSMakeRange(eq.location, sh.length - eq.location)];
+                                if (endTag.location != NSNotFound) {
+                                    NSUInteger js = eq.location + 1;
+                                    NSUInteger jl = endTag.location - js;
+                                    NSString *jsonStr = [[sh substringWithRange:NSMakeRange(js, jl)] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+                                    if ([jsonStr hasSuffix:@";"]) jsonStr = [jsonStr substringToIndex:jsonStr.length - 1];
+                                    NSDictionary *rdj = [NSJSONSerialization JSONObjectWithData:[jsonStr dataUsingEncoding:NSUTF8StringEncoding] options:0 error:nil];
+                                    id item = [DYYYManager dyyyFindItemList:rdj depth:0];
+                                    if (item && [item isKindOfClass:[NSDictionary class]]) {
+                                        awemeDetail = item;
+                                        [probeLog appendFormat:@"分享页提取成功! video keys=%@\n", [item[@"video"] allKeys]];
+                                    } else {
+                                        [probeLog appendFormat:@"_ROUTER_DATA无item_list, topKeys=%@\n", [rdj allKeys]];
+                                    }
+                                }
+                            }
+                        } else {
+                            [probeLog appendFormat:@"分享页无_ROUTER_DATA\n"];
+                        }
+                    }
+                }
+                // 全部降级失败 → 返回失败（诊断日志已落地）
+                if (!awemeDetail || ![awemeDetail isKindOfClass:[NSDictionary class]]) {
+                    [probeLog appendFormat:@"\n[失败] WebAPI/RENDER_DATA/分享页三条路全部失败\n"];
+                    [DYYYManager dyyyDeliverProbeLog:probeLog];
+                    dispatch_async(dispatch_get_main_queue(), ^{ [DYYYUtils showToast:@"接口4失败:诊断日志已复制到剪贴板"]; });
                     if (completion) completion(nil);
                     return;
                 }
@@ -4030,6 +4132,15 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
             else if (longerSide >= 1920) qCode = @"1080p";
             else if (longerSide >= 1280) qCode = @"720p";
             else if (longerSide >= 1024) qCode = @"540p";
+            if (!qCode) {
+                // width/height缺失或低于阈值时，从gear_name提取档位（如adapt_540_1/bd_1080p）
+                NSString *gn = [b[@"gear_name"] isKindOfClass:[NSString class]] ? b[@"gear_name"] : @"";
+                if ([gn containsString:@"2160"]) qCode = @"2160p";
+                else if ([gn containsString:@"1440"]) qCode = @"1440p";
+                else if ([gn containsString:@"1080"]) qCode = @"1080p";
+                else if ([gn containsString:@"720"]) qCode = @"720p";
+                else if ([gn containsString:@"540"]) qCode = @"540p";
+            }
             if (!qCode) continue;
             NSArray *urlList = playAddr[@"url_list"];
             NSString *url = (urlList && urlList.count > 0) ? urlList[0] : nil;
@@ -4037,7 +4148,7 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
             NSInteger bitRate = [b[@"bit_rate"] integerValue];
             NSDictionary *existing = byQuality[qCode];
             if (!existing || bitRate > [existing[@"bitRate"] integerValue]) {
-                byQuality[qCode] = @{@"url": url, @"size": playAddr[@"data_size"] ?: @(0), @"bitRate": @(bitRate), @"fps": b[@"FPS"] ?: @(30)};
+                byQuality[qCode] = @{@"url": url, @"size": playAddr[@"data_size"] ?: @(0), @"bitRate": @(bitRate), @"fps": b[@"fps"] ?: b[@"FPS"] ?: @(30)};
             }
         }
 
@@ -4133,7 +4244,7 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
         }
         if (videoList.count == 0) {
             NSArray *fallbackList = videoObj[@"play_addr"][@"url_list"];
-            if ([fallbackList isKindOfClass:[NSArray class]] && fallbackList.count > 0) [videoList addObject:@{@"level": @"[原画【最高画质]]-[30FPS]", @"url": fallbackList[0]}];
+            if ([fallbackList isKindOfClass:[NSArray class]] && fallbackList.count > 0) [videoList addObject:@{@"level": @"[原画【最高画质】]-[30FPS]", @"url": fallbackList[0]}];
         }
         NSMutableArray *liveVideoURLs = [NSMutableArray array];
         if (isImagePost) {
@@ -4207,11 +4318,8 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
             [probeLog appendFormat:@"  %@ → %@\n", lvl, urlPreview];
         }
         [probeLog appendFormat:@"\nvideoURI=%@\n", videoURI ?: @"无"];
-        {
-            NSString *probeText = [probeLog copy];
-            // 存储探针结果，通过通知在主线程弹窗
-            [[NSNotificationCenter defaultCenter] postNotificationName:@"DYYYProbeNotification" object:nil userInfo:@{@"text": probeText}];
-        }
+        // 探针日志落地：写文件 + 复制剪贴板（原通知无监听者）
+        [DYYYManager dyyyDeliverProbeLog:probeLog];
 
         if (completion) completion(result.count > 0 ? result : nil);
     });
