@@ -12,6 +12,56 @@
 #import "DYYYToast.h"
 #import "DYYYUtils.h"
 #import "DYYYWebViewFetcher.h"
+#import <execinfo.h>
+#import <signal.h>
+#import <fcntl.h>
+#import <unistd.h>
+
+// ===== V7.5 崩溃捕获: NSException(符号化堆栈) + signal(信号类型/地址), 写Documents/dyyy_crash.log =====
+static NSString *_dyyyCrashPathNS = nil;
+static char _dyyyCrashPathC[512] = {0};
+static BOOL _dyyyCrashInstalled = NO;
+
+static void _dyyy_signal_handler(int sig, siginfo_t *si, void *uc) {
+    int fd = open(_dyyyCrashPathC, O_CREAT | O_WRONLY | O_APPEND, 0644);
+    if (fd >= 0) {
+        char buf[256];
+        int len = snprintf(buf, sizeof(buf), "[SIGNAL] sig=%d addr=%p\n", sig, si ? si->si_addr : NULL);
+        if (len > 0) write(fd, buf, (size_t)len);
+        write(fd, "[END]\n", 6);
+        close(fd);
+    }
+    signal(sig, SIG_DFL);
+    raise(sig);
+}
+
+static void _dyyy_uncaught_handler(NSException *exc) {
+    @try {
+        NSString *rep = [NSString stringWithFormat:@"[NSException] %@: %@\n线程=%@\n堆栈:\n%@\n[END]\n",
+                         exc.name, exc.reason, [NSThread currentThread], [exc.callStackSymbols componentsJoinedByString:@"\n"]];
+        [rep writeToFile:_dyyyCrashPathNS atomically:YES encoding:NSUTF8StringEncoding error:nil];
+    } @catch (id e) {}
+    NSSetUncaughtExceptionHandler(NULL);
+}
+
++ (void)installCrashHandler {
+    if (_dyyyCrashInstalled) return;
+    _dyyyCrashInstalled = YES;
+    NSString *p = [NSHomeDirectory() stringByAppendingPathComponent:@"Documents/dyyy_crash.log"];
+    _dyyyCrashPathNS = p;
+    [p getCString:_dyyyCrashPathC maxLength:sizeof(_dyyyCrashPathC) encoding:NSUTF8StringEncoding];
+    NSSetUncaughtExceptionHandler(&_dyyy_uncaught_handler);
+    struct sigaction sa;
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_sigaction = _dyyy_signal_handler;
+    sa.sa_flags = SA_SIGINFO;
+    sigaction(SIGABRT, &sa, NULL);
+    sigaction(SIGSEGV, &sa, NULL);
+    sigaction(SIGBUS, &sa, NULL);
+    sigaction(SIGILL, &sa, NULL);
+    sigaction(SIGTRAP, &sa, NULL);
+    sigaction(SIGFPE, &sa, NULL);
+}
 
 // MARK: - API 类型定义
 typedef NS_ENUM(NSInteger, DYYYAPIType) {
@@ -4064,6 +4114,7 @@ static void dyyyNetProbeInstall(void) {
     // V7.1修复: 面板action在主线程调用本函数, 而Step2(WebView主线程创建+回调)/Step2.5/2.6(semaphore等待)
     // 若跑在主线程 -> dispatch_async(main)的WebView创建block永远不执行 -> 主线程空等90秒 -> ANR杀进程=闪退。
     // 主线程调用时整体切后台执行; completion由调用方自行dispatch回主线程更新UI。
+    [self installCrashHandler];
     if ([NSThread isMainThread]) {
         dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
             [self localParseFullFromAwemeModel:awemeModel completion:completion];
@@ -4082,9 +4133,15 @@ static void dyyyNetProbeInstall(void) {
     }
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         // ===== 接口4全流程探针 =====
-        __block NSMutableString *probeLog = [NSMutableString stringWithString:@"[接口4探针V7.4]\n"];
+        __block NSMutableString *probeLog = [NSMutableString stringWithString:@"[接口4探针V7.5]\n"];
         [probeLog appendFormat:@"awemeId=%@\n", awemeId];
         // V7.3: 读取上次闪退前的落盘日志(实时写Documents/dyyy_probe.log), 崩溃后重启回溯崩点
+        NSString *crashLogPath = [NSHomeDirectory() stringByAppendingPathComponent:@"Documents/dyyy_crash.log"];
+        NSString *crashLog = [NSString stringWithContentsOfFile:crashLogPath encoding:NSUTF8StringEncoding error:nil];
+        if (crashLog.length > 0) {
+            [probeLog appendFormat:@"\n===== [上次崩溃报告] =====\n%@\n===== [崩溃报告结束] =====\n", crashLog];
+            [[NSFileManager defaultManager] removeItemAtPath:crashLogPath error:nil];
+        }
         NSString *prevLogPath = [NSHomeDirectory() stringByAppendingPathComponent:@"Documents/dyyy_probe.log"];
         NSString *prevLog = [NSString stringWithContentsOfFile:prevLogPath encoding:NSUTF8StringEncoding error:nil];
         if (prevLog.length > 0) {
