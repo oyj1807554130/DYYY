@@ -16,8 +16,8 @@ static JSValue *_dyyyAbCtor = nil;
         return;
     }
     JSContext *ctx = [[JSContext alloc] init];
-    // 垫片: 提供假 CommonJS 环境, 屏蔽顶部 module.exports 与底部 require.main 演示块
-    [ctx evaluateScript:@"var module={exports:{}};var require={main:null};var console={log:function(){},warn:function(){},error:function(){}};"];
+    // 垫片: 假 CommonJS 环境 + TextEncoder polyfill(JSContext缺此Web API, 缺失则src执行中断于第117行, module.exports永为空→签名引擎永不就绪)
+    [ctx evaluateScript:@"var module={exports:{}};var require={main:null};var console={log:function(){},warn:function(){},error:function(){}};var TextEncoder=function(){this.encode=function(s){var out=[];for(var i=0;i<s.length;i++){var c=s.codePointAt(i);if(c>0xFFFF)i++;if(c<0x80)out.push(c);else if(c<0x800)out.push(0xC0|(c>>6),0x80|(c&63));else if(c<0x10000)out.push(0xE0|(c>>12),0x80|((c>>6)&63),0x80|(c&63));else out.push(0xF0|(c>>18),0x80|((c>>12)&63),0x80|((c>>6)&63),0x80|(c&63));}return new Uint8Array(out);};};"];
     ctx.exceptionHandler = ^(JSContext *c, JSValue *e) {
         NSLog(@"[DYYYABogus] JS异常: %@", [e toString]);
     };
