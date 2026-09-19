@@ -1736,6 +1736,77 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
         NSLog(@"[DYYY] moveItemAtURL failed: %@, from=%@, to=%@", moveError, location, destinationURL);
     }
 
+    // ===== 视频数据有效性校验：防止CDN错误页/空响应被当作视频保存（PHPhotosError 3302）=====
+    if (mediaType == MediaTypeVideo) {
+        NSDictionary *fattrs = [[NSFileManager defaultManager] attributesOfItemAtPath:destinationURL.path error:nil];
+        unsigned long long fileSize = fattrs ? [fattrs fileSize] : 0;
+        BOOL validVideo = NO;
+        if (fileSize >= 4096) {
+            NSFileHandle *fh = [NSFileHandle fileHandleForReadingAtPath:destinationURL.path];
+            if (fh) {
+                NSData *head = [fh readDataOfLength:16];
+                [fh closeFile];
+                if (head.length >= 12) {
+                    const char *b = (const char *)head.bytes;
+                    // MP4/MOV 合法box: ftyp/moov/mdat/free/skip/wide
+                    if (memcmp(b + 4, "ftyp", 4) == 0 || memcmp(b + 4, "moov", 4) == 0 ||
+                        memcmp(b + 4, "mdat", 4) == 0 || memcmp(b + 4, "free", 4) == 0 ||
+                        memcmp(b + 4, "skip", 4) == 0 || memcmp(b + 4, "wide", 4) == 0) {
+                        validVideo = YES;
+                    }
+                }
+            }
+        }
+        if (!validVideo) {
+            NSLog(@"[DYYY] 视频下载内容无效: size=%llu url=%@", fileSize, downloadTask.originalRequest.URL);
+            [[NSFileManager defaultManager] removeItemAtURL:destinationURL error:nil];
+
+            if (!self.headerRetryDoneIDs) {
+                self.headerRetryDoneIDs = [NSMutableSet set];
+            }
+            NSURL *retryURL = downloadTask.originalRequest.URL;
+            BOOL canRetry = (retryURL != nil) && ![self.headerRetryDoneIDs containsObject:downloadIDForTask];
+
+            if (canRetry) {
+                // 首次无效：复用同一downloadID，用无自定义header的干净请求重试一次
+                [self.headerRetryDoneIDs addObject:downloadIDForTask];
+                NSURLSessionConfiguration *cfg = [NSURLSessionConfiguration defaultSessionConfiguration];
+                cfg.timeoutIntervalForRequest = 60.0;
+                cfg.timeoutIntervalForResource = 600.0;
+                NSURLSession *retrySession = [NSURLSession sessionWithConfiguration:cfg delegate:self delegateQueue:[NSOperationQueue mainQueue]];
+                NSURLSessionDownloadTask *retryTask = [retrySession downloadTaskWithURL:retryURL];
+                retryTask.taskDescription = downloadIDForTask;
+                self.downloadTasks[downloadIDForTask] = retryTask;
+                self.taskProgressMap[downloadIDForTask] = @0.0;
+                [retryTask resume];
+                dispatch_async(dispatch_get_main_queue(), ^{
+                  [DYYYUtils showToast:@"视频数据无效，正在直连重试..."];
+                });
+            } else {
+                // 重试后仍无效：报明确错误并走失败链路，坏数据不进相册
+                [self.headerRetryDoneIDs removeObject:downloadIDForTask];
+                [self.downloadTasks removeObjectForKey:downloadIDForTask];
+                [self.taskProgressMap removeObjectForKey:downloadIDForTask];
+                [self.mediaTypeMap removeObjectForKey:downloadIDForTask];
+                NSString *invalidMsg = [NSString stringWithFormat:@"下载失败: 视频数据无效(%.0fKB)", fileSize / 1024.0];
+                if (isBatchDownload) {
+                    [[DYYYManager shared] incrementCompletedAndUpdateProgressForBatch:batchID success:NO];
+                    [self startNextSerialImageForBatch:batchID];
+                } else {
+                    void (^completionBlock)(BOOL success, NSURL *fileURL) = self.completionBlocks[downloadIDForTask];
+                    if (completionBlock) {
+                        dispatch_async(dispatch_get_main_queue(), ^{ completionBlock(NO, nil); });
+                    }
+                    [self finalizeDownloadWithID:downloadIDForTask success:NO fileURL:nil];
+                }
+                dispatch_async(dispatch_get_main_queue(), ^{
+                  [DYYYUtils showToast:invalidMsg];
+                });
+            }
+            return;
+        }
+    }
+
     if (isBatchDownload) {
         if (!moveError) {
             [DYYYManager saveMedia:destinationURL
