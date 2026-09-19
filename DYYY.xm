@@ -9471,39 +9471,18 @@ static void findTargetViewInView(UIView *view) {
                         usingBlock:^(NSNotification *note) {
           NSString *text = note.userInfo[@"text"];
           if (![text isKindOfClass:[NSString class]] || text.length == 0) return;
-          // V7.2弹窗加固: V7流程长达数十秒, 用户等待期间常在切页面, present撞上转场(抖音自研导航容器)会崩
-          __block int retryCount = 0;
-          __block dispatch_block_t presentRetry = nil;
-          presentRetry = ^{
-            UIWindow *win = [DYYYUtils getActiveWindow];
-            if (!win || !win.rootViewController) return;
-            UIViewController *topVC = win.rootViewController;
-            while (topVC.presentedViewController && !topVC.presentedViewController.isBeingDismissed) {
-              topVC = topVC.presentedViewController;
-            }
-            // 顶层VC正在转场 -> 延迟2秒重试, 最多5次(10秒)后放弃
-            if (topVC.isBeingPresented || topVC.isBeingDismissed || (topVC.presentedViewController && topVC.presentedViewController.isBeingDismissed)) {
-              if (retryCount >= 5) return;
-              retryCount++;
-              dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), presentRetry);
-              return;
-            }
-            NSString *tail = text.length > 1200 ? [text substringFromIndex:text.length - 1200] : text;
-            NSString *header = text.length > 1200 ? [NSString stringWithFormat:@"[日志共%lu字，显示末尾1200字]\n", (unsigned long)text.length] : @"";
-            UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"接口4探针"
-                                                                           message:[NSString stringWithFormat:@"%@%@", header, tail]
-                                                                    preferredStyle:UIAlertControllerStyleAlert];
-            [alert addAction:[UIAlertAction actionWithTitle:@"复制完整日志" style:UIAlertActionStyleDefault handler:^(UIAlertAction *act) {
-                [UIPasteboard generalPasteboard].string = text;
-            }]];
-            [alert addAction:[UIAlertAction actionWithTitle:@"关闭" style:UIAlertActionStyleCancel handler:nil]];
-            @try {
-              [topVC presentViewController:alert animated:YES completion:nil];
-            } @catch (NSException *e) {
-              if (retryCount < 5) { retryCount++; dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), presentRetry); }
-            }
-          };
-          presentRetry();
+          UIWindow *win = [DYYYUtils getActiveWindow];
+          if (!win || !win.rootViewController) return;
+          NSString *tail = text.length > 1200 ? [text substringFromIndex:text.length - 1200] : text;
+          NSString *header = text.length > 1200 ? [NSString stringWithFormat:@"[日志共%lu字，显示末尾1200字]\n", (unsigned long)text.length] : @"";
+          UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"接口4探针"
+                                                                         message:[NSString stringWithFormat:@"%@%@", header, tail]
+                                                                  preferredStyle:UIAlertControllerStyleAlert];
+          [alert addAction:[UIAlertAction actionWithTitle:@"复制完整日志" style:UIAlertActionStyleDefault handler:^(UIAlertAction *act) {
+              [UIPasteboard generalPasteboard].string = text;
+          }]];
+          [alert addAction:[UIAlertAction actionWithTitle:@"关闭" style:UIAlertActionStyleCancel handler:nil]];
+          [win.rootViewController presentViewController:alert animated:YES completion:nil];
         }];
     }
 }

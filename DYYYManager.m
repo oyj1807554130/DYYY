@@ -11,38 +11,7 @@
 
 #import "DYYYToast.h"
 #import "DYYYUtils.h"
-#import "DYYYWebViewFetcher.h"
-#import <execinfo.h>
-#import <signal.h>
-#import <fcntl.h>
-#import <unistd.h>
-
-// ===== V7.5 崩溃捕获: NSException(符号化堆栈) + signal(信号类型/地址), 写Documents/dyyy_crash.log =====
-static NSString *_dyyyCrashPathNS = nil;
-static char _dyyyCrashPathC[512] = {0};
-static BOOL _dyyyCrashInstalled = NO;
-
-static void _dyyy_signal_handler(int sig, siginfo_t *si, void *uc) {
-    int fd = open(_dyyyCrashPathC, O_CREAT | O_WRONLY | O_APPEND, 0644);
-    if (fd >= 0) {
-        char buf[256];
-        int len = snprintf(buf, sizeof(buf), "[SIGNAL] sig=%d addr=%p\n", sig, si ? si->si_addr : NULL);
-        if (len > 0) write(fd, buf, (size_t)len);
-        write(fd, "[END]\n", 6);
-        close(fd);
-    }
-    signal(sig, SIG_DFL);
-    raise(sig);
-}
-
-static void _dyyy_uncaught_handler(NSException *exc) {
-    @try {
-        NSString *rep = [NSString stringWithFormat:@"[NSException] %@: %@\n线程=%@\n堆栈:\n%@\n[END]\n",
-                         exc.name, exc.reason, [NSThread currentThread], [exc.callStackSymbols componentsJoinedByString:@"\n"]];
-        [rep writeToFile:_dyyyCrashPathNS atomically:YES encoding:NSUTF8StringEncoding error:nil];
-    } @catch (id e) {}
-    NSSetUncaughtExceptionHandler(NULL);
-}
+#import "DYYYABogus.h"
 
 // MARK: - API 类型定义
 typedef NS_ENUM(NSInteger, DYYYAPIType) {
@@ -3845,280 +3814,10 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
     return [parts componentsJoinedByString:@"; "];
 }
 
-#pragma mark - [网络栈探针V4] 网络栈侦察：首次长按时才安装hook(启动阶段零改动)，白名单方法+参数类型校验
-static NSMutableArray *dyyyNetProbeCaptured = nil;
-static NSMutableArray *dyyyNetProbeURLs = nil;
-static NSMutableDictionary *dyyyNetProbeOrigMap = nil;
-static BOOL dyyyNetProbeInstalled = NO;
-static NSString *dyyyNetProbeHookSel = nil;
-static NSMutableArray *dyyyNetProbeHookInfo = nil;
-static id dyyyNetProbeSelfMgr = nil;
-static id dyyyNetProbeSelfQueue = nil;
-static BOOL dyyyNetProbeHookedSession = NO;
-
-static void dyyyNetProbeCapture(id request) {
-    @try {
-        if (!dyyyNetProbeCaptured) { dyyyNetProbeCaptured = [[NSMutableArray alloc] init]; }
-        if (!dyyyNetProbeURLs) { dyyyNetProbeURLs = [[NSMutableArray alloc] init]; }
-        if (dyyyNetProbeCaptured.count >= 16) { return; }
-        if (!request) { return; }
-        const char *cn = object_getClassName(request);
-        if (!cn) { return; }
-        NSString *clsName = [NSString stringWithUTF8String:cn];
-        if (![clsName containsString:@"Request"] && ![clsName containsString:@"URL"]) { return; }
-        NSString *url = nil;
-        for (NSString *k in @[@"urlString", @"URLString", @"requestURLString", @"requestURL", @"url", @"URL"]) {
-            @try {
-                id v = [request valueForKey:k];
-                if ([v isKindOfClass:[NSURL class]]) { url = [(NSURL *)v absoluteString]; }
-                else if ([v isKindOfClass:[NSString class]]) { url = v; }
-                if (url.length > 0) { break; }
-            } @catch (NSException *e1) {}
-        }
-        if (url.length == 0) { return; }
-        if (![url containsString:@"aweme"]) { return; }
-        if ([url containsString:@"douyinvod"] || [url containsString:@"douyinpic"] || [url containsString:@"zjcdn"] || [url containsString:@"bytecdn"] || [url containsString:@"byteimg"]) { return; }
-        NSString *path = url;
-        NSRange qr = [url rangeOfString:@"?"];
-        if (qr.location != NSNotFound) { path = [url substringToIndex:qr.location]; }
-        NSMutableString *rec = [NSMutableString stringWithFormat:@"◆ %@\n", url];
-        NSString *method = nil;
-        for (NSString *mk in @[@"requestMethod", @"HTTPMethod", @"httpMethod", @"method"]) {
-            @try {
-                id mv = [request valueForKey:mk];
-                if ([mv isKindOfClass:[NSString class]]) { method = mv; break; }
-            } @catch (NSException *e2) {}
-        }
-        if (method.length > 0) { [rec appendFormat:@"  method=%@\n", method]; }
-        NSString *hinfo = nil;
-        for (NSString *hk in @[@"headers", @"requestHeaders", @"headerFields", @"allHTTPHeaderFields", @"HTTPHeaderFields"]) {
-            @try {
-                id hv = [request valueForKey:hk];
-                if ([hv isKindOfClass:[NSDictionary class]]) {
-                    NSMutableArray *hits = [NSMutableArray array];
-                    for (NSString *hk2 in hv) {
-                        NSString *low = hk2.lowercaseString;
-                        if ([low containsString:@"argus"] || [low containsString:@"ladon"] || [low containsString:@"khronos"] || [low containsString:@"gorgon"] || [low containsString:@"stub"] || [low containsString:@"helios"]) { [hits addObject:hk2]; }
-                    }
-                    hinfo = [NSString stringWithFormat:@"%@ 共%lu头 签名头:%@", hk, (unsigned long)[(NSDictionary *)hv count], hits.count > 0 ? [hits componentsJoinedByString:@","] : @"无"];
-                    break;
-                }
-            } @catch (NSException *e3) {}
-        }
-        [rec appendFormat:@"  headers: %@\n", hinfo != nil ? hinfo : @"未找到"];
-        if ([method isEqualToString:@"POST"]) {
-            for (NSString *bk in @[@"HTTPBody", @"httpBody", @"postBody", @"params"]) {
-                @try {
-                    id bv = [request valueForKey:bk];
-                    NSString *bs = nil;
-                    if ([bv isKindOfClass:[NSData class]]) { bs = [[NSString alloc] initWithData:bv encoding:NSUTF8StringEncoding]; }
-                    else if ([bv isKindOfClass:[NSString class]]) { bs = (NSString *)bv; }
-                    else if ([bv isKindOfClass:[NSDictionary class]]) { bs = [(NSDictionary *)bv description]; }
-                    if (bs.length > 0) {
-                        [rec appendFormat:@"  body(%@): %@\n", bk, bs.length > 600 ? [bs substringToIndex:600] : bs];
-                        break;
-                    }
-                } @catch (NSException *e4) {}
-            }
-        }
-        @synchronized (dyyyNetProbeCaptured) {
-            BOOL dup = NO;
-            for (NSString *old in dyyyNetProbeURLs) {
-                if ([old hasPrefix:path]) { dup = YES; break; }
-            }
-            if (!dup && dyyyNetProbeCaptured.count < 16) {
-                [dyyyNetProbeCaptured addObject:rec];
-                [dyyyNetProbeURLs addObject:url.length > 2400 ? [url substringToIndex:2400] : url];
-            }
-        }
-    } @catch (NSException *e) {}
-}
-
-static id dyyy_net_swz_start(id self, SEL _cmd, id request) {
-    @try {
-        NSString *scn = NSStringFromClass(object_getClass(self));
-        if ([scn containsString:@"Queue"]) { if (!dyyyNetProbeSelfQueue) { dyyyNetProbeSelfQueue = self; } }
-        else { if (!dyyyNetProbeSelfMgr) { dyyyNetProbeSelfMgr = self; } }
-    } @catch (NSException *e0) {}
-    if (request) { dyyyNetProbeCapture(request); }
-    NSValue *ov = dyyyNetProbeOrigMap ? [dyyyNetProbeOrigMap objectForKey:NSStringFromSelector(_cmd)] : nil;
-    if (ov) {
-        IMP orig = (IMP)[ov pointerValue];
-        if (orig) { return ((id (*)(id, SEL, id))orig)(self, _cmd, request); }
-    }
-    return nil;
-}
-
-static void dyyyNetProbeCaptureURLReq(NSURLRequest *req) {
-    @try {
-        if (!req) { return; }
-        if (!dyyyNetProbeCaptured) { dyyyNetProbeCaptured = [[NSMutableArray alloc] init]; }
-        if (!dyyyNetProbeURLs) { dyyyNetProbeURLs = [[NSMutableArray alloc] init]; }
-        if (dyyyNetProbeCaptured.count >= 16) { return; }
-        NSURL *uu = [req URL];
-        if (!uu) { return; }
-        NSString *url = [uu absoluteString];
-        if (url.length == 0) { return; }
-        if (![url containsString:@"aweme"]) { return; }
-        if ([url containsString:@"douyinvod"] || [url containsString:@"douyinpic"] || [url containsString:@"zjcdn"] || [url containsString:@"bytecdn"] || [url containsString:@"byteimg"]) { return; }
-        NSString *path = url;
-        NSRange qr = [url rangeOfString:@"?"];
-        if (qr.location != NSNotFound) { path = [url substringToIndex:qr.location]; }
-        NSMutableString *rec = [NSMutableString stringWithFormat:@"◆[S] %@\n", url];
-        NSString *method = [req HTTPMethod] ?: @"";
-        if (method.length > 0) { [rec appendFormat:@"  method=%@\n", method]; }
-        NSDictionary *hh = [req allHTTPHeaderFields];
-        if (hh) {
-            NSMutableArray *hits = [NSMutableArray array];
-            for (NSString *hk2 in hh) {
-                NSString *low = hk2.lowercaseString;
-                if ([low containsString:@"argus"] || [low containsString:@"ladon"] || [low containsString:@"khronos"] || [low containsString:@"gorgon"] || [low containsString:@"stub"] || [low containsString:@"helios"]) { [hits addObject:hk2]; }
-            }
-            [rec appendFormat:@"  headers 共%lu头 签名头:%@\n", (unsigned long)[(NSDictionary *)hh count], hits.count > 0 ? [hits componentsJoinedByString:@","] : @"无"];
-        }
-        if ([method isEqualToString:@"POST"]) {
-            NSData *bd = [req HTTPBody];
-            if (bd.length > 0) {
-                NSString *bs = [[NSString alloc] initWithData:bd encoding:NSUTF8StringEncoding];
-                if (bs.length > 600) { bs = [bs substringToIndex:600]; }
-                [rec appendFormat:@"  body: %@\n", bs ?: @""];
-            }
-        }
-        @synchronized (dyyyNetProbeCaptured) {
-            BOOL dup = NO;
-            for (NSString *old in dyyyNetProbeURLs) {
-                if ([old hasPrefix:path]) { dup = YES; break; }
-            }
-            if (!dup && dyyyNetProbeCaptured.count < 16) {
-                [dyyyNetProbeCaptured addObject:rec];
-                [dyyyNetProbeURLs addObject:url.length > 2400 ? [url substringToIndex:2400] : url];
-            }
-        }
-    } @catch (NSException *e) {}
-}
-
-static id dyyy_net_swz_ns3(id self, SEL _cmd, id req) {
-    if (req) { dyyyNetProbeCaptureURLReq(req); }
-    NSValue *ov = dyyyNetProbeOrigMap ? [dyyyNetProbeOrigMap objectForKey:[NSString stringWithFormat:@"S_%@", NSStringFromSelector(_cmd)]] : nil;
-    if (ov) {
-        IMP orig = (IMP)[ov pointerValue];
-        if (orig) { return ((id (*)(id, SEL, id))orig)(self, _cmd, req); }
-    }
-    return nil;
-}
-
-static id dyyy_net_swz_ns4(id self, SEL _cmd, id req, id cb) {
-    if (req) { dyyyNetProbeCaptureURLReq(req); }
-    NSValue *ov = dyyyNetProbeOrigMap ? [dyyyNetProbeOrigMap objectForKey:[NSString stringWithFormat:@"S_%@", NSStringFromSelector(_cmd)]] : nil;
-    if (ov) {
-        IMP orig = (IMP)[ov pointerValue];
-        if (orig) { return ((id (*)(id, SEL, id, id))orig)(self, _cmd, req, cb); }
-    }
-    return nil;
-}
-
-static void dyyyNetProbeInstall(void) {
-    @try {
-        if (dyyyNetProbeInstalled) { return; }
-        dyyyNetProbeInstalled = YES;
-        if (!dyyyNetProbeOrigMap) { dyyyNetProbeOrigMap = [[NSMutableDictionary alloc] init]; }
-        if (!dyyyNetProbeHookInfo) { dyyyNetProbeHookInfo = [[NSMutableArray alloc] init]; }
-        NSArray *want = @[@"startRequest:", @"startRequestSync:", @"sendRequest:", @"addRequest:", @"addHttpRequest:"];
-        NSMutableArray *targets = [NSMutableArray array];
-        Class c0 = NSClassFromString(@"TTNetworkManager");
-        int depth = 0;
-        while (c0 && depth < 5) { [targets addObject:c0]; c0 = class_getSuperclass(c0); depth++; }
-        Class qc = NSClassFromString(@"TTHttpRequestQueue");
-        if (qc) { [targets addObject:qc]; }
-        // NSURLSession系统层hook(公开API,签名固定,系统类不受抖音内部重构影响)
-        Class sc = [NSURLSession class];
-        if (sc) {
-            for (NSString *wn in @[@"dataTaskWithRequest:", @"dataTaskWithRequest:completionHandler:"]) {
-                if ([dyyyNetProbeHookInfo containsObject:wn]) { continue; }
-                SEL ws = NSSelectorFromString(wn);
-                Method m = class_getInstanceMethod(sc, ws);
-                if (!m) { continue; }
-                unsigned int na = method_getNumberOfArguments(m);
-                if (na != 3 && na != 4) { continue; }
-                char *rt = method_copyReturnType(m);
-                BOOL rtOK = (rt != NULL && rt[0] == '@');
-                if (rt) { free(rt); }
-                if (!rtOK) { continue; }
-                IMP o = method_getImplementation(m);
-                [dyyyNetProbeOrigMap setObject:[NSValue valueWithPointer:(void *)o] forKey:[NSString stringWithFormat:@"S_%@", wn]];
-                method_setImplementation(m, na == 3 ? (IMP)dyyy_net_swz_ns3 : (IMP)dyyy_net_swz_ns4);
-                [dyyyNetProbeHookInfo addObject:wn];
-                dyyyNetProbeHookedSession = YES;
-                NSString *line2 = [NSString stringWithFormat:@"NSURLSession %@", wn];
-                dyyyNetProbeHookSel = dyyyNetProbeHookSel.length > 0 ? [dyyyNetProbeHookSel stringByAppendingFormat:@"\n%@", line2] : line2;
-            }
-        }
-        for (Class tc in targets) {
-            for (NSString *wn in want) {
-                if ([dyyyNetProbeHookInfo containsObject:wn]) { continue; }
-                SEL ws = NSSelectorFromString(wn);
-                Method m = class_getInstanceMethod(tc, ws);
-                if (!m) { continue; }
-                if (method_getNumberOfArguments(m) != 3) { continue; }
-                char *at = method_copyArgumentType(m, 2);
-                BOOL argObj = (at != NULL && at[0] == '@');
-                if (at) { free(at); }
-                if (!argObj) { continue; }
-                char *rt = method_copyReturnType(m);
-                BOOL rtOK = (rt != NULL && (rt[0] == 'v' || rt[0] == '@'));
-                if (rt) { free(rt); }
-                if (!rtOK) { continue; }
-                IMP o = method_getImplementation(m);
-                [dyyyNetProbeOrigMap setObject:[NSValue valueWithPointer:(void *)o] forKey:wn];
-                method_setImplementation(m, (IMP)dyyy_net_swz_start);
-                [dyyyNetProbeHookInfo addObject:wn];
-                NSString *line = [NSString stringWithFormat:@"%@ %@", NSStringFromClass(tc), wn];
-                dyyyNetProbeHookSel = dyyyNetProbeHookSel.length > 0 ? [dyyyNetProbeHookSel stringByAppendingFormat:@"\n%@", line] : line;
-            }
-        }
-    } @catch (NSException *e) {}
-}
-
 // 本地解析全画质：从awemeModel取awemeId，走ttwid+web API+bit_rate全画质（JS规则）
-+ (void)installCrashHandler {
-    if (_dyyyCrashInstalled) return;
-    _dyyyCrashInstalled = YES;
-    NSString *p = [NSHomeDirectory() stringByAppendingPathComponent:@"Documents/dyyy_crash.log"];
-    _dyyyCrashPathNS = p;
-    [p getCString:_dyyyCrashPathC maxLength:sizeof(_dyyyCrashPathC) encoding:NSUTF8StringEncoding];
-    NSSetUncaughtExceptionHandler(&_dyyy_uncaught_handler);
-    struct sigaction sa;
-    memset(&sa, 0, sizeof(sa));
-    sa.sa_sigaction = _dyyy_signal_handler;
-    sa.sa_flags = SA_SIGINFO;
-    sigaction(SIGABRT, &sa, NULL);
-    sigaction(SIGSEGV, &sa, NULL);
-    sigaction(SIGBUS, &sa, NULL);
-    sigaction(SIGILL, &sa, NULL);
-    sigaction(SIGTRAP, &sa, NULL);
-    sigaction(SIGFPE, &sa, NULL);
-}
-
-+ (void)persistProbeLog:(NSString *)text {
-    @try {
-        NSString *p = [NSHomeDirectory() stringByAppendingPathComponent:@"Documents/dyyy_probe.log"];
-        if (text.length > 0) [text writeToFile:p atomically:YES encoding:NSUTF8StringEncoding error:nil];
-    } @catch (NSException *e) {}
-}
-
 + (void)localParseFullFromAwemeModel:(id)awemeModel completion:(void(^)(NSDictionary *result))completion {
     if (!awemeModel || !completion) {
         if (completion) completion(nil);
-        return;
-    }
-    // V7.1修复: 面板action在主线程调用本函数, 而Step2(WebView主线程创建+回调)/Step2.5/2.6(semaphore等待)
-    // 若跑在主线程 -> dispatch_async(main)的WebView创建block永远不执行 -> 主线程空等90秒 -> ANR杀进程=闪退。
-    // 主线程调用时整体切后台执行; completion由调用方自行dispatch回主线程更新UI。
-    [self installCrashHandler];
-    if ([NSThread isMainThread]) {
-        dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-            [self localParseFullFromAwemeModel:awemeModel completion:completion];
-        });
         return;
     }
     NSString *awemeId = nil;
@@ -4133,143 +3832,114 @@ static void dyyyNetProbeInstall(void) {
     }
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         // ===== 接口4全流程探针 =====
-        __block NSMutableString *probeLog = [NSMutableString stringWithString:@"[接口4探针V7.7]\n"];
+        __block NSMutableString *probeLog = [NSMutableString stringWithString:@"[接口4探针]\n"];
         [probeLog appendFormat:@"awemeId=%@\n", awemeId];
-        // V7.3: 读取上次闪退前的落盘日志(实时写Documents/dyyy_probe.log), 崩溃后重启回溯崩点
-        NSString *crashLogPath = [NSHomeDirectory() stringByAppendingPathComponent:@"Documents/dyyy_crash.log"];
-        NSString *crashLog = [NSString stringWithContentsOfFile:crashLogPath encoding:NSUTF8StringEncoding error:nil];
-        if (crashLog.length > 0) {
-            [probeLog appendFormat:@"\n===== [上次崩溃报告] =====\n%@\n===== [崩溃报告结束] =====\n", crashLog];
-            [[NSFileManager defaultManager] removeItemAtPath:crashLogPath error:nil];
-        }
-        NSString *prevLogPath = [NSHomeDirectory() stringByAppendingPathComponent:@"Documents/dyyy_probe.log"];
-        NSString *prevLog = [NSString stringWithContentsOfFile:prevLogPath encoding:NSUTF8StringEncoding error:nil];
-        if (prevLog.length > 0) {
-            NSString *prevTail = prevLog.length > 800 ? [prevLog substringFromIndex:prevLog.length - 800] : prevLog;
-            [probeLog appendFormat:@"\n[上次闪退前日志尾部]\n%@\n[本次运行开始]\n", prevTail];
-        }
 
-        // [网络栈探针V4] 首次长按装hook，之后进详情页/刷视频，再长按就有抓包
+        // [本地画质探针V3] 深挖原始档位字段——朴素结构
         {
-            [probeLog appendString:@"\n[网络栈探针V4]\n"];
-            BOOL wasInstalled = dyyyNetProbeInstalled;
-            dyyyNetProbeInstall();
-            [probeLog appendFormat:@"[安装] %d hook=%@\n", dyyyNetProbeInstalled ? 1 : 0, dyyyNetProbeHookSel ?: @"无"];
-            if (!wasInstalled) { [probeLog appendString:@"(首次长按,hook刚装,更早的历史请求抓不到)\n"]; }
-            Class ttnm = NSClassFromString(@"TTNetworkManager");
-            if (!ttnm) {
-                [probeLog appendString:@"[TTNetworkManager] 类不存在!\n"];
+            [probeLog appendString:@"\n[本地画质探针]\n"];
+            id lpVideo = nil;
+            @try { lpVideo = [awemeModel valueForKey:@"video"]; } @catch (NSException *lpe) { lpVideo = nil; }
+            if (lpVideo != nil) {
+                NSArray *lpKeys = @[@"bitrateRawData", @"bitrateModels_origin", @"manualBitrateModels", @"switchableGears", @"coverBitRateModelArray", @"miscDownloadAddrs", @"playLowBitURL", @"bitrateModels"];
+                for (NSString *lpK in lpKeys) {
+                    id lpV = nil;
+                    @try { lpV = [lpVideo valueForKey:lpK]; } @catch (NSException *lke) { lpV = nil; }
+                    if (lpV == nil) continue;
+                    if ([lpV isKindOfClass:[NSArray class]]) {
+                        [probeLog appendFormat:@"%@: %lu档\n", lpK, (unsigned long)[lpV count]];
+                        int lpIdx = 0;
+                        for (id lpIt in lpV) {
+                            if (lpIdx >= 6) {
+                                [probeLog appendString:@"  ...(截断)\n"];
+                                break;
+                            }
+                            id lpG = nil;
+                            id lpQ = nil;
+                            id lpPa = nil;
+                            id lpSz = nil;
+                            @try { lpG = [lpIt valueForKey:@"gearName"]; } @catch (NSException *g1) { lpG = nil; }
+                            if (lpG == nil) {
+                                @try { lpG = [lpIt valueForKey:@"gear_name"]; } @catch (NSException *g2) { lpG = nil; }
+                            }
+                            @try { lpQ = [lpIt valueForKey:@"qualityType"]; } @catch (NSException *q1) { lpQ = nil; }
+                            if (lpQ == nil) {
+                                @try { lpQ = [lpIt valueForKey:@"quality_type"]; } @catch (NSException *q2) { lpQ = nil; }
+                            }
+                            @try { lpPa = [lpIt valueForKey:@"playAddr"]; } @catch (NSException *p1) { lpPa = nil; }
+                            if (lpPa == nil) {
+                                @try { lpPa = [lpIt valueForKey:@"play_addr"]; } @catch (NSException *p2) { lpPa = nil; }
+                            }
+                            id lpUrls = nil;
+                            if (lpPa != nil) {
+                                @try { lpUrls = [lpPa valueForKey:@"urlList"]; } @catch (NSException *u1) { lpUrls = nil; }
+                                if (lpUrls == nil) {
+                                    @try { lpUrls = [lpPa valueForKey:@"url_list"]; } @catch (NSException *u2) { lpUrls = nil; }
+                                }
+                                id lpDs = nil;
+                                @try { lpDs = [lpPa valueForKey:@"dataSize"]; } @catch (NSException *d1) { lpDs = nil; }
+                                if (lpDs == nil) {
+                                    @try { lpDs = [lpPa valueForKey:@"data_size"]; } @catch (NSException *d2) { lpDs = nil; }
+                                }
+                                if (lpDs != nil) lpSz = lpDs;
+                            }
+                            id lpU0 = nil;
+                            if ([lpUrls isKindOfClass:[NSArray class]] && [lpUrls count] > 0) lpU0 = [lpUrls firstObject];
+                            NSString *lpUprev = @"无";
+                            if (lpU0 != nil) lpUprev = [NSString stringWithFormat:@"%@", lpU0];
+                            if ([lpUprev length] > 80) lpUprev = [[lpUprev substringToIndex:80] stringByAppendingString:@"..."];
+                            [probeLog appendFormat:@"  [%d] gear=%@ qt=%@ size=%@ url=%@\n", lpIdx, lpG, lpQ, lpSz, lpUprev];
+                            lpIdx++;
+                        }
+                    } else if ([lpV isKindOfClass:[NSDictionary class]]) {
+                        [probeLog appendFormat:@"%@: dict keys=%@\n", lpK, [[lpV allKeys] componentsJoinedByString:@","]];
+                        id lpBr = [lpV objectForKey:@"bit_rate"];
+                        if ([lpBr isKindOfClass:[NSArray class]]) {
+                            [probeLog appendFormat:@"  bit_rate: %lu档\n", (unsigned long)[lpBr count]];
+                            int lpIdx2 = 0;
+                            for (id lpIt2 in lpBr) {
+                                if (lpIdx2 >= 8) {
+                                    [probeLog appendString:@"  ...(截断)\n"];
+                                    break;
+                                }
+                                if ([lpIt2 isKindOfClass:[NSDictionary class]]) {
+                                    id lpGear2 = [lpIt2 objectForKey:@"gear_name"];
+                                    id lpQt2 = [lpIt2 objectForKey:@"quality_type"];
+                                    id lpPa2 = [lpIt2 objectForKey:@"play_addr"];
+                                    id lpUrls2 = nil;
+                                    id lpDs2 = nil;
+                                    if ([lpPa2 isKindOfClass:[NSDictionary class]]) {
+                                        lpUrls2 = [lpPa2 objectForKey:@"url_list"];
+                                        lpDs2 = [lpPa2 objectForKey:@"data_size"];
+                                    }
+                                    id lpU02 = nil;
+                                    if ([lpUrls2 isKindOfClass:[NSArray class]] && [lpUrls2 count] > 0) lpU02 = [lpUrls2 firstObject];
+                                    NSString *lpUprev2 = @"无";
+                                    if (lpU02 != nil) lpUprev2 = [NSString stringWithFormat:@"%@", lpU02];
+                                    if ([lpUprev2 length] > 80) lpUprev2 = [[lpUprev2 substringToIndex:80] stringByAppendingString:@"..."];
+                                    [probeLog appendFormat:@"  [%d] gear=%@ qt=%@ size=%@ url=%@\n", lpIdx2, lpGear2, lpQt2, lpDs2, lpUprev2];
+                                }
+                                lpIdx2++;
+                            }
+                        } else {
+                            [probeLog appendFormat:@"  bit_rate=%@\n", lpBr];
+                        }
+                    } else if ([lpV isKindOfClass:[NSString class]]) {
+                        NSString *lpSprev = lpV;
+                        if ([lpSprev length] > 120) lpSprev = [[lpSprev substringToIndex:120] stringByAppendingString:@"..."];
+                        [probeLog appendFormat:@"%@: %@\n", lpK, lpSprev];
+                    } else if ([lpV isKindOfClass:[NSData class]]) {
+                        NSString *lpS2 = [[NSString alloc] initWithData:lpV encoding:NSUTF8StringEncoding];
+                        if ([lpS2 length] > 300) lpS2 = [[lpS2 substringToIndex:300] stringByAppendingString:@"..."];
+                        [probeLog appendFormat:@"%@: data=%@\n", lpK, lpS2];
+                    } else {
+                        [probeLog appendFormat:@"%@: <%@>\n", lpK, [lpV class]];
+                    }
+                }
             } else {
-                NSString *sharedSel = nil;
-                for (NSString *sn in @[@"sharedManager", @"sharedInstance", @"shareManager", @"manager"]) {
-                    if ([ttnm respondsToSelector:NSSelectorFromString(sn)]) { sharedSel = sn; break; }
-                }
-                [probeLog appendFormat:@"[TTNetworkManager] 存在 shared=%@ TTHttpRequest=%@\n", sharedSel ?: @"未找到", NSClassFromString(@"TTHttpRequest") ? @"有" : @"无"];
-                // [链] TTNetworkManager父类链逐层侦察
-                Class fc = ttnm;
-                int fd = 0;
-                while (fc && fd < 5) {
-                    unsigned int fmc = 0;
-                    Method *fml = class_copyMethodList(fc, &fmc);
-                    NSMutableArray *fm = [NSMutableArray array];
-                    for (unsigned int i = 0; i < fmc; i++) {
-                        NSString *n = NSStringFromSelector(method_getName(fml[i]));
-                        if ([n containsString:@"equest"] || [n containsString:@"tart"] || [n containsString:@"send"]) {
-                            if (fm.count < 12) { [fm addObject:n]; }
-                        }
-                    }
-                    if (fml) { free(fml); }
-                    NSMutableArray *ownArr = [NSMutableArray array];
-                    Class sup = class_getSuperclass(fc);
-                    for (NSString *wn in @[@"startRequest:", @"startRequestSync:", @"sendRequest:", @"addRequest:", @"addHttpRequest:"]) {
-                        SEL ws = NSSelectorFromString(wn);
-                        if (class_getInstanceMethod(fc, ws) && !class_getInstanceMethod(sup, ws)) { [ownArr addObject:wn]; }
-                    }
-                    [probeLog appendFormat:@"[链%d] %@ 本类%lu方法 相关%lu:%@ 声明[%@]\n", fd, NSStringFromClass(fc), (unsigned long)fmc, (unsigned long)fm.count, fm.count > 0 ? [fm componentsJoinedByString:@","] : @"无", ownArr.count > 0 ? [ownArr componentsJoinedByString:@","] : @"-"];
-                    fc = sup;
-                    fd++;
-                }
-                // [Queue] 请求队列侦察
-                Class tq = NSClassFromString(@"TTHttpRequestQueue");
-                if (!tq) {
-                    [probeLog appendString:@"[Queue] 类不存在\n"];
-                } else {
-                    NSString *qshared = nil;
-                    for (NSString *sn in @[@"sharedQueue", @"sharedInstance", @"defaultQueue"]) {
-                        if ([tq respondsToSelector:NSSelectorFromString(sn)]) { qshared = sn; break; }
-                    }
-                    unsigned int qmc = 0;
-                    Method *qml = class_copyMethodList(tq, &qmc);
-                    NSMutableArray *qn = [NSMutableArray array];
-                    for (unsigned int i = 0; i < qmc; i++) {
-                        NSString *n = NSStringFromSelector(method_getName(qml[i]));
-                        if ([n containsString:@"equest"] || [n containsString:@"tart"] || [n containsString:@"send"] || [n containsString:@"add"]) {
-                            if (qn.count < 20) { [qn addObject:[NSString stringWithFormat:@"-%@", n]]; }
-                        }
-                    }
-                    if (qml) { free(qml); }
-                    [probeLog appendFormat:@"[Queue] 存在 shared=%@ 本类%lu方法 相关%lu:%@\n", qshared ?: @"未找到", (unsigned long)qmc, (unsigned long)qn.count, qn.count > 0 ? [qn componentsJoinedByString:@","] : @"无"];
-                }
-                [probeLog appendFormat:@"[self] Mgr=%@ Queue=%@\n", dyyyNetProbeSelfMgr ? @"有" : @"无", dyyyNetProbeSelfQueue ? @"有" : @"无"];
-                [probeLog appendFormat:@"[Session] %@\n", dyyyNetProbeHookedSession ? @"已hook" : @"未hook"];
+                [probeLog appendString:@"video对象为空\n"];
             }
-            NSArray *snap = nil;
-            NSArray *snapURLs = nil;
-            if (dyyyNetProbeCaptured) {
-                @synchronized (dyyyNetProbeCaptured) {
-                    snap = [dyyyNetProbeCaptured copy];
-                    snapURLs = [dyyyNetProbeURLs copy];
-                }
-            }
-            [probeLog appendFormat:@"[抓包%lu条]\n", (unsigned long)snap.count];
-            for (NSString *rec in snap) { [probeLog appendString:rec]; }
-            if (snap.count == 0) {
-                [probeLog appendString:@"[提示] 0条→现在去任意作者主页点开一条视频再返回(可多刷一两个视频),然后再次长按保存,就有抓包了\n"];
-            }
-            {
-                NSMutableArray *cpn = [NSMutableArray array];
-                int cn = 0;
-                Class *cl = objc_copyClassList(&cn);
-                for (int i = 0; i < cn; i++) {
-                    NSString *n = NSStringFromClass(cl[i]);
-                    if ([n containsString:@"CommonParams"]) { [cpn addObject:n]; }
-                    if (cpn.count >= 20) { break; }
-                }
-                if (cl) { free(cl); }
-                [probeLog appendFormat:@"[CommonParams类] %@\n", cpn.count > 0 ? [cpn componentsJoinedByString:@", "] : @"无"];
-            }
-            {
-                NSDictionary *ud = [[NSUserDefaults standardUserDefaults] dictionaryRepresentation];
-                NSMutableArray *uh = [NSMutableArray array];
-                for (NSString *k in ud) {
-                    NSString *low = k.lowercaseString;
-                    if ([low containsString:@"device_id"] || [low containsString:@"openudid"] || [low isEqualToString:@"iid"] || [low containsString:@"version_code"]) {
-                        id v = [ud objectForKey:k];
-                        NSString *s = [v isKindOfClass:[NSString class]] ? (NSString *)v : [NSString stringWithFormat:@"%@", v];
-                        if (s.length > 80) { s = [s substringToIndex:80]; }
-                        [uh addObject:[NSString stringWithFormat:@"%@=%@", k, s]];
-                        if (uh.count >= 10) { break; }
-                    }
-                }
-                [probeLog appendFormat:@"[UD参数] %@\n", uh.count > 0 ? [uh componentsJoinedByString:@" | "] : @"无"];
-            }
-            NSString *fu = nil;
-            for (NSString *u in snapURLs) {
-                if ([u containsString:@"/aweme/v1/"]) { fu = u; break; }
-            }
-            if (fu == nil && snapURLs.count > 0) { fu = [snapURLs objectAtIndex:0]; }
-            if (fu.length > 0) {
-                NSURL *u2 = [NSURL URLWithString:fu];
-                NSString *host = u2.host ?: @"api.douyin.com";
-                NSString *query = @"";
-                NSRange qr2 = [fu rangeOfString:@"?"];
-                if (qr2.location != NSNotFound && qr2.location + 1 < fu.length) { query = [fu substringFromIndex:qr2.location + 1]; }
-                NSString *detailURL = [NSString stringWithFormat:@"https://%@/aweme/v1/multi/aweme/detail/?aweme_ids=[%%22%@%%22]", host, awemeId];
-                if (query.length > 0) { detailURL = [detailURL stringByAppendingFormat:@"&%@", query]; }
-                [probeLog appendFormat:@"[detail预览] %@\n", detailURL];
-            }
-            // V7.6静默化: 中途诊断信息只落盘不弹窗不写剪贴板(弹窗present疑似崩点区间), 流程结束后才弹最终结果
-            [DYYYManager persistProbeLog:probeLog];
+            [[NSNotificationCenter defaultCenter] postNotificationName:@"DYYYProbeNotification" object:nil userInfo:@{@"text": [probeLog copy]}];
         }
 
         // Step 0: Cookie预热——GET www.douyin.com刷新web Cookie，确保msToken等不过期
@@ -4288,7 +3958,6 @@ static void dyyyNetProbeInstall(void) {
             dispatch_semaphore_wait(warmupSem, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC));
             NSInteger warmupCookieCountAfter = [[NSHTTPCookieStorage sharedHTTPCookieStorage] cookiesForURL:[NSURL URLWithString:@"https://www.douyin.com/"]].count;
             [probeLog appendFormat:@"\n[Step0 预热]\nGET www.douyin.com → HTTP %ld\nCookie: %ld→%ld\n", (long)warmupStatus, (long)warmupCookieCountBefore, (long)warmupCookieCountAfter];
-            [DYYYManager persistProbeLog:probeLog];
         }
 
         // Step 1: 构建完整Cookie（从app Cookie存储取douyin.com全部cookie，对齐JS规则）
@@ -4319,7 +3988,6 @@ static void dyyyNetProbeInstall(void) {
                 if ([t hasPrefix:@"ttwid="]) ttwidStr = [t substringFromIndex:6];
             }
             [probeLog appendFormat:@"[自定义Cookie生效] len=%lu ttwid=%@\n", (unsigned long)customCookie.length, ttwidStr.length > 0 ? @"已提取" : @"无(将自动注册)"];
-            [DYYYManager persistProbeLog:probeLog];
         }
         // 降级：如果没有ttwid，从注册接口获取并追加到cookie
         if (!ttwidStr || ttwidStr.length == 0) {
@@ -4388,7 +4056,6 @@ static void dyyyNetProbeInstall(void) {
                 dispatch_semaphore_wait(ttwidSem, dispatch_time(DISPATCH_TIME_NOW, 10 * NSEC_PER_SEC));
             }
             [probeLog appendFormat:@"\n[Step1.5 ttwid注册]\nPOST ttwid.bytedance.com → HTTP %ld\nSet-Cookie ttwid=%@ (len=%lu)\nJSON body ttwid=%@\n最终ttwid=%@\n", (long)ttwidHttpStatus, ttwidFromHeader ? [[ttwidFromHeader substringToIndex:MIN(20, ttwidFromHeader.length)] stringByAppendingString:@"..."] : @"无", (unsigned long)(ttwidFromHeader ? ttwidFromHeader.length : 0), ttwidFromBody ? @"有" : @"无", ttwidStr.length > 0 ? @"有" : @"无"];
-            [DYYYManager persistProbeLog:probeLog];
             if (ttwidStr && ttwidStr.length > 0) {
                 if (fullCookieStr.length > 0) [fullCookieStr appendString:@"; "];
                 [fullCookieStr appendFormat:@"ttwid=%@", ttwidStr];
@@ -4396,7 +4063,6 @@ static void dyyyNetProbeInstall(void) {
         }
         if (fullCookieStr.length == 0) {
             [probeLog appendFormat:@"\n[失败] Cookie为空，无法构建请求\n"];
-            [DYYYManager persistProbeLog:probeLog];
             [[NSNotificationCenter defaultCenter] postNotificationName:@"DYYYProbeNotification" object:nil userInfo:@{@"text": [probeLog copy]}];
             if (completion) completion(nil);
             return;
@@ -4404,38 +4070,126 @@ static void dyyyNetProbeInstall(void) {
         // 存储ttwid供后续CDN下载使用
         if (ttwidStr && ttwidStr.length > 0) [DYYYManager shared].localParseTtwid = ttwidStr;
 
-        // Step 2: web detail —— 隐藏WKWebView加载PC版详情页, 拦截页面自身发出的detail请求(签名/cookie/指纹全真, Argus无法拒绝)
+        // Step 2: web API（完整URL参数+浏览器指纹header+全Cookie，对齐JS规则）
         __block NSDictionary *awemeDetail = nil;
-        dispatch_semaphore_t wvSem = dispatch_semaphore_create(0);
-        [probeLog appendFormat:@"\n[Step2 WebView] 加载 douyin.com/video/%@ 拦截页面detail请求...\n", awemeId];
-        [DYYYManager persistProbeLog:probeLog];
-        [DYYYWebViewFetcher fetchDetail:awemeId probeLog:probeLog completion:^(NSDictionary *detail) {
-            awemeDetail = detail;
-            dispatch_semaphore_signal(wvSem);
-        }];
-        dispatch_semaphore_wait(wvSem, dispatch_time(DISPATCH_TIME_NOW, 20 * NSEC_PER_SEC));
-        if ([awemeDetail isKindOfClass:[NSDictionary class]]) {
-            NSDictionary *wvV = awemeDetail[@"video"];
-            NSArray *wvBr = [wvV isKindOfClass:[NSDictionary class]] ? wvV[@"bit_rate"] : nil;
-            [probeLog appendFormat:@"[Step2 WebView] 结果=成功 bit_rate=%lu条\n", (unsigned long)(wvBr ? [wvBr count] : 0)];
-            [DYYYManager persistProbeLog:probeLog];
-        } else {
-            [probeLog appendFormat:@"[Step2 WebView] 结果=未拦截到(超时/风控页/页面异常)\n"];
-            [DYYYManager persistProbeLog:probeLog];
+        NSString *detailParams = [NSString stringWithFormat:@"aweme_id=%@&device_platform=webapp&aid=6383&channel=channel_pc_web&update_version_code=170400&pc_client_type=1&version_code=190500&version_name=19.5.0&cookie_enabled=true&screen_width=2560&screen_height=1440&browser_language=zh-CN&browser_platform=Win32&browser_name=Chrome&browser_version=150.0.0.0&browser_online=true&engine_name=Blink&engine_version=150.0.0.0&os_name=Windows&os_version=10&cpu_core_num=12&device_memory=8&platform=PC&downlink=4.75&effective_type=4g&round_trip_time=150", awemeId];
+        NSString *signUA = @"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36";
+        NSString *signedParams = [DYYYABogus signedQueryForParams:detailParams body:nil ua:signUA];
+        NSString *apiURL = [NSString stringWithFormat:@"https://www.douyin.com/aweme/v1/web/aweme/detail/?%@", signedParams ?: detailParams];
+        NSMutableURLRequest *apiReq = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:apiURL]];
+        [apiReq setValue:@"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36" forHTTPHeaderField:@"User-Agent"];
+        [apiReq setValue:@"https://www.douyin.com/" forHTTPHeaderField:@"Referer"];
+        [apiReq setValue:@"text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7" forHTTPHeaderField:@"Accept"];
+        [apiReq setValue:@"zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6" forHTTPHeaderField:@"Accept-Language"];
+        [apiReq setValue:@"no-cache" forHTTPHeaderField:@"Cache-Control"];
+        [apiReq setValue:@"no-cache" forHTTPHeaderField:@"Pragma"];
+        NSString *secChUa = [NSString stringWithFormat:@"%cChromium%c;v=%c150%c, %cGoogle Chrome%c;v=%c150%c", 34, 34, 34, 34, 34, 34, 34, 34];
+        [apiReq setValue:secChUa forHTTPHeaderField:@"sec-ch-ua"];
+        [apiReq setValue:@"?0" forHTTPHeaderField:@"sec-ch-ua-mobile"];
+        NSString *secChPlatform = [NSString stringWithFormat:@"%cWindows%c", 34, 34];
+        [apiReq setValue:secChPlatform forHTTPHeaderField:@"sec-ch-ua-platform"];
+        [apiReq setValue:@"document" forHTTPHeaderField:@"sec-fetch-dest"];
+        [apiReq setValue:@"navigate" forHTTPHeaderField:@"sec-fetch-mode"];
+        [apiReq setValue:@"same-origin" forHTTPHeaderField:@"sec-fetch-site"];
+        [apiReq setValue:@"?1" forHTTPHeaderField:@"sec-fetch-user"];
+        [apiReq setValue:@"1" forHTTPHeaderField:@"upgrade-insecure-requests"];
+        [apiReq setValue:fullCookieStr forHTTPHeaderField:@"Cookie"];
+        // Argus风控要求uifid请求头（值取自Cookie中UIFID字段，抖音web端XHR均携带）
+        NSString *uifidVal = nil;
+        NSRange ur = [fullCookieStr rangeOfString:@"UIFID="];
+        if (ur.location != NSNotFound) {
+            NSUInteger us = ur.location + ur.length;
+            NSRange ueR = [fullCookieStr rangeOfString:@";" options:0 range:NSMakeRange(us, fullCookieStr.length - us)];
+            NSUInteger ue = (ueR.location == NSNotFound) ? fullCookieStr.length : ueR.location;
+            uifidVal = [fullCookieStr substringWithRange:NSMakeRange(us, ue - us)];
         }
+        if (uifidVal.length > 10) {
+            [apiReq setValue:uifidVal forHTTPHeaderField:@"uifid"];
+            [probeLog appendFormat:@"[uifid请求头] len=%lu\n", (unsigned long)uifidVal.length];
+        } else {
+            [probeLog appendFormat:@"[uifid请求头] 未找到UIFID\n"];
+        }
+        [probeLog appendFormat:@"\n[Step2 发送Cookie] len=%lu preview=%@...\n", (unsigned long)fullCookieStr.length, [fullCookieStr substringToIndex:MIN(120, fullCookieStr.length)]];
+        dispatch_semaphore_t apiSem = dispatch_semaphore_create(0);
+        NSURLSessionDataTask *apiTask = [[NSURLSession sharedSession] dataTaskWithRequest:apiReq completionHandler:^(NSData *apiData, NSURLResponse *apiResp, NSError *apiErr) {
+            @try {
+                NSHTTPURLResponse *step2Http = (NSHTTPURLResponse *)apiResp;
+                [probeLog appendFormat:@"\n[Step2 WebAPI响应] HTTP %ld body=%lu字节\n", (long)(step2Http ? step2Http.statusCode : 0), (unsigned long)apiData.length];
+                NSDictionary *apiJson = apiData.length > 0 ? [NSJSONSerialization JSONObjectWithData:apiData options:0 error:nil] : nil;
+                if (!apiJson) {
+                    if (apiData.length == 0) {
+                        [probeLog appendFormat:@"\n[Step2 WebAPI响应]\n响应为空! error=%@\n", apiErr.localizedDescription];
+                    } else {
+                        NSString *rawBody = [[NSString alloc] initWithData:apiData encoding:NSUTF8StringEncoding];
+                        if (rawBody.length > 200) rawBody = [rawBody substringToIndex:200];
+                        if (rawBody.length == 0) rawBody = [NSString stringWithFormat:@"<非UTF8二进制 %lu字节>", (unsigned long)apiData.length];
+                        [probeLog appendFormat:@"\n[Step2 WebAPI响应]\n⚠️响应非JSON! body前200字:\n%@\n", rawBody];
+                    }
+                }
+                if ([apiJson isKindOfClass:[NSDictionary class]]) {
+                        NSInteger statusCode = [apiJson[@"status_code"] integerValue];
+                        if (statusCode == 0) awemeDetail = apiJson[@"aweme_detail"];
+                        // 探针：web API响应
+                        [probeLog appendFormat:@"\n[Step2 WebAPI响应]\nstatus_code=%ld\n", (long)statusCode];
+                        NSHTTPURLResponse *httpR = (NSHTTPURLResponse *)apiResp;
+                        [probeLog appendFormat:@"HTTP status=%ld\n", (long)httpR.statusCode];
+                        [probeLog appendFormat:@"responseBody长度=%lu\n", (unsigned long)apiData.length];
+                        if (statusCode == 0 && awemeDetail) {
+                            NSDictionary *vObj = awemeDetail[@"video"];
+                            NSArray *brList = vObj[@"bit_rate"];
+                            [probeLog appendFormat:@"bit_rate条目数=%lu\n", (unsigned long)(brList ? brList.count : 0)];
+                            for (NSDictionary *br in (brList ?: @[])) {
+                                NSString *gn = br[@"gear_name"] ?: @"?";
+                                NSInteger brVal = [br[@"bit_rate"] integerValue];
+                                NSInteger fps = [br[@"FPS"] integerValue];
+                                NSDictionary *pa = br[@"play_addr"] ?: @{};
+                                NSInteger h = [pa[@"height"] integerValue];
+                                NSInteger w = [pa[@"width"] integerValue];
+                                long long ds = [pa[@"data_size"] longLongValue];
+                                [probeLog appendFormat:@"  gear=%@ bitrate=%ld fps=%ld %ldx%ld size=%lld\n", gn, (long)brVal, (long)fps, (long)w, (long)h, ds];
+                            }
+                        } else {
+                            // 截取前200字符看错误
+                            NSString *raw = [[NSString alloc] initWithData:apiData encoding:NSUTF8StringEncoding];
+                            if (raw.length > 200) raw = [raw substringToIndex:200];
+                            [probeLog appendFormat:@"error响应: %@\n", raw];
+                        }
+                    }
+            } @catch (NSException *e) {}
+            dispatch_semaphore_signal(apiSem);
+        }];
+        [apiTask resume];
+        dispatch_semaphore_wait(apiSem, dispatch_time(DISPATCH_TIME_NOW, 15 * NSEC_PER_SEC));
 
         if (!awemeDetail || ![awemeDetail isKindOfClass:[NSDictionary class]]) {
-            // WebView首试失败, 重试一次(偶发页面加载失败/弱网)
-            [probeLog appendFormat:@"\n[Step2 WebView重试] 再次加载页面...\n"];
-            dispatch_semaphore_t wvSem2 = dispatch_semaphore_create(0);
-            awemeDetail = nil;
-            [DYYYWebViewFetcher fetchDetail:awemeId probeLog:probeLog completion:^(NSDictionary *detail2) {
-                awemeDetail = detail2;
-                dispatch_semaphore_signal(wvSem2);
-            }];
-            dispatch_semaphore_wait(wvSem2, dispatch_time(DISPATCH_TIME_NOW, 20 * NSEC_PER_SEC));
-            [probeLog appendFormat:@"[Step2 WebView重试] 结果=%@\n", ([awemeDetail isKindOfClass:[NSDictionary class]]) ? @"成功" : @"仍失败"];
-            [DYYYManager persistProbeLog:probeLog];
+            // Cookie可能过期，重新从app读取全Cookie重试一次
+            NSHTTPCookieStorage *retryCookieStore = [NSHTTPCookieStorage sharedHTTPCookieStorage];
+            NSArray *retryCookies = [retryCookieStore cookiesForURL:[NSURL URLWithString:@"https://www.douyin.com/"]];
+            NSMutableString *retryCookieStr = [NSMutableString string];
+            for (NSHTTPCookie *rc in retryCookies) {
+                if (retryCookieStr.length > 0) [retryCookieStr appendString:@"; "];
+                [retryCookieStr appendFormat:@"%@=%@", [rc name], [rc value]];
+            }
+            if (retryCookieStr.length > 0) {
+                [apiReq setValue:retryCookieStr forHTTPHeaderField:@"Cookie"];
+                dispatch_semaphore_t apiSem2 = dispatch_semaphore_create(0);
+                awemeDetail = nil;
+                NSURLSessionDataTask *apiTask2 = [[NSURLSession sharedSession] dataTaskWithRequest:apiReq completionHandler:^(NSData *aD2, NSURLResponse *aR2, NSError *aE2) {
+                    @try {
+                        if (aD2.length > 0) {
+                            NSDictionary *aJ2 = [NSJSONSerialization JSONObjectWithData:aD2 options:0 error:nil];
+                            if ([aJ2 isKindOfClass:[NSDictionary class]]) {
+                                NSInteger sc2 = [aJ2[@"status_code"] integerValue];
+                                if (sc2 == 0) awemeDetail = aJ2[@"aweme_detail"];
+                            }
+                        }
+                    } @catch (NSException *ex3) {}
+                    dispatch_semaphore_signal(apiSem2);
+                }];
+                [apiTask2 resume];
+                dispatch_semaphore_wait(apiSem2, dispatch_time(DISPATCH_TIME_NOW, 15 * NSEC_PER_SEC));
+            }
+
             if (!awemeDetail || ![awemeDetail isKindOfClass:[NSDictionary class]]) {
                 // 降级: 从视频页面HTML提取RENDER_DATA（不需要a_bogus）
                 [probeLog appendFormat:@"\n[Step2.5 页面降级] GET /video/%@\n", awemeId];
@@ -4446,7 +4200,8 @@ static void dyyyNetProbeInstall(void) {
                 // 登录态页面不嵌视频数据(返回首页shell)，降级页必须用游客态Cookie(仅ttwid)
                 NSString *guestCookie = (ttwidStr.length > 0) ? [NSString stringWithFormat:@"ttwid=%@", ttwidStr] : @"ttwid=";
                 [pageReq setValue:guestCookie forHTTPHeaderField:@"Cookie"];
-                [probeLog appendFormat:@"游客Cookie len=%lu\n", (unsigned long)guestCookie.length];
+                if (uifidVal.length > 10) [pageReq setValue:uifidVal forHTTPHeaderField:@"uifid"];
+                [probeLog appendFormat:@"游客Cookie len=%lu uifid头=%@\n", (unsigned long)guestCookie.length, (uifidVal.length > 10) ? @"有" : @"无"];
                 [pageReq setValue:@"text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8" forHTTPHeaderField:@"Accept"];
                 [pageReq setValue:@"zh-CN,zh;q=0.9" forHTTPHeaderField:@"Accept-Language"];
                 __block NSData *pageData = nil;
@@ -4552,13 +4307,11 @@ static void dyyyNetProbeInstall(void) {
                 // 页面降级也失败 → 直接失败（无本地解析保底）
                 if (!awemeDetail || ![awemeDetail isKindOfClass:[NSDictionary class]]) {
                     [probeLog appendFormat:@"\n[失败] 页面降级也失败\n"];
-                    [DYYYManager persistProbeLog:probeLog];
                     [[NSNotificationCenter defaultCenter] postNotificationName:@"DYYYProbeNotification" object:nil userInfo:@{@"text": [probeLog copy]}];
                     if (completion) completion(nil);
                     return;
                 }
                 [probeLog appendFormat:@"[Step2.5成功] 页面降级获取4K数据成功\n"];
-                [DYYYManager persistProbeLog:probeLog];
             }
         }
 
@@ -4771,7 +4524,6 @@ static void dyyyNetProbeInstall(void) {
         {
             NSString *probeText = [probeLog copy];
             // 存储探针结果，通过通知在主线程弹窗
-            [DYYYManager persistProbeLog:probeLog];
             [[NSNotificationCenter defaultCenter] postNotificationName:@"DYYYProbeNotification" object:nil userInfo:@{@"text": probeText}];
         }
 
