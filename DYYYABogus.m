@@ -42,7 +42,7 @@ static JSValue *_dyyyAbCtor = nil;
         @try {
             // 每次签名新建实例: big_array 会被 transform_bytes 原地改写, 状态跨调用持续变化
             // 只传 (fp, ua): options/rng/timeFn 走默认 -> [0,1,14](兼容GET), 真随机, 系统时钟
-            JSValue *inst = [_dyyyAbCtor constructWithArguments:@[ @"", ua ?: @"" ] inContext:_dyyyAbCtx];
+            JSValue *inst = [_dyyyAbCtor constructWithArguments:@[ @"", ua ?: @"" ]];
             if (!inst || inst.isUndefined) return nil;
             JSValue *result = [inst invokeMethod:@"generate_abogus" withArguments:@[ params ?: @"", body ?: @"" ]];
             if (!result || result.isUndefined || !result.isArray) return nil;
