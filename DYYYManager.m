@@ -3820,6 +3820,9 @@ static NSMutableArray *dyyyNetProbeURLs = nil;
 static NSMutableDictionary *dyyyNetProbeOrigMap = nil;
 static BOOL dyyyNetProbeInstalled = NO;
 static NSString *dyyyNetProbeHookSel = nil;
+static NSMutableArray *dyyyNetProbeHookInfo = nil;
+static id dyyyNetProbeSelfMgr = nil;
+static id dyyyNetProbeSelfQueue = nil;
 
 static void dyyyNetProbeCapture(id request) {
     @try {
@@ -3832,7 +3835,7 @@ static void dyyyNetProbeCapture(id request) {
         NSString *clsName = [NSString stringWithUTF8String:cn];
         if (![clsName containsString:@"Request"] && ![clsName containsString:@"URL"]) { return; }
         NSString *url = nil;
-        for (NSString *k in @[@"urlString", @"URL", @"url"]) {
+        for (NSString *k in @[@"urlString", @"URLString", @"requestURLString", @"requestURL", @"url", @"URL"]) {
             @try {
                 id v = [request valueForKey:k];
                 if ([v isKindOfClass:[NSURL class]]) { url = [(NSURL *)v absoluteString]; }
@@ -3900,6 +3903,11 @@ static void dyyyNetProbeCapture(id request) {
 }
 
 static id dyyy_net_swz_start(id self, SEL _cmd, id request) {
+    @try {
+        NSString *scn = NSStringFromClass(object_getClass(self));
+        if ([scn containsString:@"Queue"]) { if (!dyyyNetProbeSelfQueue) { dyyyNetProbeSelfQueue = self; } }
+        else { if (!dyyyNetProbeSelfMgr) { dyyyNetProbeSelfMgr = self; } }
+    } @catch (NSException *e0) {}
     if (request) { dyyyNetProbeCapture(request); }
     NSValue *ov = dyyyNetProbeOrigMap ? [dyyyNetProbeOrigMap objectForKey:NSStringFromSelector(_cmd)] : nil;
     if (ov) {
@@ -3913,26 +3921,38 @@ static void dyyyNetProbeInstall(void) {
     @try {
         if (dyyyNetProbeInstalled) { return; }
         dyyyNetProbeInstalled = YES;
-        Class cls = NSClassFromString(@"TTNetworkManager");
-        if (!cls) { return; }
-        NSArray *want = @[@"startRequest:", @"startRequestSync:", @"sendRequest:", @"addRequest:"];
-        unsigned int mc = 0;
-        Method *ml = class_copyMethodList(cls, &mc);
-        for (unsigned int i = 0; i < mc; i++) {
-            NSString *n = NSStringFromSelector(method_getName(ml[i]));
-            if (![want containsObject:n]) { continue; }
-            if (method_getNumberOfArguments(ml[i]) != 3) { continue; }
-            char *at = method_copyArgumentType(ml[i], 2);
-            BOOL isObj = (at != NULL && at[0] == '@');
-            if (at) { free(at); }
-            if (!isObj) { continue; }
-            IMP o = method_getImplementation(ml[i]);
-            if (!dyyyNetProbeOrigMap) { dyyyNetProbeOrigMap = [[NSMutableDictionary alloc] init]; }
-            [dyyyNetProbeOrigMap setObject:[NSValue valueWithPointer:(void *)o] forKey:n];
-            method_setImplementation(ml[i], (IMP)dyyy_net_swz_start);
-            dyyyNetProbeHookSel = dyyyNetProbeHookSel.length > 0 ? [dyyyNetProbeHookSel stringByAppendingFormat:@",%@", n] : n;
+        if (!dyyyNetProbeOrigMap) { dyyyNetProbeOrigMap = [[NSMutableDictionary alloc] init]; }
+        if (!dyyyNetProbeHookInfo) { dyyyNetProbeHookInfo = [[NSMutableArray alloc] init]; }
+        NSArray *want = @[@"startRequest:", @"startRequestSync:", @"sendRequest:", @"addRequest:", @"addHttpRequest:"];
+        NSMutableArray *targets = [NSMutableArray array];
+        Class c0 = NSClassFromString(@"TTNetworkManager");
+        int depth = 0;
+        while (c0 && depth < 5) { [targets addObject:c0]; c0 = class_getSuperclass(c0); depth++; }
+        Class qc = NSClassFromString(@"TTHttpRequestQueue");
+        if (qc) { [targets addObject:qc]; }
+        for (Class tc in targets) {
+            for (NSString *wn in want) {
+                if ([dyyyNetProbeHookInfo containsObject:wn]) { continue; }
+                SEL ws = NSSelectorFromString(wn);
+                Method m = class_getInstanceMethod(tc, ws);
+                if (!m) { continue; }
+                if (method_getNumberOfArguments(m) != 3) { continue; }
+                char *at = method_copyArgumentType(m, 2);
+                BOOL argObj = (at != NULL && at[0] == '@');
+                if (at) { free(at); }
+                if (!argObj) { continue; }
+                char *rt = method_copyReturnType(m);
+                BOOL rtOK = (rt != NULL && (rt[0] == 'v' || rt[0] == '@'));
+                if (rt) { free(rt); }
+                if (!rtOK) { continue; }
+                IMP o = method_getImplementation(m);
+                [dyyyNetProbeOrigMap setObject:[NSValue valueWithPointer:(void *)o] forKey:wn];
+                method_setImplementation(m, (IMP)dyyy_net_swz_start);
+                [dyyyNetProbeHookInfo addObject:wn];
+                NSString *line = [NSString stringWithFormat:@"%@ %@", NSStringFromClass(tc), wn];
+                dyyyNetProbeHookSel = dyyyNetProbeHookSel.length > 0 ? [dyyyNetProbeHookSel stringByAppendingFormat:@"\n%@", line] : line;
+            }
         }
-        if (ml) { free(ml); }
     } @catch (NSException *e) {}
 }
 
@@ -3973,29 +3993,52 @@ static void dyyyNetProbeInstall(void) {
                     if ([ttnm respondsToSelector:NSSelectorFromString(sn)]) { sharedSel = sn; break; }
                 }
                 [probeLog appendFormat:@"[TTNetworkManager] 存在 shared=%@ TTHttpRequest=%@\n", sharedSel ?: @"未找到", NSClassFromString(@"TTHttpRequest") ? @"有" : @"无"];
-                NSMutableArray *names = [NSMutableArray array];
-                unsigned int mc = 0;
-                Method *ml = class_copyMethodList(object_getClass(ttnm), &mc);
-                for (unsigned int i = 0; i < mc; i++) {
-                    NSString *n = NSStringFromSelector(method_getName(ml[i]));
-                    if ([n containsString:@"equest"] || [n containsString:@"tart"]) { [names addObject:[NSString stringWithFormat:@"+%@", n]]; }
+                // [链] TTNetworkManager父类链逐层侦察
+                Class fc = ttnm;
+                int fd = 0;
+                while (fc && fd < 5) {
+                    unsigned int fmc = 0;
+                    Method *fml = class_copyMethodList(fc, &fmc);
+                    NSMutableArray *fm = [NSMutableArray array];
+                    for (unsigned int i = 0; i < fmc; i++) {
+                        NSString *n = NSStringFromSelector(method_getName(fml[i]));
+                        if ([n containsString:@"equest"] || [n containsString:@"tart"] || [n containsString:@"send"]) {
+                            if (fm.count < 12) { [fm addObject:n]; }
+                        }
+                    }
+                    if (fml) { free(fml); }
+                    NSMutableArray *ownArr = [NSMutableArray array];
+                    Class sup = class_getSuperclass(fc);
+                    for (NSString *wn in @[@"startRequest:", @"startRequestSync:", @"sendRequest:", @"addRequest:", @"addHttpRequest:"]) {
+                        SEL ws = NSSelectorFromString(wn);
+                        if (class_getInstanceMethod(fc, ws) && !class_getInstanceMethod(sup, ws)) { [ownArr addObject:wn]; }
+                    }
+                    [probeLog appendFormat:@"[链%d] %@ 本类%lu方法 相关%lu:%@ 声明[%@]\n", fd, NSStringFromClass(fc), (unsigned long)fmc, (unsigned long)fm.count, fm.count > 0 ? [fm componentsJoinedByString:@","] : @"无", ownArr.count > 0 ? [ownArr componentsJoinedByString:@","] : @"-"];
+                    fc = sup;
+                    fd++;
                 }
-                if (ml) { free(ml); }
-                mc = 0;
-                ml = class_copyMethodList(ttnm, &mc);
-                for (unsigned int i = 0; i < mc; i++) {
-                    NSString *n = NSStringFromSelector(method_getName(ml[i]));
-                    if ([n containsString:@"equest"] || [n containsString:@"tart"]) { [names addObject:[NSString stringWithFormat:@"-%@", n]]; }
+                // [Queue] 请求队列侦察
+                Class tq = NSClassFromString(@"TTHttpRequestQueue");
+                if (!tq) {
+                    [probeLog appendString:@"[Queue] 类不存在\n"];
+                } else {
+                    NSString *qshared = nil;
+                    for (NSString *sn in @[@"sharedQueue", @"sharedInstance", @"defaultQueue"]) {
+                        if ([tq respondsToSelector:NSSelectorFromString(sn)]) { qshared = sn; break; }
+                    }
+                    unsigned int qmc = 0;
+                    Method *qml = class_copyMethodList(tq, &qmc);
+                    NSMutableArray *qn = [NSMutableArray array];
+                    for (unsigned int i = 0; i < qmc; i++) {
+                        NSString *n = NSStringFromSelector(method_getName(qml[i]));
+                        if ([n containsString:@"equest"] || [n containsString:@"tart"] || [n containsString:@"send"] || [n containsString:@"add"]) {
+                            if (qn.count < 20) { [qn addObject:[NSString stringWithFormat:@"-%@", n]]; }
+                        }
+                    }
+                    if (qml) { free(qml); }
+                    [probeLog appendFormat:@"[Queue] 存在 shared=%@ 本类%lu方法 相关%lu:%@\n", qshared ?: @"未找到", (unsigned long)qmc, (unsigned long)qn.count, qn.count > 0 ? [qn componentsJoinedByString:@","] : @"无"];
                 }
-                if (ml) { free(ml); }
-                [probeLog appendFormat:@"[方法%lu个]\n", (unsigned long)names.count];
-                int shown = 0;
-                for (NSString *n in names) {
-                    [probeLog appendString:n];
-                    [probeLog appendString:@"\n"];
-                    shown++;
-                    if (shown >= 50) { break; }
-                }
+                [probeLog appendFormat:@"[self] Mgr=%@ Queue=%@\n", dyyyNetProbeSelfMgr ? @"有" : @"无", dyyyNetProbeSelfQueue ? @"有" : @"无"];
             }
             NSArray *snap = nil;
             NSArray *snapURLs = nil;
