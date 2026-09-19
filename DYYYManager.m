@@ -3814,6 +3814,126 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
     return [parts componentsJoinedByString:@"; "];
 }
 
+#pragma mark - [网络栈探针V4] 借App网络栈自动签名的前置侦察：枚举TTNetworkManager+swizzle抓包真实请求
+static NSMutableArray *dyyyNetProbeCaptured = nil;
+static NSMutableArray *dyyyNetProbeURLs = nil;
+static NSMutableDictionary *dyyyNetProbeOrigMap = nil;
+static BOOL dyyyNetProbeInstalled = NO;
+static NSString *dyyyNetProbeHookSel = nil;
+
+static void dyyyNetProbeCapture(id request) {
+    @try {
+        if (!dyyyNetProbeCaptured) { dyyyNetProbeCaptured = [[NSMutableArray alloc] init]; }
+        if (!dyyyNetProbeURLs) { dyyyNetProbeURLs = [[NSMutableArray alloc] init]; }
+        if (!dyyyNetProbeOrigMap) { dyyyNetProbeOrigMap = [[NSMutableDictionary alloc] init]; }
+        if (dyyyNetProbeCaptured.count >= 16) { return; }
+        NSString *url = nil;
+        for (NSString *k in @[@"urlString", @"URL", @"url"]) {
+            @try {
+                id v = [request valueForKey:k];
+                if ([v isKindOfClass:[NSURL class]]) { url = [(NSURL *)v absoluteString]; }
+                else if ([v isKindOfClass:[NSString class]]) { url = v; }
+                if (url.length > 0) { break; }
+            } @catch (NSException *e1) {}
+        }
+        if (url.length == 0) { return; }
+        if (![url containsString:@"aweme"]) { return; }
+        if ([url containsString:@"douyinvod"] || [url containsString:@"douyinpic"] || [url containsString:@"zjcdn"] || [url containsString:@"bytecdn"] || [url containsString:@"byteimg"]) { return; }
+        NSString *path = url;
+        NSRange qr = [url rangeOfString:@"?"];
+        if (qr.location != NSNotFound) { path = [url substringToIndex:qr.location]; }
+        NSMutableString *rec = [NSMutableString stringWithFormat:@"◆ %@\n", url];
+        NSString *method = nil;
+        for (NSString *mk in @[@"requestMethod", @"HTTPMethod", @"httpMethod", @"method"]) {
+            @try {
+                id mv = [request valueForKey:mk];
+                if ([mv isKindOfClass:[NSString class]]) { method = mv; break; }
+            } @catch (NSException *e2) {}
+        }
+        if (method.length > 0) { [rec appendFormat:@"  method=%@\n", method]; }
+        NSString *hinfo = nil;
+        for (NSString *hk in @[@"headers", @"requestHeaders", @"headerFields", @"allHTTPHeaderFields", @"HTTPHeaderFields"]) {
+            @try {
+                id hv = [request valueForKey:hk];
+                if ([hv isKindOfClass:[NSDictionary class]]) {
+                    NSMutableArray *hits = [NSMutableArray array];
+                    for (NSString *hk2 in hv) {
+                        NSString *low = hk2.lowercaseString;
+                        if ([low containsString:@"argus"] || [low containsString:@"ladon"] || [low containsString:@"khronos"] || [low containsString:@"gorgon"] || [low containsString:@"stub"] || [low containsString:@"helios"]) { [hits addObject:hk2]; }
+                    }
+                    hinfo = [NSString stringWithFormat:@"%@ 共%lu头 签名头:%@", hk, (unsigned long)hv.count, hits.count > 0 ? [hits componentsJoinedByString:@","] : @"无"];
+                    break;
+                }
+            } @catch (NSException *e3) {}
+        }
+        [rec appendFormat:@"  headers: %@\n", hinfo != nil ? hinfo : @"未找到"];
+        if ([method isEqualToString:@"POST"]) {
+            for (NSString *bk in @[@"HTTPBody", @"httpBody", @"postBody", @"params"]) {
+                @try {
+                    id bv = [request valueForKey:bk];
+                    NSString *bs = nil;
+                    if ([bv isKindOfClass:[NSData class]]) { bs = [[NSString alloc] initWithData:bv encoding:NSUTF8StringEncoding]; }
+                    else if ([bv isKindOfClass:[NSString class]]) { bs = (NSString *)bv; }
+                    else if ([bv isKindOfClass:[NSDictionary class]]) { bs = [(NSDictionary *)bv description]; }
+                    if (bs.length > 0) {
+                        [rec appendFormat:@"  body(%@): %@\n", bk, bs.length > 600 ? [bs substringToIndex:600] : bs];
+                        break;
+                    }
+                } @catch (NSException *e4) {}
+            }
+        }
+        @synchronized (dyyyNetProbeCaptured) {
+            BOOL dup = NO;
+            for (NSString *old in dyyyNetProbeURLs) {
+                if ([old hasPrefix:path]) { dup = YES; break; }
+            }
+            if (!dup && dyyyNetProbeCaptured.count < 16) {
+                [dyyyNetProbeCaptured addObject:rec];
+                [dyyyNetProbeURLs addObject:url.length > 2400 ? [url substringToIndex:2400] : url];
+            }
+        }
+    } @catch (NSException *e) {}
+}
+
+static id dyyy_net_swz_start(id self, SEL _cmd, id request) {
+    dyyyNetProbeCapture(request);
+    NSValue *ov = [dyyyNetProbeOrigMap objectForKey:NSStringFromSelector(_cmd)];
+    if (ov) {
+        IMP orig = (IMP)[ov pointerValue];
+        if (orig) { return ((id (*)(id, SEL, id))orig)(self, _cmd, request); }
+    }
+    return nil;
+}
+
+static void dyyyNetProbeInstall(void) {
+    @try {
+        if (dyyyNetProbeInstalled) { return; }
+        dyyyNetProbeInstalled = YES;
+        Class cls = NSClassFromString(@"TTNetworkManager");
+        if (!cls) { return; }
+        unsigned int mc = 0;
+        Method *ml = class_copyMethodList(cls, &mc);
+        for (unsigned int i = 0; i < mc; i++) {
+            NSString *n = NSStringFromSelector(method_getName(ml[i]));
+            BOOL match = [n hasPrefix:@"startRequest"] || [n hasPrefix:@"sendRequest"] || [n hasPrefix:@"addRequest"];
+            if (!match) { continue; }
+            if (method_getNumberOfArguments(ml[i]) != 3) { continue; }
+            IMP o = method_getImplementation(ml[i]);
+            if (!dyyyNetProbeOrigMap) { dyyyNetProbeOrigMap = [[NSMutableDictionary alloc] init]; }
+            [dyyyNetProbeOrigMap setObject:[NSValue valueWithPointer:(void *)o] forKey:n];
+            method_setImplementation(ml[i], (IMP)dyyy_net_swz_start);
+            dyyyNetProbeHookSel = dyyyNetProbeHookSel.length > 0 ? [dyyyNetProbeHookSel stringByAppendingFormat:@",%@", n] : n;
+        }
+        if (ml) { free(ml); }
+    } @catch (NSException *e) {}
+}
+
+__attribute__((constructor)) static void dyyyNetProbeBootstrap(void) {
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        dyyyNetProbeInstall();
+    });
+}
+
 // 本地解析全画质：从awemeModel取awemeId，走ttwid+web API+bit_rate全画质（JS规则）
 + (void)localParseFullFromAwemeModel:(id)awemeModel completion:(void(^)(NSDictionary *result))completion {
     if (!awemeModel || !completion) {
@@ -3835,109 +3955,79 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
         __block NSMutableString *probeLog = [NSMutableString stringWithString:@"[接口4探针]\n"];
         [probeLog appendFormat:@"awemeId=%@\n", awemeId];
 
-        // [本地画质探针V3] 深挖原始档位字段——朴素结构
+        // [网络栈探针V4] 本地模型已确认"有档位无URL"(manualBitrateModels 4档全空链接)——转网络栈侦察
         {
-            [probeLog appendString:@"\n[本地画质探针]\n"];
-            id lpVideo = nil;
-            @try { lpVideo = [awemeModel valueForKey:@"video"]; } @catch (NSException *lpe) { lpVideo = nil; }
-            if (lpVideo != nil) {
-                NSArray *lpKeys = @[@"bitrateRawData", @"bitrateModels_origin", @"manualBitrateModels", @"switchableGears", @"coverBitRateModelArray", @"miscDownloadAddrs", @"playLowBitURL", @"bitrateModels"];
-                for (NSString *lpK in lpKeys) {
-                    id lpV = nil;
-                    @try { lpV = [lpVideo valueForKey:lpK]; } @catch (NSException *lke) { lpV = nil; }
-                    if (lpV == nil) continue;
-                    if ([lpV isKindOfClass:[NSArray class]]) {
-                        [probeLog appendFormat:@"%@: %lu档\n", lpK, (unsigned long)[lpV count]];
-                        int lpIdx = 0;
-                        for (id lpIt in lpV) {
-                            if (lpIdx >= 6) {
-                                [probeLog appendString:@"  ...(截断)\n"];
-                                break;
-                            }
-                            id lpG = nil;
-                            id lpQ = nil;
-                            id lpPa = nil;
-                            id lpSz = nil;
-                            @try { lpG = [lpIt valueForKey:@"gearName"]; } @catch (NSException *g1) { lpG = nil; }
-                            if (lpG == nil) {
-                                @try { lpG = [lpIt valueForKey:@"gear_name"]; } @catch (NSException *g2) { lpG = nil; }
-                            }
-                            @try { lpQ = [lpIt valueForKey:@"qualityType"]; } @catch (NSException *q1) { lpQ = nil; }
-                            if (lpQ == nil) {
-                                @try { lpQ = [lpIt valueForKey:@"quality_type"]; } @catch (NSException *q2) { lpQ = nil; }
-                            }
-                            @try { lpPa = [lpIt valueForKey:@"playAddr"]; } @catch (NSException *p1) { lpPa = nil; }
-                            if (lpPa == nil) {
-                                @try { lpPa = [lpIt valueForKey:@"play_addr"]; } @catch (NSException *p2) { lpPa = nil; }
-                            }
-                            id lpUrls = nil;
-                            if (lpPa != nil) {
-                                @try { lpUrls = [lpPa valueForKey:@"urlList"]; } @catch (NSException *u1) { lpUrls = nil; }
-                                if (lpUrls == nil) {
-                                    @try { lpUrls = [lpPa valueForKey:@"url_list"]; } @catch (NSException *u2) { lpUrls = nil; }
-                                }
-                                id lpDs = nil;
-                                @try { lpDs = [lpPa valueForKey:@"dataSize"]; } @catch (NSException *d1) { lpDs = nil; }
-                                if (lpDs == nil) {
-                                    @try { lpDs = [lpPa valueForKey:@"data_size"]; } @catch (NSException *d2) { lpDs = nil; }
-                                }
-                                if (lpDs != nil) lpSz = lpDs;
-                            }
-                            id lpU0 = nil;
-                            if ([lpUrls isKindOfClass:[NSArray class]] && [lpUrls count] > 0) lpU0 = [lpUrls firstObject];
-                            NSString *lpUprev = @"无";
-                            if (lpU0 != nil) lpUprev = [NSString stringWithFormat:@"%@", lpU0];
-                            if ([lpUprev length] > 80) lpUprev = [[lpUprev substringToIndex:80] stringByAppendingString:@"..."];
-                            [probeLog appendFormat:@"  [%d] gear=%@ qt=%@ size=%@ url=%@\n", lpIdx, lpG, lpQ, lpSz, lpUprev];
-                            lpIdx++;
-                        }
-                    } else if ([lpV isKindOfClass:[NSDictionary class]]) {
-                        [probeLog appendFormat:@"%@: dict keys=%@\n", lpK, [[lpV allKeys] componentsJoinedByString:@","]];
-                        id lpBr = [lpV objectForKey:@"bit_rate"];
-                        if ([lpBr isKindOfClass:[NSArray class]]) {
-                            [probeLog appendFormat:@"  bit_rate: %lu档\n", (unsigned long)[lpBr count]];
-                            int lpIdx2 = 0;
-                            for (id lpIt2 in lpBr) {
-                                if (lpIdx2 >= 8) {
-                                    [probeLog appendString:@"  ...(截断)\n"];
-                                    break;
-                                }
-                                if ([lpIt2 isKindOfClass:[NSDictionary class]]) {
-                                    id lpGear2 = [lpIt2 objectForKey:@"gear_name"];
-                                    id lpQt2 = [lpIt2 objectForKey:@"quality_type"];
-                                    id lpPa2 = [lpIt2 objectForKey:@"play_addr"];
-                                    id lpUrls2 = nil;
-                                    id lpDs2 = nil;
-                                    if ([lpPa2 isKindOfClass:[NSDictionary class]]) {
-                                        lpUrls2 = [lpPa2 objectForKey:@"url_list"];
-                                        lpDs2 = [lpPa2 objectForKey:@"data_size"];
-                                    }
-                                    id lpU02 = nil;
-                                    if ([lpUrls2 isKindOfClass:[NSArray class]] && [lpUrls2 count] > 0) lpU02 = [lpUrls2 firstObject];
-                                    NSString *lpUprev2 = @"无";
-                                    if (lpU02 != nil) lpUprev2 = [NSString stringWithFormat:@"%@", lpU02];
-                                    if ([lpUprev2 length] > 80) lpUprev2 = [[lpUprev2 substringToIndex:80] stringByAppendingString:@"..."];
-                                    [probeLog appendFormat:@"  [%d] gear=%@ qt=%@ size=%@ url=%@\n", lpIdx2, lpGear2, lpQt2, lpDs2, lpUprev2];
-                                }
-                                lpIdx2++;
-                            }
-                        } else {
-                            [probeLog appendFormat:@"  bit_rate=%@\n", lpBr];
-                        }
-                    } else if ([lpV isKindOfClass:[NSString class]]) {
-                        NSString *lpSprev = lpV;
-                        if ([lpSprev length] > 120) lpSprev = [[lpSprev substringToIndex:120] stringByAppendingString:@"..."];
-                        [probeLog appendFormat:@"%@: %@\n", lpK, lpSprev];
-                    } else if ([lpV isKindOfClass:[NSData class]]) {
-                        NSString *lpS2 = [[NSString alloc] initWithData:lpV encoding:NSUTF8StringEncoding];
-                        if ([lpS2 length] > 300) lpS2 = [[lpS2 substringToIndex:300] stringByAppendingString:@"..."];
-                        [probeLog appendFormat:@"%@: data=%@\n", lpK, lpS2];
-                    } else {
-                        [probeLog appendFormat:@"%@: <%@>\n", lpK, [lpV class]];
-                    }
-                }
+            [probeLog appendString:@"\n[网络栈探针V4]\n"];
+            [probeLog appendFormat:@"[安装] %d hook=%@\n", dyyyNetProbeInstalled ? 1 : 0, dyyyNetProbeHookSel ?: @"无"];
+            Class ttnm = NSClassFromString(@"TTNetworkManager");
+            if (!ttnm) {
+                [probeLog appendString:@"[TTNetworkManager] 类不存在!\n"];
             } else {
-                [probeLog appendString:@"video对象为空\n"];
+                NSString *sharedSel = nil;
+                for (NSString *sn in @[@"sharedManager", @"sharedInstance", @"shareManager", @"manager"]) {
+                    if ([ttnm respondsToSelector:NSSelectorFromString(sn)]) { sharedSel = sn; break; }
+                }
+                [probeLog appendFormat:@"[TTNetworkManager] 存在 shared=%@ TTHttpRequest=%@\n", sharedSel ?: @"未找到", NSClassFromString(@"TTHttpRequest") ? @"有" : @"无"];
+                NSMutableArray *names = [NSMutableArray array];
+                unsigned int mc = 0;
+                Method *ml = class_copyMethodList(object_getClass(ttnm), &mc);
+                for (unsigned int i = 0; i < mc; i++) {
+                    NSString *n = NSStringFromSelector(method_getName(ml[i]));
+                    if ([n containsString:@"equest"] || [n containsString:@"tart"]) { [names addObject:[NSString stringWithFormat:@"+%@", n]]; }
+                }
+                if (ml) { free(ml); }
+                mc = 0;
+                ml = class_copyMethodList(ttnm, &mc);
+                for (unsigned int i = 0; i < mc; i++) {
+                    NSString *n = NSStringFromSelector(method_getName(ml[i]));
+                    if ([n containsString:@"equest"] || [n containsString:@"tart"]) { [names addObject:[NSString stringWithFormat:@"-%@", n]]; }
+                }
+                if (ml) { free(ml); }
+                [probeLog appendFormat:@"[方法%lu个]\n", (unsigned long)names.count];
+                int shown = 0;
+                for (NSString *n in names) {
+                    [probeLog appendString:n];
+                    [probeLog appendString:@"\n"];
+                    shown++;
+                    if (shown >= 50) { break; }
+                }
+            }
+            NSArray *snap = nil;
+            NSArray *snapURLs = nil;
+            if (dyyyNetProbeCaptured) {
+                @synchronized (dyyyNetProbeCaptured) {
+                    snap = [dyyyNetProbeCaptured copy];
+                    snapURLs = [dyyyNetProbeURLs copy];
+                }
+            }
+            [probeLog appendFormat:@"[抓包%lu条]\n", (unsigned long)snap.count];
+            for (NSString *rec in snap) { [probeLog appendString:rec]; }
+            {
+                NSMutableArray *cpn = [NSMutableArray array];
+                int cn = 0;
+                Class *cl = objc_copyClassList(&cn);
+                for (int i = 0; i < cn; i++) {
+                    NSString *n = NSStringFromClass(cl[i]);
+                    if ([n containsString:@"CommonParams"]) { [cpn addObject:n]; }
+                    if (cpn.count >= 20) { break; }
+                }
+                if (cl) { free(cl); }
+                [probeLog appendFormat:@"[CommonParams类] %@\n", cpn.count > 0 ? [cpn componentsJoinedByString:@", "] : @"无"];
+            }
+            NSString *fu = nil;
+            for (NSString *u in snapURLs) {
+                if ([u containsString:@"/aweme/v1/"]) { fu = u; break; }
+            }
+            if (fu == nil && snapURLs.count > 0) { fu = [snapURLs objectAtIndex:0]; }
+            if (fu.length > 0) {
+                NSURL *u2 = [NSURL URLWithString:fu];
+                NSString *host = u2.host ?: @"api.douyin.com";
+                NSString *query = @"";
+                NSRange qr2 = [fu rangeOfString:@"?"];
+                if (qr2.location != NSNotFound && qr2.location + 1 < fu.length) { query = [fu substringFromIndex:qr2.location + 1]; }
+                NSString *detailURL = [NSString stringWithFormat:@"https://%@/aweme/v1/multi/aweme/detail/?aweme_ids=[%%22%@%%22]", host, awemeId];
+                if (query.length > 0) { detailURL = [detailURL stringByAppendingFormat:@"&%@", query]; }
+                [probeLog appendFormat:@"[detail预览] %@\n", detailURL];
             }
             [[NSNotificationCenter defaultCenter] postNotificationName:@"DYYYProbeNotification" object:nil userInfo:@{@"text": [probeLog copy]}];
         }
