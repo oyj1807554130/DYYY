@@ -3865,9 +3865,16 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
         dispatch_semaphore_t apiSem = dispatch_semaphore_create(0);
         NSURLSessionDataTask *apiTask = [[NSURLSession sharedSession] dataTaskWithRequest:apiReq completionHandler:^(NSData *apiData, NSURLResponse *apiResp, NSError *apiErr) {
             @try {
-                if (apiData.length > 0) {
-                    NSDictionary *apiJson = [NSJSONSerialization JSONObjectWithData:apiData options:0 error:nil];
-                    if ([apiJson isKindOfClass:[NSDictionary class]]) {
+                NSHTTPURLResponse *step2Http = (NSHTTPURLResponse *)apiResp;
+                [probeLog appendFormat:@"\n[Step2 WebAPI响应] HTTP %ld body=%lu字节\n", (long)(step2Http ? step2Http.statusCode : 0), (unsigned long)apiData.length];
+                NSDictionary *apiJson = apiData.length > 0 ? [NSJSONSerialization JSONObjectWithData:apiData options:0 error:nil] : nil;
+                if (!apiJson) {
+                    NSString *rawBody = [[NSString alloc] initWithData:apiData encoding:NSUTF8StringEncoding];
+                    if (rawBody.length > 200) rawBody = [rawBody substringToIndex:200];
+                    if (rawBody.length == 0) rawBody = [NSString stringWithFormat:@"<非UTF8二进制 %lu字节>", (unsigned long)apiData.length];
+                    [probeLog appendFormat:@"⚠️响应非JSON! body前200字:\n%@\n", rawBody];
+                }
+                if ([apiJson isKindOfClass:[NSDictionary class]]) {
                         NSInteger statusCode = [apiJson[@"status_code"] integerValue];
                         if (statusCode == 0) awemeDetail = apiJson[@"aweme_detail"];
                         // 探针：web API响应
