@@ -3756,6 +3756,17 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
             [probeLog appendFormat:@"  %@=%@ (domain=%@)\n", [c name], valPreview, [c domain]];
         }
         [probeLog appendFormat:@"ttwid=%@\n", ttwidStr.length > 0 ? @"有" : @"无"];
+        // 自定义Cookie优先（设置-接口4Cookie：电脑浏览器douyin.com完整Cookie，风控更稳）
+        NSString *customCookie = [[NSUserDefaults standardUserDefaults] stringForKey:@"DYYYLocalParseCookie"];
+        if (customCookie.length > 20) {
+            fullCookieStr = [NSMutableString stringWithString:customCookie];
+            ttwidStr = nil;
+            for (NSString *pair in [customCookie componentsSeparatedByString:@";"]) {
+                NSString *t = [pair stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+                if ([t hasPrefix:@"ttwid="]) ttwidStr = [t substringFromIndex:6];
+            }
+            [probeLog appendFormat:@"[自定义Cookie生效] len=%lu ttwid=%@\n", (unsigned long)customCookie.length, ttwidStr.length > 0 ? @"已提取" : @"无(将自动注册)"];
+        }
         // 降级：如果没有ttwid，从注册接口获取并追加到cookie
         if (!ttwidStr || ttwidStr.length == 0) {
             NSString *ttwidURL = @"https://ttwid.bytedance.com/ttwid/union/register/";
