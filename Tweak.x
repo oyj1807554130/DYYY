@@ -303,21 +303,29 @@ static BOOL DY4KValidMP4(NSString *path) {
 
 #pragma mark - UI
 
+@interface DY4KBall : NSObject
++ (instancetype)shared;
+- (void)mount;
+- (UIViewController *)hostVC;
+@end
+
 static UIViewController *DY4KTopVC(void) {
-    UIViewController *top = nil;
-    for (UIScene *sc in [UIApplication sharedApplication].connectedScenes) {
-        if ([sc isKindOfClass:[UIWindowScene class]] && sc.activationState == UISceneActivationStateForegroundActive) {
-            UIWindow *w = ((UIWindowScene *)sc).keyWindow;
-            if (!w) {
-                for (UIWindow *ww in ((UIWindowScene *)sc).windows) {
-                    if (ww.isKeyWindow) { w = ww; break; }
+    UIViewController *top = [[DY4KBall shared] hostVC];
+    if (!top) {
+        for (UIScene *sc in [UIApplication sharedApplication].connectedScenes) {
+            if ([sc isKindOfClass:[UIWindowScene class]] && sc.activationState == UISceneActivationStateForegroundActive) {
+                UIWindow *w = ((UIWindowScene *)sc).keyWindow;
+                if (!w) {
+                    for (UIWindow *ww in ((UIWindowScene *)sc).windows) {
+                        if (ww.isKeyWindow) { w = ww; break; }
+                    }
                 }
+                top = w.rootViewController;
+                break;
             }
-            top = w.rootViewController;
-            while (top.presentedViewController) top = top.presentedViewController;
-            break;
         }
     }
+    while (top.presentedViewController) top = top.presentedViewController;
     return top;
 }
 
@@ -432,13 +440,9 @@ static void DY4KShowMenu(void) {
 }
 @end
 
-@interface DY4KBall : NSObject
-+ (instancetype)shared;
-- (void)mount;
-@end
-
 @implementation DY4KBall {
     DY4KBallWindow *_win;
+    UIViewController *_hostVC;
     UIButton *_btn;
 }
 
@@ -449,6 +453,10 @@ static void DY4KShowMenu(void) {
         s = [DY4KBall new];
     });
     return s;
+}
+
+- (UIViewController *)hostVC {
+    return _hostVC;
 }
 
 - (void)mount {
@@ -468,17 +476,20 @@ static void DY4KShowMenu(void) {
     if (!scene) return;
     CGFloat x = [[NSUserDefaults standardUserDefaults] floatForKey:@"dy4k_ball_x"];
     CGFloat y = [[NSUserDefaults standardUserDefaults] floatForKey:@"dy4k_ball_y"];
-    if (x == 0 && y == 0) {
-        x = scene.screen.bounds.size.width - 60;
+    CGSize scr0 = scene.screen.bounds.size;
+    if (x <= 0 && y <= 0) {
+        x = scr0.width - 60;
         y = 220;
     }
-    _win = [[DY4KBallWindow alloc] initWithFrame:CGRectMake(x, y, 44, 44)];
-    _win.windowScene = scene;
+    _win = [[DY4KBallWindow alloc] initWithWindowScene:scene];
+    _win.frame = scene.screen.bounds;
     _win.windowLevel = 1000000;
     _win.backgroundColor = [UIColor clearColor];
     _win.hidden = NO;
+    _hostVC = [UIViewController new];
+    _win.rootViewController = _hostVC;
     _btn = [UIButton buttonWithType:UIButtonTypeCustom];
-    _btn.frame = _win.bounds;
+    _btn.frame = CGRectMake(x, y, 44, 44);
     _btn.layer.cornerRadius = 22;
     _btn.clipsToBounds = YES;
     _btn.backgroundColor = [UIColor colorWithWhite:0.05 alpha:0.72];
@@ -493,10 +504,10 @@ static void DY4KShowMenu(void) {
 - (void)panned:(UIPanGestureRecognizer *)p {
     if (p.state == UIGestureRecognizerStateChanged) {
         CGPoint t = [p translationInView:_win];
-        CGRect f = _win.frame;
+        CGRect f = _btn.frame;
         f.origin.x += t.x;
         f.origin.y += t.y;
-        CGSize scr = _win.windowScene.screen.bounds.size;
+        CGSize scr = _win.bounds.size;
         if (f.origin.x < 0) f.origin.x = 0;
         if (f.origin.y < 80) f.origin.y = 80;
         if (f.origin.x > scr.width - 44) f.origin.x = scr.width - 44;
@@ -504,12 +515,14 @@ static void DY4KShowMenu(void) {
         _win.frame = f;
         [p setTranslation:CGPointZero inView:_win];
     } else if (p.state == UIGestureRecognizerStateEnded) {
-        [[NSUserDefaults standardUserDefaults] setFloat:_win.frame.origin.x forKey:@"dy4k_ball_x"];
-        [[NSUserDefaults standardUserDefaults] setFloat:_win.frame.origin.y forKey:@"dy4k_ball_y"];
+        [[NSUserDefaults standardUserDefaults] setFloat:_btn.frame.origin.x forKey:@"dy4k_ball_x"];
+        [[NSUserDefaults standardUserDefaults] setFloat:_btn.frame.origin.y forKey:@"dy4k_ball_y"];
     }
 }
 
 - (void)tapped {
+    UIImpactFeedbackGenerator *hap = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleMedium];
+    [hap impactOccurred];
     dispatch_async(dispatch_get_main_queue(), ^{
         DY4KShowMenu();
     });
