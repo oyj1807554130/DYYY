@@ -5,6 +5,7 @@
 
 #import <UIKit/UIKit.h>
 #import <Photos/Photos.h>
+#import <objc/runtime.h>
 
 #pragma mark - 模型
 
@@ -77,6 +78,12 @@
 
 static NSMutableDictionary<NSString *, DY4KVideo *> *dy4kCache = nil;
 static dispatch_queue_t dy4kParseQueue = nil;
+static long dy4kNotifCount = 0;
+static long dy4kMonitorHit = 0;
+static long dy4kBigHit = 0;
+static long dy4kBRHit = 0;
+static int dy4kSwizzled = 0;
+static NSMutableArray *dy4kMonNames = nil;
 
 static NSArray<DY4KVideo *> *DY4KRecentVideos(void) {
     NSMutableArray<DY4KVideo *> *arr = [NSMutableArray array];
@@ -101,6 +108,87 @@ static NSArray<DY4KVideo *> *DY4KRecentVideos(void) {
 }
 
 #pragma mark - 响应解析
+
+static id DY4KTryVC(id obj, NSString *k1, NSString *k2) {
+    @try { id v = [obj valueForKey:k1]; if (v) return v; } @catch (NSException *e) {}
+    if (k2) { @try { id v = [obj valueForKey:k2]; if (v) return v; } @catch (NSException *e) {} }
+    return nil;
+}
+
+static NSString *DY4KFindURL(id node, int depth) {
+    if (depth > 5 || !node || node == [NSNull null]) return nil;
+    if ([node isKindOfClass:[NSString class]]) {
+        NSString *s = (NSString *)node;
+        if ([s hasPrefix:@"http"] && s.length > 20) return s;
+        return nil;
+    }
+    if ([node isKindOfClass:[NSURL class]]) return ((NSURL *)node).absoluteString;
+    if ([node isKindOfClass:[NSArray class]]) {
+        for (id v in (NSArray *)node) {
+            NSString *u = DY4KFindURL(v, depth + 1);
+            if (u) return u;
+        }
+        return nil;
+    }
+    if ([node isKindOfClass:[NSDictionary class]]) {
+        for (id v in ((NSDictionary *)node).allValues) {
+            NSString *u = DY4KFindURL(v, depth + 1);
+            if (u) return u;
+        }
+        return nil;
+    }
+    NSString *u = DY4KFindURL(DY4KTryVC(node, @"urlList", @"url_list"), depth + 1);
+    if (u) return u;
+    u = DY4KFindURL(DY4KTryVC(node, @"playAddr", @"play_addr"), depth + 1);
+    if (u) return u;
+    return DY4KFindURL(DY4KTryVC(node, @"url", nil), depth + 1);
+}
+
+// 竞品同款思路: 播放器设置码率模型时截获(运行时swizzle,不依赖通知)
+static void DY4KOnBitrateModels(id models) {
+    @try {
+        if (!models) return;
+        if ([models isKindOfClass:[NSDictionary class]]) models = [(NSDictionary *)models allValues];
+        if (![models isKindOfClass:[NSArray class]] || [(NSArray *)models count] == 0) return;
+        DY4KGear *best = nil;
+        for (id m in (NSArray *)models) {
+            if (!m || ![m respondsToSelector:@selector(valueForKey:)]) continue;
+            id gn = DY4KTryVC(m, @"gearName", @"gear_name");
+            id br = DY4KTryVC(m, @"bitRate", @"bit_rate");
+            id pa = DY4KTryVC(m, @"playAddr", @"play_addr");
+            id w = DY4KTryVC(m, @"width", nil);
+            id h = DY4KTryVC(m, @"height", nil);
+            NSString *url = DY4KFindURL(pa, 0);
+            if (!url) {
+                id u2 = DY4KTryVC(m, @"uri", nil);
+                if (!u2 && pa) u2 = DY4KTryVC(pa, @"uri", nil);
+                if ([u2 isKindOfClass:[NSString class]] && [(NSString *)u2 length] > 5) {
+                    url = [NSString stringWithFormat:@"https://www.douyin.com/aweme/v1/play/?video_id=%@&ratio=1080p", u2];
+                }
+            }
+            if (!url) continue;
+            DY4KGear *g = [DY4KGear new];
+            g.gearName = [gn isKindOfClass:[NSString class]] ? gn : @"gear";
+            g.bitrate = [br isKindOfClass:[NSNumber class]] ? [(NSNumber *)br longValue] : 0;
+            g.width = [w isKindOfClass:[NSNumber class]] ? [(NSNumber *)w longValue] : 0;
+            g.height = [h isKindOfClass:[NSNumber class]] ? [(NSNumber *)h longValue] : 0;
+            g.urls = @[url];
+            if (!best || g.bitrate > best.bitrate) best = g;
+        }
+        if (!best) return;
+        @synchronized (dy4kCache) {
+            DY4KVideo *v = dy4kCache[@"__current__"];
+            if (!v) {
+                v = [DY4KVideo new];
+                v.aid = @"__current__";
+                v.desc = @"当前播放视频";
+                dy4kCache[@"__current__"] = v;
+            }
+            v.time = [[NSDate date] timeIntervalSince1970];
+            [v mergeGear:best];
+        }
+    } @catch (NSException *e) {}
+}
 
 static DY4KGear *DY4KParseGear(NSDictionary *br) {
     if (![br isKindOfClass:[NSDictionary class]]) return nil;
@@ -192,6 +280,7 @@ static void DY4KInspectResponse(NSDictionary *userInfo) {
                 NSMutableDictionary<NSString *, DY4KVideo *> *acc = [NSMutableDictionary dictionary];
                 DY4KWalk(json, nil, nil, nil, acc);
                 if (acc.count == 0) return;
+                dy4kBigHit += (long)acc.count;
                 @synchronized (dy4kCache) {
                     for (NSString *aid in acc) {
                         DY4KVideo *nv = acc[aid];
@@ -339,6 +428,20 @@ static void DY4KAlert(NSString *msg, NSArray<UIAlertAction *> *actions) {
         for (UIAlertAction *a in actions) [ac addAction:a];
     }
     [top presentViewController:ac animated:YES completion:nil];
+}
+
+static void DY4KShowDiag(void) {
+    NSMutableString *msg = [NSMutableString string];
+    [msg appendFormat:@"通知总数:%ld", dy4kNotifCount];
+    [msg appendFormat:@"\nMonitorFinish:%ld", dy4kMonitorHit];
+    [msg appendFormat:@"\n大响应入库:%ld", dy4kBigHit];
+    [msg appendFormat:@"\n码率模型:%ld", dy4kBRHit];
+    [msg appendFormat:@"\nswizzle:%d", dy4kSwizzled];
+    [msg appendFormat:@"\n缓存:%lu条", (unsigned long)dy4kCache.count];
+    NSString *names = nil;
+    @synchronized (dy4kMonNames) { names = [dy4kMonNames componentsJoinedByString:@", "]; }
+    [msg appendFormat:@"\n相关通知:%@", names.length ? names : @"无"];
+    DY4KAlert(msg, nil);
 }
 
 static void DY4KSaveAndReport(NSString *path) {
@@ -509,6 +612,9 @@ static void DY4KShowMenu(void) {
     [_btn addTarget:self action:@selector(tapped) forControlEvents:UIControlEventTouchUpInside];
     UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(panned:)];
     [_btn addGestureRecognizer:pan];
+    UILongPressGestureRecognizer *lp = [[UILongPressGestureRecognizer alloc] initWithTarget:self action:@selector(longpressed:)];
+    lp.minimumPressDuration = 0.8;
+    [_btn addGestureRecognizer:lp];
     _win.allowedView = _btn;
     [_win addSubview:_btn];
 }
@@ -540,20 +646,57 @@ static void DY4KShowMenu(void) {
     });
 }
 
+- (void)longpressed:(UILongPressGestureRecognizer *)g {
+    if (g.state != UIGestureRecognizerStateBegan) return;
+    UIImpactFeedbackGenerator *hap = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleMedium];
+    [hap impactOccurred];
+    dispatch_async(dispatch_get_main_queue(), ^{
+        DY4KShowDiag();
+    });
+}
+
 @end
 
 #pragma mark - 入口
 
-static id dy4kNetObs = nil;
+static id dy4kAllObs = nil;
 static id dy4kActiveObs = nil;
+static IMP dy4kOrigSetBR = NULL;
+
+static void dy4kHookSetBitrateModels(id self, SEL _cmd, id models) {
+    DY4KOnBitrateModels(models);
+    if (dy4kOrigSetBR) ((void (*)(id, SEL, id))dy4kOrigSetBR)(self, _cmd, models);
+}
 
 %ctor {
     @autoreleasepool {
         dy4kCache = [NSMutableDictionary dictionary];
         dy4kParseQueue = dispatch_queue_create("com.omega.dy4k.parse", DISPATCH_QUEUE_SERIAL);
-        dy4kNetObs = [[NSNotificationCenter defaultCenter] addObserverForName:@"kTTNetworkManagerMonitorFinishNotification" object:nil queue:nil usingBlock:^(NSNotification *note) {
-            DY4KInspectResponse(note.userInfo);
+        dy4kMonNames = [NSMutableArray array];
+        dy4kAllObs = [[NSNotificationCenter defaultCenter] addObserverForName:nil object:nil queue:nil usingBlock:^(NSNotification *note) {
+            @try {
+                dy4kNotifCount++;
+                NSString *n = note.name ?: @"";
+                if ([n containsString:@"Monitor"] || [n containsString:@"TTNetwork"] || [n containsString:@"Network"] || [n containsString:@"network"]) {
+                    @synchronized (dy4kMonNames) {
+                        if (dy4kMonNames.count < 12 && ![dy4kMonNames containsObject:n]) [dy4kMonNames addObject:n];
+                    }
+                }
+                if ([n isEqualToString:@"kTTNetworkManagerMonitorFinishNotification"]) {
+                    dy4kMonitorHit++;
+                    DY4KInspectResponse(note.userInfo);
+                }
+            } @catch (NSException *e) {}
         }];
+        Class brCls = NSClassFromString(@"AWEDPlayerVideoModel");
+        if (brCls) {
+            Method m = class_getInstanceMethod(brCls, NSSelectorFromString(@"setBitrateModels:"));
+            if (m) {
+                dy4kOrigSetBR = method_getImplementation(m);
+                method_setImplementation(m, (IMP)dy4kHookSetBitrateModels);
+                dy4kSwizzled = 1;
+            }
+        }
         dy4kActiveObs = [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationDidBecomeActiveNotification object:nil queue:nil usingBlock:^(__unused NSNotification *note) {
             dispatch_async(dispatch_get_main_queue(), ^{
                 [[DY4KBall shared] mount];
