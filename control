@@ -1,12 +1,10 @@
-Package: com.huami.dyyy
-Name: DYYY
-Version: 2.2-9
-Description: 仅供学习交流，请在 24 小时内自觉删除。
-Homepage: https://github.com/huami1314/DYYY
+Package: com.omega.dy4k
+Name: DY4K
+Version: 1.0-1
+Description: 独立抖音4K解析悬浮球 - 本地截获原生响应全档bit_rate, 直连下载, 不依赖DYYY, 不发外部解析请求。仅供学习交流。
 Section: Tweaks
-Depends: firmware (>= 5.0), mobilesubstrate
+Depends: firmware (>= 13.0), mobilesubstrate
 Priority: optional
-Maintainer: huami
-Author: huami
+Maintainer: omega
+Author: omega
 Architecture: iphoneos-arm
-Icon: https://Mieing.Github.io/repo/file/TikTok.png
