@@ -4118,8 +4118,12 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
         if (!rawImages || ![rawImages isKindOfClass:[NSArray class]]) rawImages = @[];
         if (rawImages.count > 0) isImagePost = YES;
 
+        // bit_rate字段名三兼容（web RENDER_DATA/移动端SSR/app端字段名不同：bit_rate/bit_rate_list/bitRateList）
         NSArray *bitRateList = videoObj[@"bit_rate"];
+        if (!bitRateList || ![bitRateList isKindOfClass:[NSArray class]]) bitRateList = videoObj[@"bit_rate_list"];
+        if (!bitRateList || ![bitRateList isKindOfClass:[NSArray class]]) bitRateList = videoObj[@"bitRateList"];
         if (!bitRateList || ![bitRateList isKindOfClass:[NSArray class]]) bitRateList = @[];
+        [probeLog appendFormat:@"\n[Step3 码率字段诊断] bit_rate=%lu条 bit_rate_list=%lu条 bitRateList=%lu条 实际采用=%lu条 videoKeys=%@\n", (unsigned long)([videoObj[@"bit_rate"] isKindOfClass:[NSArray class]] ? [(NSArray *)videoObj[@"bit_rate"] count] : 0), (unsigned long)([videoObj[@"bit_rate_list"] isKindOfClass:[NSArray class]] ? [(NSArray *)videoObj[@"bit_rate_list"] count] : 0), (unsigned long)([videoObj[@"bitRateList"] isKindOfClass:[NSArray class]] ? [(NSArray *)videoObj[@"bitRateList"] count] : 0), (unsigned long)bitRateList.count, [videoObj allKeys]];
         NSMutableDictionary *byQuality = [NSMutableDictionary dictionary];
         for (NSDictionary *b in bitRateList) {
             NSDictionary *playAddr = b[@"play_addr"] ?: @{};
