@@ -3764,6 +3764,81 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
         __block NSMutableString *probeLog = [NSMutableString stringWithString:@"[接口4探针]\n"];
         [probeLog appendFormat:@"awemeId=%@\n", awemeId];
 
+        // [本地画质探针] 打印AwemeModel内video全部码率档位——验证本地是否藏有4K
+        {
+            [probeLog appendString:@"\n[本地画质探针]\n"];
+            id lpVideo = nil;
+            @try { lpVideo = [awemeModel valueForKey:@"video"]; } @catch (NSException *lpe) { lpVideo = nil; }
+            if (lpVideo) {
+                unsigned int lpCnt = 0;
+                Ivar *lpIvars = class_copyIvarList([lpVideo class], &lpCnt);
+                NSMutableArray *lpHits = [NSMutableArray array];
+                for (unsigned int i = 0; i < lpCnt; i++) {
+                    const char *lpNm = ivar_getName(lpIvars[i]);
+                    NSString *lpNs = lpNm ? [NSString stringWithUTF8String:lpNm] : @"";
+                    NSString *lpLow = lpNs.lowercaseString;
+                    if ([lpLow containsString:@"bit"] || [lpLow containsString:@"rate"] || [lpLow containsString:@"addr"] || [lpLow containsString:@"gear"] || [lpLow containsString:@"quality"]) {
+                        [lpHits addObject:lpNs];
+                    }
+                }
+                if (lpIvars) free(lpIvars);
+                [probeLog appendFormat:@"video画质相关ivar(%lu): %@\n", (unsigned long)lpHits.count, [lpHits componentsJoinedByString:@", "]];
+                NSArray *lpKeys = @[@"bit_rate", @"bitRateList", @"bit_rate_list", @"bitrateModels", @"bitrate_models", @"play_addr", @"playAddr", @"download_addr", @"downloadAddr", @"play_addr_h264", @"play_addr_265", @"play_addr_h265", @"video_text"];
+                for (NSString *lpK in lpKeys) {
+                    id lpV = nil;
+                    @try { lpV = [lpVideo valueForKey:lpK]; } @catch (NSException *lke) { lpV = nil; }
+                    if (!lpV) continue;
+                    if ([lpV isKindOfClass:[NSArray class]]) {
+                        if ([lpV count] == 0) { [probeLog appendFormat:@"%@: 空数组\n", lpK]; continue; }
+                        [probeLog appendFormat:@"%@: %lu档\n", lpK, (unsigned long)[lpV count]];
+                        int lpIdx = 0;
+                        for (id lpIt in lpV) {
+                            if (lpIdx >= 12) { [probeLog appendString:@"  ...(截断)\n"]; break; }
+                            id lpG = nil; id lpQ = nil; id lpSz = nil;
+                            @try { lpG = [lpIt valueForKey:@"gear_name"]; } @catch(NSException *lge) {}
+                            if (!lpG) @try { lpG = [lpIt valueForKey:@"gearName"]; } @catch(NSException *lge) {}
+                            @try { lpQ = [lpIt valueForKey:@"quality_type"]; } @catch(NSException *lqe) {}
+                            if (!lpQ) @try { lpQ = [lpIt valueForKey:@"qualityType"]; } @catch(NSException *lqe) {}
+                            @try { lpSz = [lpIt valueForKey:@"band_width"]; } @catch(NSException *lbe) {}
+                            id lpPa = nil;
+                            @try { lpPa = [lpIt valueForKey:@"play_addr"]; } @catch(NSException *lpe2) {}
+                            if (!lpPa) @try { lpPa = [lpIt valueForKey:@"playAddr"]; } @catch(NSException *lpe2) {}
+                            id lpUrls = nil;
+                            if (lpPa) {
+                                @try { lpUrls = [lpPa valueForKey:@"url_list"]; } @catch(NSException *lue) {}
+                                if (!lpUrls) @try { lpUrls = [lpPa valueForKey:@"urlList"]; } @catch(NSException *lue) {}
+                                id lpDs = nil;
+                                @try { lpDs = [lpPa valueForKey:@"data_size"]; } @catch(NSException *lde) {}
+                                if (!lpDs) @try { lpDs = [lpPa valueForKey:@"dataSize"]; } @catch(NSException *lde) {}
+                                if (lpDs) lpSz = lpDs;
+                            }
+                            id lpU0 = ([lpUrls isKindOfClass:[NSArray class]] && [lpUrls count] > 0) ? [lpUrls firstObject] : nil;
+                            NSString *lpUprev = lpU0 ? [NSString stringWithFormat:@"%@", lpU0] : @"无";
+                            if (lpUprev.length > 90) lpUprev = [[lpUprev substringToIndex:90] stringByAppendingString:@"..."];
+                            [probeLog appendFormat:@"  [%d] gear=%@ qt=%@ size=%@\n      url=%@\n", lpIdx, lpG, lpQ, lpSz, lpUprev];
+                            lpIdx++;
+                        }
+                    } else if ([lpV isKindOfClass:[NSDictionary class]]) {
+                        id lpUrls = nil; @try { lpUrls = [lpV valueForKey:@"url_list"]; } @catch(NSException *lue) {}
+                        if (!lpUrls) @try { lpUrls = [lpV valueForKey:@"urlList"]; } @catch(NSException *lue) {}
+                        id lpDs = nil; @try { lpDs = [lpV valueForKey:@"data_size"]; } @catch(NSException *lde) {}
+                        if (!lpDs) @try { lpDs = [lpV valueForKey:@"dataSize"]; } @catch(NSException *lde) {}
+                        NSString *lpUprev = lpUrls ? [NSString stringWithFormat:@"%@", lpUrls] : @"无";
+                        if (lpUprev.length > 90) lpUprev = [[lpUprev substringToIndex:90] stringByAppendingString:@"..."];
+                        [probeLog appendFormat:@"%@: dict size=%@ urls=%@\n", lpK, lpDs, lpUprev];
+                    } else if ([lpV isKindOfClass:[NSString class]]) {
+                        NSString *lpSprev = [lpV length] > 90 ? [[lpV substringToIndex:90] stringByAppendingString:@"..."] : lpV;
+                        [probeLog appendFormat:@"%@: %@\n", lpK, lpSprev];
+                    } else {
+                        [probeLog appendFormat:@"%@: <%@>\n", lpK, [lpV class]];
+                    }
+                }
+            } else {
+                [probeLog appendString:@"video对象为空\n"];
+            }
+            [[NSNotificationCenter defaultCenter] postNotificationName:@"DYYYProbeNotification" object:nil userInfo:@{@"text": [probeLog copy]}];
+        }
+
         // Step 0: Cookie预热——GET www.douyin.com刷新web Cookie，确保msToken等不过期
         {
             NSMutableURLRequest *warmupReq = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:@"https://www.douyin.com/"]];
