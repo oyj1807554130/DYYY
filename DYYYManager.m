@@ -4075,7 +4075,7 @@ static void dyyyNetProbeInstall(void) {
     }
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         // ===== 接口4全流程探针 =====
-        __block NSMutableString *probeLog = [NSMutableString stringWithString:@"[接口4探针]\n"];
+        __block NSMutableString *probeLog = [NSMutableString stringWithString:@"[接口4探针V7.2]\n"];
         [probeLog appendFormat:@"awemeId=%@\n", awemeId];
 
         // [网络栈探针V4] 首次长按装hook，之后进详情页/刷视频，再长按就有抓包
