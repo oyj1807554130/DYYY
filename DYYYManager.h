@@ -32,7 +32,6 @@
 @property(nonatomic, strong) NSURLSessionDownloadTask *rawDownloadTask;
 // 标记下一次downloadMediaWithProgress不加UA/Referer（app内部URL裸奔下载）
 @property(nonatomic, assign) BOOL skipNextDownloadHeaders;
-@property(nonatomic, strong) NSMutableSet *headerRetryDoneIDs;
 
 /**
  * 获取单例实例

@@ -2041,14 +2041,6 @@ void showDYYYSettingsVC(UIViewController *rootVC, BOOL hasAgreed) {
             @"detail" : @"",
             @"cellType" : @6,
             @"imageName" : @"ic_cloudarrowdown_outlined_20"},
-          @{
-              @"identifier" : @"DYYYLocalParseCookie",
-              @"title" : @"接口4Cookie",
-              @"subTitle" : @"填入电脑浏览器douyin.com的Cookie，风控更稳",
-              @"detail" : @"",
-              @"cellType" : @20,
-              @"imageName" : @"ic_cloudarrowdown_outlined_20"
-          },
           @{@"identifier" : @"DYYYShowAllVideoQuality",
             @"title" : @"接口显示清晰选项",
             @"detail" : @"",
@@ -2182,23 +2174,6 @@ void showDYYYSettingsVC(UIViewController *rootVC, BOOL hasAgreed) {
 
                                                item.detail = trimmedText3.length > 0 ? trimmedText3 : @"不填关闭";
 
-                                               [item refreshCell];
-                                             }
-                                              onCancel:nil];
-              };
-          }
-          // 特殊处理接口4Cookie
-          if ([item.identifier isEqualToString:@"DYYYLocalParseCookie"]) {
-              NSString *savedCookie = [[NSUserDefaults standardUserDefaults] objectForKey:@"DYYYLocalParseCookie"];
-              item.detail = savedCookie.length > 0 ? [NSString stringWithFormat:@"已填入 %lu 字", (unsigned long)savedCookie.length] : @"不填自动注册";
-              item.cellTappedBlock = ^{
-                [DYYYSettingsHelper showTextInputAlert:@"设置接口4Cookie"
-                                           defaultText:savedCookie ?: @""
-                                           placeholder:@"电脑浏览器douyin.com的完整Cookie"
-                                             onConfirm:^(NSString *text) {
-                                               NSString *trimmed = [text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-                                               [DYYYSettingsHelper setUserDefaults:trimmed forKey:@"DYYYLocalParseCookie"];
-                                               item.detail = trimmed.length > 0 ? [NSString stringWithFormat:@"已填入 %lu 字", (unsigned long)trimmed.length] : @"不填自动注册";
                                                [item refreshCell];
                                              }
                                               onCancel:nil];

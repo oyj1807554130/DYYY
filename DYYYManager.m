@@ -11,7 +11,6 @@
 
 #import "DYYYToast.h"
 #import "DYYYUtils.h"
-#import "DYYYABogus.h"
 
 // MARK: - API 类型定义
 typedef NS_ENUM(NSInteger, DYYYAPIType) {
@@ -63,50 +62,6 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
 @end
 
 @implementation DYYYManager
-
-// 递归搜索RENDER_DATA中的视频详情字典（优先aweme_detail格式，其次含bit_rate的dict）
-+ (id)dyyyFindDetailDict:(id)node depth:(NSInteger)depth {
-    if (depth > 8 || !node) return nil;
-    if ([node isKindOfClass:[NSDictionary class]]) {
-        NSDictionary *dict = (NSDictionary *)node;
-        id ad = dict[@"aweme_detail"];
-        if ([ad isKindOfClass:[NSDictionary class]]) return ad;
-        if ([dict[@"bit_rate"] isKindOfClass:[NSArray class]] && [dict[@"video"] isKindOfClass:[NSDictionary class]]) return dict;
-        for (NSString *key in dict) {
-            id found = [DYYYManager dyyyFindDetailDict:dict[key] depth:depth + 1];
-            if (found) return found;
-        }
-    } else if ([node isKindOfClass:[NSArray class]]) {
-        for (id item in (NSArray *)node) {
-            id found = [DYYYManager dyyyFindDetailDict:item depth:depth + 1];
-            if (found) return found;
-        }
-    }
-    return nil;
-}
-
-// 递归搜索_ROUTER_DATA中的item_list（取第一个含video的item）
-+ (id)dyyyFindItemList:(id)node depth:(NSInteger)depth {
-    if (depth > 8 || !node) return nil;
-    if ([node isKindOfClass:[NSDictionary class]]) {
-        NSDictionary *dict = (NSDictionary *)node;
-        id il = dict[@"item_list"];
-        if ([il isKindOfClass:[NSArray class]] && [(NSArray *)il count] > 0) {
-            id first = ((NSArray *)il)[0];
-            if ([first isKindOfClass:[NSDictionary class]] && [first[@"video"] isKindOfClass:[NSDictionary class]]) return first;
-        }
-        for (NSString *key in dict) {
-            id found = [DYYYManager dyyyFindItemList:dict[key] depth:depth + 1];
-            if (found) return found;
-        }
-    } else if ([node isKindOfClass:[NSArray class]]) {
-        for (id item2 in (NSArray *)node) {
-            id found = [DYYYManager dyyyFindItemList:item2 depth:depth + 1];
-            if (found) return found;
-        }
-    }
-    return nil;
-}
 
 #pragma mark - API 适配器实现
 
@@ -1734,77 +1689,6 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
     [[NSFileManager defaultManager] moveItemAtURL:location toURL:destinationURL error:&moveError];
     if (moveError) {
         NSLog(@"[DYYY] moveItemAtURL failed: %@, from=%@, to=%@", moveError, location, destinationURL);
-    }
-
-    // ===== 视频数据有效性校验：防止CDN错误页/空响应被当作视频保存（PHPhotosError 3302）=====
-    if (mediaType == MediaTypeVideo) {
-        NSDictionary *fattrs = [[NSFileManager defaultManager] attributesOfItemAtPath:destinationURL.path error:nil];
-        unsigned long long fileSize = fattrs ? [fattrs fileSize] : 0;
-        BOOL validVideo = NO;
-        if (fileSize >= 4096) {
-            NSFileHandle *fh = [NSFileHandle fileHandleForReadingAtPath:destinationURL.path];
-            if (fh) {
-                NSData *head = [fh readDataOfLength:16];
-                [fh closeFile];
-                if (head.length >= 12) {
-                    const char *b = (const char *)head.bytes;
-                    // MP4/MOV 合法box: ftyp/moov/mdat/free/skip/wide
-                    if (memcmp(b + 4, "ftyp", 4) == 0 || memcmp(b + 4, "moov", 4) == 0 ||
-                        memcmp(b + 4, "mdat", 4) == 0 || memcmp(b + 4, "free", 4) == 0 ||
-                        memcmp(b + 4, "skip", 4) == 0 || memcmp(b + 4, "wide", 4) == 0) {
-                        validVideo = YES;
-                    }
-                }
-            }
-        }
-        if (!validVideo) {
-            NSLog(@"[DYYY] 视频下载内容无效: size=%llu url=%@", fileSize, downloadTask.originalRequest.URL);
-            [[NSFileManager defaultManager] removeItemAtURL:destinationURL error:nil];
-
-            if (!self.headerRetryDoneIDs) {
-                self.headerRetryDoneIDs = [NSMutableSet set];
-            }
-            NSURL *retryURL = downloadTask.originalRequest.URL;
-            BOOL canRetry = (retryURL != nil) && ![self.headerRetryDoneIDs containsObject:downloadIDForTask];
-
-            if (canRetry) {
-                // 首次无效：复用同一downloadID，用无自定义header的干净请求重试一次
-                [self.headerRetryDoneIDs addObject:downloadIDForTask];
-                NSURLSessionConfiguration *cfg = [NSURLSessionConfiguration defaultSessionConfiguration];
-                cfg.timeoutIntervalForRequest = 60.0;
-                cfg.timeoutIntervalForResource = 600.0;
-                NSURLSession *retrySession = [NSURLSession sessionWithConfiguration:cfg delegate:self delegateQueue:[NSOperationQueue mainQueue]];
-                NSURLSessionDownloadTask *retryTask = [retrySession downloadTaskWithURL:retryURL];
-                retryTask.taskDescription = downloadIDForTask;
-                self.downloadTasks[downloadIDForTask] = retryTask;
-                self.taskProgressMap[downloadIDForTask] = @0.0;
-                [retryTask resume];
-                dispatch_async(dispatch_get_main_queue(), ^{
-                  [DYYYUtils showToast:@"视频数据无效，正在直连重试..."];
-                });
-            } else {
-                // 重试后仍无效：报明确错误并走失败链路，坏数据不进相册
-                [self.headerRetryDoneIDs removeObject:downloadIDForTask];
-                [self.downloadTasks removeObjectForKey:downloadIDForTask];
-                [self.taskProgressMap removeObjectForKey:downloadIDForTask];
-                [self.mediaTypeMap removeObjectForKey:downloadIDForTask];
-                NSString *invalidMsg = [NSString stringWithFormat:@"下载失败: 视频数据无效(%.0fKB)", fileSize / 1024.0];
-                if (isBatchDownload) {
-                    [[DYYYManager shared] incrementCompletedAndUpdateProgressForBatch:batchID success:NO];
-                    [self startNextSerialImageForBatch:batchID];
-                } else {
-                    void (^completionBlock)(BOOL success, NSURL *fileURL) = self.completionBlocks[downloadIDForTask];
-                    if (completionBlock) {
-                        dispatch_async(dispatch_get_main_queue(), ^{ completionBlock(NO, nil); });
-                    }
-                    [self finalizeDownloadWithID:downloadIDForTask success:NO fileURL:nil];
-                }
-                dispatch_async(dispatch_get_main_queue(), ^{
-                  [DYYYUtils showToast:invalidMsg];
-                });
-            }
-            return;
-        }
     }
 
     if (isBatchDownload) {
@@ -3835,113 +3719,6 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
         __block NSMutableString *probeLog = [NSMutableString stringWithString:@"[接口4探针]\n"];
         [probeLog appendFormat:@"awemeId=%@\n", awemeId];
 
-        // [本地画质探针V3] 深挖原始档位字段——朴素结构
-        {
-            [probeLog appendString:@"\n[本地画质探针]\n"];
-            id lpVideo = nil;
-            @try { lpVideo = [awemeModel valueForKey:@"video"]; } @catch (NSException *lpe) { lpVideo = nil; }
-            if (lpVideo != nil) {
-                NSArray *lpKeys = @[@"bitrateRawData", @"bitrateModels_origin", @"manualBitrateModels", @"switchableGears", @"coverBitRateModelArray", @"miscDownloadAddrs", @"playLowBitURL", @"bitrateModels"];
-                for (NSString *lpK in lpKeys) {
-                    id lpV = nil;
-                    @try { lpV = [lpVideo valueForKey:lpK]; } @catch (NSException *lke) { lpV = nil; }
-                    if (lpV == nil) continue;
-                    if ([lpV isKindOfClass:[NSArray class]]) {
-                        [probeLog appendFormat:@"%@: %lu档\n", lpK, (unsigned long)[lpV count]];
-                        int lpIdx = 0;
-                        for (id lpIt in lpV) {
-                            if (lpIdx >= 6) {
-                                [probeLog appendString:@"  ...(截断)\n"];
-                                break;
-                            }
-                            id lpG = nil;
-                            id lpQ = nil;
-                            id lpPa = nil;
-                            id lpSz = nil;
-                            @try { lpG = [lpIt valueForKey:@"gearName"]; } @catch (NSException *g1) { lpG = nil; }
-                            if (lpG == nil) {
-                                @try { lpG = [lpIt valueForKey:@"gear_name"]; } @catch (NSException *g2) { lpG = nil; }
-                            }
-                            @try { lpQ = [lpIt valueForKey:@"qualityType"]; } @catch (NSException *q1) { lpQ = nil; }
-                            if (lpQ == nil) {
-                                @try { lpQ = [lpIt valueForKey:@"quality_type"]; } @catch (NSException *q2) { lpQ = nil; }
-                            }
-                            @try { lpPa = [lpIt valueForKey:@"playAddr"]; } @catch (NSException *p1) { lpPa = nil; }
-                            if (lpPa == nil) {
-                                @try { lpPa = [lpIt valueForKey:@"play_addr"]; } @catch (NSException *p2) { lpPa = nil; }
-                            }
-                            id lpUrls = nil;
-                            if (lpPa != nil) {
-                                @try { lpUrls = [lpPa valueForKey:@"urlList"]; } @catch (NSException *u1) { lpUrls = nil; }
-                                if (lpUrls == nil) {
-                                    @try { lpUrls = [lpPa valueForKey:@"url_list"]; } @catch (NSException *u2) { lpUrls = nil; }
-                                }
-                                id lpDs = nil;
-                                @try { lpDs = [lpPa valueForKey:@"dataSize"]; } @catch (NSException *d1) { lpDs = nil; }
-                                if (lpDs == nil) {
-                                    @try { lpDs = [lpPa valueForKey:@"data_size"]; } @catch (NSException *d2) { lpDs = nil; }
-                                }
-                                if (lpDs != nil) lpSz = lpDs;
-                            }
-                            id lpU0 = nil;
-                            if ([lpUrls isKindOfClass:[NSArray class]] && [lpUrls count] > 0) lpU0 = [lpUrls firstObject];
-                            NSString *lpUprev = @"无";
-                            if (lpU0 != nil) lpUprev = [NSString stringWithFormat:@"%@", lpU0];
-                            if ([lpUprev length] > 80) lpUprev = [[lpUprev substringToIndex:80] stringByAppendingString:@"..."];
-                            [probeLog appendFormat:@"  [%d] gear=%@ qt=%@ size=%@ url=%@\n", lpIdx, lpG, lpQ, lpSz, lpUprev];
-                            lpIdx++;
-                        }
-                    } else if ([lpV isKindOfClass:[NSDictionary class]]) {
-                        [probeLog appendFormat:@"%@: dict keys=%@\n", lpK, [[lpV allKeys] componentsJoinedByString:@","]];
-                        id lpBr = [lpV objectForKey:@"bit_rate"];
-                        if ([lpBr isKindOfClass:[NSArray class]]) {
-                            [probeLog appendFormat:@"  bit_rate: %lu档\n", (unsigned long)[lpBr count]];
-                            int lpIdx2 = 0;
-                            for (id lpIt2 in lpBr) {
-                                if (lpIdx2 >= 8) {
-                                    [probeLog appendString:@"  ...(截断)\n"];
-                                    break;
-                                }
-                                if ([lpIt2 isKindOfClass:[NSDictionary class]]) {
-                                    id lpGear2 = [lpIt2 objectForKey:@"gear_name"];
-                                    id lpQt2 = [lpIt2 objectForKey:@"quality_type"];
-                                    id lpPa2 = [lpIt2 objectForKey:@"play_addr"];
-                                    id lpUrls2 = nil;
-                                    id lpDs2 = nil;
-                                    if ([lpPa2 isKindOfClass:[NSDictionary class]]) {
-                                        lpUrls2 = [lpPa2 objectForKey:@"url_list"];
-                                        lpDs2 = [lpPa2 objectForKey:@"data_size"];
-                                    }
-                                    id lpU02 = nil;
-                                    if ([lpUrls2 isKindOfClass:[NSArray class]] && [lpUrls2 count] > 0) lpU02 = [lpUrls2 firstObject];
-                                    NSString *lpUprev2 = @"无";
-                                    if (lpU02 != nil) lpUprev2 = [NSString stringWithFormat:@"%@", lpU02];
-                                    if ([lpUprev2 length] > 80) lpUprev2 = [[lpUprev2 substringToIndex:80] stringByAppendingString:@"..."];
-                                    [probeLog appendFormat:@"  [%d] gear=%@ qt=%@ size=%@ url=%@\n", lpIdx2, lpGear2, lpQt2, lpDs2, lpUprev2];
-                                }
-                                lpIdx2++;
-                            }
-                        } else {
-                            [probeLog appendFormat:@"  bit_rate=%@\n", lpBr];
-                        }
-                    } else if ([lpV isKindOfClass:[NSString class]]) {
-                        NSString *lpSprev = lpV;
-                        if ([lpSprev length] > 120) lpSprev = [[lpSprev substringToIndex:120] stringByAppendingString:@"..."];
-                        [probeLog appendFormat:@"%@: %@\n", lpK, lpSprev];
-                    } else if ([lpV isKindOfClass:[NSData class]]) {
-                        NSString *lpS2 = [[NSString alloc] initWithData:lpV encoding:NSUTF8StringEncoding];
-                        if ([lpS2 length] > 300) lpS2 = [[lpS2 substringToIndex:300] stringByAppendingString:@"..."];
-                        [probeLog appendFormat:@"%@: data=%@\n", lpK, lpS2];
-                    } else {
-                        [probeLog appendFormat:@"%@: <%@>\n", lpK, [lpV class]];
-                    }
-                }
-            } else {
-                [probeLog appendString:@"video对象为空\n"];
-            }
-            [[NSNotificationCenter defaultCenter] postNotificationName:@"DYYYProbeNotification" object:nil userInfo:@{@"text": [probeLog copy]}];
-        }
-
         // Step 0: Cookie预热——GET www.douyin.com刷新web Cookie，确保msToken等不过期
         {
             NSMutableURLRequest *warmupReq = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:@"https://www.douyin.com/"]];
@@ -3978,17 +3755,6 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
             [probeLog appendFormat:@"  %@=%@ (domain=%@)\n", [c name], valPreview, [c domain]];
         }
         [probeLog appendFormat:@"ttwid=%@\n", ttwidStr.length > 0 ? @"有" : @"无"];
-        // 自定义Cookie优先（设置-接口4Cookie：电脑浏览器douyin.com完整Cookie，风控更稳）
-        NSString *customCookie = [[NSUserDefaults standardUserDefaults] stringForKey:@"DYYYLocalParseCookie"];
-        if (customCookie.length > 20) {
-            fullCookieStr = [NSMutableString stringWithString:customCookie];
-            ttwidStr = nil;
-            for (NSString *pair in [customCookie componentsSeparatedByString:@";"]) {
-                NSString *t = [pair stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
-                if ([t hasPrefix:@"ttwid="]) ttwidStr = [t substringFromIndex:6];
-            }
-            [probeLog appendFormat:@"[自定义Cookie生效] len=%lu ttwid=%@\n", (unsigned long)customCookie.length, ttwidStr.length > 0 ? @"已提取" : @"无(将自动注册)"];
-        }
         // 降级：如果没有ttwid，从注册接口获取并追加到cookie
         if (!ttwidStr || ttwidStr.length == 0) {
             NSString *ttwidURL = @"https://ttwid.bytedance.com/ttwid/union/register/";
@@ -4072,10 +3838,7 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
 
         // Step 2: web API（完整URL参数+浏览器指纹header+全Cookie，对齐JS规则）
         __block NSDictionary *awemeDetail = nil;
-        NSString *detailParams = [NSString stringWithFormat:@"aweme_id=%@&device_platform=webapp&aid=6383&channel=channel_pc_web&update_version_code=170400&pc_client_type=1&version_code=190500&version_name=19.5.0&cookie_enabled=true&screen_width=2560&screen_height=1440&browser_language=zh-CN&browser_platform=Win32&browser_name=Chrome&browser_version=150.0.0.0&browser_online=true&engine_name=Blink&engine_version=150.0.0.0&os_name=Windows&os_version=10&cpu_core_num=12&device_memory=8&platform=PC&downlink=4.75&effective_type=4g&round_trip_time=150", awemeId];
-        NSString *signUA = @"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36";
-        NSString *signedParams = [DYYYABogus signedQueryForParams:detailParams body:nil ua:signUA];
-        NSString *apiURL = [NSString stringWithFormat:@"https://www.douyin.com/aweme/v1/web/aweme/detail/?%@", signedParams ?: detailParams];
+        NSString *apiURL = [NSString stringWithFormat:@"https://www.douyin.com/aweme/v1/web/aweme/detail/?aweme_id=%@&device_platform=webapp&aid=6383&channel=channel_pc_web&update_version_code=170400&pc_client_type=1&version_code=190500&version_name=19.5.0&cookie_enabled=true&screen_width=2560&screen_height=1440&browser_language=zh-CN&browser_platform=Win32&browser_name=Chrome&browser_version=150.0.0.0&browser_online=true&engine_name=Blink&engine_version=150.0.0.0&os_name=Windows&os_version=10&cpu_core_num=12&device_memory=8&platform=PC&downlink=4.75&effective_type=4g&round_trip_time=150", awemeId];
         NSMutableURLRequest *apiReq = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:apiURL]];
         [apiReq setValue:@"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36" forHTTPHeaderField:@"User-Agent"];
         [apiReq setValue:@"https://www.douyin.com/" forHTTPHeaderField:@"Referer"];
@@ -4094,39 +3857,13 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
         [apiReq setValue:@"?1" forHTTPHeaderField:@"sec-fetch-user"];
         [apiReq setValue:@"1" forHTTPHeaderField:@"upgrade-insecure-requests"];
         [apiReq setValue:fullCookieStr forHTTPHeaderField:@"Cookie"];
-        // Argus风控要求uifid请求头（值取自Cookie中UIFID字段，抖音web端XHR均携带）
-        NSString *uifidVal = nil;
-        NSRange ur = [fullCookieStr rangeOfString:@"UIFID="];
-        if (ur.location != NSNotFound) {
-            NSUInteger us = ur.location + ur.length;
-            NSRange ueR = [fullCookieStr rangeOfString:@";" options:0 range:NSMakeRange(us, fullCookieStr.length - us)];
-            NSUInteger ue = (ueR.location == NSNotFound) ? fullCookieStr.length : ueR.location;
-            uifidVal = [fullCookieStr substringWithRange:NSMakeRange(us, ue - us)];
-        }
-        if (uifidVal.length > 10) {
-            [apiReq setValue:uifidVal forHTTPHeaderField:@"uifid"];
-            [probeLog appendFormat:@"[uifid请求头] len=%lu\n", (unsigned long)uifidVal.length];
-        } else {
-            [probeLog appendFormat:@"[uifid请求头] 未找到UIFID\n"];
-        }
         [probeLog appendFormat:@"\n[Step2 发送Cookie] len=%lu preview=%@...\n", (unsigned long)fullCookieStr.length, [fullCookieStr substringToIndex:MIN(120, fullCookieStr.length)]];
         dispatch_semaphore_t apiSem = dispatch_semaphore_create(0);
         NSURLSessionDataTask *apiTask = [[NSURLSession sharedSession] dataTaskWithRequest:apiReq completionHandler:^(NSData *apiData, NSURLResponse *apiResp, NSError *apiErr) {
             @try {
-                NSHTTPURLResponse *step2Http = (NSHTTPURLResponse *)apiResp;
-                [probeLog appendFormat:@"\n[Step2 WebAPI响应] HTTP %ld body=%lu字节\n", (long)(step2Http ? step2Http.statusCode : 0), (unsigned long)apiData.length];
-                NSDictionary *apiJson = apiData.length > 0 ? [NSJSONSerialization JSONObjectWithData:apiData options:0 error:nil] : nil;
-                if (!apiJson) {
-                    if (apiData.length == 0) {
-                        [probeLog appendFormat:@"\n[Step2 WebAPI响应]\n响应为空! error=%@\n", apiErr.localizedDescription];
-                    } else {
-                        NSString *rawBody = [[NSString alloc] initWithData:apiData encoding:NSUTF8StringEncoding];
-                        if (rawBody.length > 200) rawBody = [rawBody substringToIndex:200];
-                        if (rawBody.length == 0) rawBody = [NSString stringWithFormat:@"<非UTF8二进制 %lu字节>", (unsigned long)apiData.length];
-                        [probeLog appendFormat:@"\n[Step2 WebAPI响应]\n⚠️响应非JSON! body前200字:\n%@\n", rawBody];
-                    }
-                }
-                if ([apiJson isKindOfClass:[NSDictionary class]]) {
+                if (apiData.length > 0) {
+                    NSDictionary *apiJson = [NSJSONSerialization JSONObjectWithData:apiData options:0 error:nil];
+                    if ([apiJson isKindOfClass:[NSDictionary class]]) {
                         NSInteger statusCode = [apiJson[@"status_code"] integerValue];
                         if (statusCode == 0) awemeDetail = apiJson[@"aweme_detail"];
                         // 探针：web API响应
@@ -4155,6 +3892,9 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                             [probeLog appendFormat:@"error响应: %@\n", raw];
                         }
                     }
+                } else {
+                    [probeLog appendFormat:@"\n[Step2 WebAPI响应]\n响应为空! error=%@\n", apiErr.localizedDescription];
+                }
             } @catch (NSException *e) {}
             dispatch_semaphore_signal(apiSem);
         }];
@@ -4197,11 +3937,7 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                 NSMutableURLRequest *pageReq = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:pageURL]];
                 [pageReq setValue:@"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36" forHTTPHeaderField:@"User-Agent"];
                 [pageReq setValue:@"https://www.douyin.com/" forHTTPHeaderField:@"Referer"];
-                // 登录态页面不嵌视频数据(返回首页shell)，降级页必须用游客态Cookie(仅ttwid)
-                NSString *guestCookie = (ttwidStr.length > 0) ? [NSString stringWithFormat:@"ttwid=%@", ttwidStr] : @"ttwid=";
-                [pageReq setValue:guestCookie forHTTPHeaderField:@"Cookie"];
-                if (uifidVal.length > 10) [pageReq setValue:uifidVal forHTTPHeaderField:@"uifid"];
-                [probeLog appendFormat:@"游客Cookie len=%lu uifid头=%@\n", (unsigned long)guestCookie.length, (uifidVal.length > 10) ? @"有" : @"无"];
+                [pageReq setValue:fullCookieStr forHTTPHeaderField:@"Cookie"];
                 [pageReq setValue:@"text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8" forHTTPHeaderField:@"Accept"];
                 [pageReq setValue:@"zh-CN,zh;q=0.9" forHTTPHeaderField:@"Accept-Language"];
                 __block NSData *pageData = nil;
@@ -4242,66 +3978,16 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                             @try { detail = rj[@"app"][@"videoDetail"][@"aweme_detail"]; } @catch (NSException *e) {}
                             if (!detail || ![detail isKindOfClass:[NSDictionary class]]) { @try { detail = rj[@"42"][@"aweme_detail"]; } @catch (NSException *e) {} }
                             if (!detail || ![detail isKindOfClass:[NSDictionary class]]) { @try { detail = rj[@"app"][@"videoDetail"]; } @catch (NSException *e) {} }
-                            if (!detail || ![detail isKindOfClass:[NSDictionary class]]) {
-                                detail = [DYYYManager dyyyFindDetailDict:rj depth:0];
-                            }
                             if (detail && [detail isKindOfClass:[NSDictionary class]]) {
                                 awemeDetail = detail;
-                                [probeLog appendFormat:@"RENDER_DATA提取成功! keys=%@\n", [(NSDictionary *)detail allKeys]];
+                                [probeLog appendFormat:@"RENDER_DATA提取成功!\n"];
                             } else {
                                 // 打印顶层key辅助调试
-                                id appDict = nil; @try { appDict = rj[@"app"]; } @catch (NSException *e) {}
-                                [probeLog appendFormat:@"RENDER_DATA未找到aweme_detail, topKeys=%@ appKeys=%@\n", [rj allKeys], [appDict isKindOfClass:[NSDictionary class]] ? [(NSDictionary *)appDict allKeys] : @"无"];
+                                [probeLog appendFormat:@"RENDER_DATA未找到aweme_detail, topKeys=%@\n", [rj allKeys]];
                             }
                         }
                     } else {
                         [probeLog appendFormat:@"HTML中未找到RENDER_DATA\n"];
-                    }
-                }
-                // Step2.6: 分享页降级(iesdouyin游客SSR数据,无需签名,不受Argus拦截)
-                if (!awemeDetail || ![awemeDetail isKindOfClass:[NSDictionary class]]) {
-                    [probeLog appendFormat:@"\n[Step2.6 分享页降级] GET iesdouyin.com/share/video/%@\n", awemeId];
-                    NSString *shareURL = [NSString stringWithFormat:@"https://www.iesdouyin.com/share/video/%@", awemeId];
-                    NSMutableURLRequest *shareReq = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:shareURL]];
-                    [shareReq setValue:@"Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1" forHTTPHeaderField:@"User-Agent"];
-                    __block NSData *sData = nil;
-                    __block NSInteger sStatus = 0;
-                    dispatch_semaphore_t sSem = dispatch_semaphore_create(0);
-                    NSURLSessionDataTask *sTask = [[NSURLSession sharedSession] dataTaskWithRequest:shareReq completionHandler:^(NSData *sd, NSURLResponse *sr, NSError *se) {
-                        sData = sd;
-                        if (sr && [sr isKindOfClass:[NSHTTPURLResponse class]]) sStatus = [(NSHTTPURLResponse *)sr statusCode];
-                        dispatch_semaphore_signal(sSem);
-                    }];
-                    [sTask resume];
-                    dispatch_semaphore_wait(sSem, dispatch_time(DISPATCH_TIME_NOW, 15 * NSEC_PER_SEC));
-                    [probeLog appendFormat:@"HTTP %ld body=%lu\n", (long)sStatus, (unsigned long)(sData ? sData.length : 0)];
-                    if (sData && sStatus == 200) {
-                        NSString *sh = [[NSString alloc] initWithData:sData encoding:NSUTF8StringEncoding];
-                        NSRange rStart = [sh rangeOfString:@"window._ROUTER_DATA"];
-                        if (rStart.location != NSNotFound) {
-                            NSRange eq = [sh rangeOfString:@"=" options:0 range:NSMakeRange(rStart.location, sh.length - rStart.location)];
-                            if (eq.location != NSNotFound) {
-                                NSRange endTag = [sh rangeOfString:@"</script>" options:0 range:NSMakeRange(eq.location, sh.length - eq.location)];
-                                if (endTag.location != NSNotFound) {
-                                    NSUInteger js = eq.location + 1;
-                                    NSUInteger jl = endTag.location - js;
-                                    NSString *jsonStr = [[sh substringWithRange:NSMakeRange(js, jl)] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-                                    if ([jsonStr hasSuffix:@";"]) jsonStr = [jsonStr substringToIndex:jsonStr.length - 1];
-                                    NSDictionary *rdj = [NSJSONSerialization JSONObjectWithData:[jsonStr dataUsingEncoding:NSUTF8StringEncoding] options:0 error:nil];
-                                    id item = [DYYYManager dyyyFindItemList:rdj depth:0];
-                                    if (item && [item isKindOfClass:[NSDictionary class]]) {
-                                        awemeDetail = item;
-                                        [probeLog appendFormat:@"分享页提取成功! video keys=%@\n", [item[@"video"] allKeys]];
-                                    } else {
-                                        id loader = nil; @try { loader = rdj[@"loaderData"]; } @catch (NSException *e) {}
-                                        NSString *snip = (jsonStr.length > 1200) ? [jsonStr substringToIndex:1200] : jsonStr;
-                                        [probeLog appendFormat:@"_ROUTER_DATA无item_list topKeys=%@ loaderKeys=%@\nROUTER前1200字:\n%@\n", [rdj allKeys], [loader isKindOfClass:[NSDictionary class]] ? [(NSDictionary *)loader allKeys] : @"无", snip];
-                                    }
-                                }
-                            }
-                        } else {
-                            [probeLog appendFormat:@"分享页无_ROUTER_DATA\n"];
-                        }
                     }
                 }
                 // 页面降级也失败 → 直接失败（无本地解析保底）
