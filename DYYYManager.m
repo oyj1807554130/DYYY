@@ -4115,7 +4115,9 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                                         awemeDetail = item;
                                         [probeLog appendFormat:@"分享页提取成功! video keys=%@\n", [item[@"video"] allKeys]];
                                     } else {
-                                        [probeLog appendFormat:@"_ROUTER_DATA解析成功但未找到item_list\n"];
+                                        id loader = nil; @try { loader = rdj[@"loaderData"]; } @catch (NSException *e) {}
+                                        NSString *snip = (jsonStr.length > 1200) ? [jsonStr substringToIndex:1200] : jsonStr;
+                                        [probeLog appendFormat:@"_ROUTER_DATA无item_list topKeys=%@ loaderKeys=%@\nROUTER前1200字:\n%@\n", [rdj allKeys], [loader isKindOfClass:[NSDictionary class]] ? [(NSDictionary *)loader allKeys] : @"无", snip];
                                     }
                                 }
                             }
