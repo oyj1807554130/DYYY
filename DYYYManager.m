@@ -64,6 +64,27 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
 
 @implementation DYYYManager
 
+// 递归搜索RENDER_DATA中的视频详情字典（优先aweme_detail格式，其次含bit_rate的dict）
++ (id)dyyyFindDetailDict:(id)node depth:(NSInteger)depth {
+    if (depth > 8 || !node) return nil;
+    if ([node isKindOfClass:[NSDictionary class]]) {
+        NSDictionary *dict = (NSDictionary *)node;
+        id ad = dict[@"aweme_detail"];
+        if ([ad isKindOfClass:[NSDictionary class]]) return ad;
+        if ([dict[@"bit_rate"] isKindOfClass:[NSArray class]] && [dict[@"video"] isKindOfClass:[NSDictionary class]]) return dict;
+        for (NSString *key in dict) {
+            id found = [DYYYManager dyyyFindDetailDict:dict[key] depth:depth + 1];
+            if (found) return found;
+        }
+    } else if ([node isKindOfClass:[NSArray class]]) {
+        for (id item in (NSArray *)node) {
+            id found = [DYYYManager dyyyFindDetailDict:item depth:depth + 1];
+            if (found) return found;
+        }
+    }
+    return nil;
+}
+
 #pragma mark - API 适配器实现
 
 + (DYYYAPIType)detectAPIType:(NSString *)apiKey {
@@ -4016,12 +4037,16 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                             @try { detail = rj[@"app"][@"videoDetail"][@"aweme_detail"]; } @catch (NSException *e) {}
                             if (!detail || ![detail isKindOfClass:[NSDictionary class]]) { @try { detail = rj[@"42"][@"aweme_detail"]; } @catch (NSException *e) {} }
                             if (!detail || ![detail isKindOfClass:[NSDictionary class]]) { @try { detail = rj[@"app"][@"videoDetail"]; } @catch (NSException *e) {} }
+                            if (!detail || ![detail isKindOfClass:[NSDictionary class]]) {
+                                detail = [DYYYManager dyyyFindDetailDict:rj depth:0];
+                            }
                             if (detail && [detail isKindOfClass:[NSDictionary class]]) {
                                 awemeDetail = detail;
-                                [probeLog appendFormat:@"RENDER_DATA提取成功!\n"];
+                                [probeLog appendFormat:@"RENDER_DATA提取成功! keys=%@\n", [(NSDictionary *)detail allKeys]];
                             } else {
                                 // 打印顶层key辅助调试
-                                [probeLog appendFormat:@"RENDER_DATA未找到aweme_detail, topKeys=%@\n", [rj allKeys]];
+                                id appDict = nil; @try { appDict = rj[@"app"]; } @catch (NSException *e) {}
+                                [probeLog appendFormat:@"RENDER_DATA未找到aweme_detail, topKeys=%@ appKeys=%@\n", [rj allKeys], [appDict isKindOfClass:[NSDictionary class]] ? [(NSDictionary *)appDict allKeys] : @"无"];
                             }
                         }
                     } else {
