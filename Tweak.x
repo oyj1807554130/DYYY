@@ -94,6 +94,7 @@ static long dy4kNTMOk = 0;         // Web主动请求成功入库次数
 static NSString *dy4kLastErr = nil; // 最近一次主动路失败原因
 static long dy4kURLHit = 0;        // v1.6 URLSession拦截命中入库次数
 static NSMutableArray *dy4kMonPaths = nil; // Monitor响应URL path样本
+static NSMutableArray *dy4kURLPaths = nil; // v1.8: NSURLSession(系统会话)请求path样本
 static NSMutableArray *dy4kMonHex = nil;   // Monitor响应body头部hex(判压缩)
 // v1.5 自适应诊断
 static NSMutableArray *dy4kFoundCls = nil;   // 运行时发现的相关类名
@@ -318,7 +319,7 @@ static void DY4KInspectResponse(NSDictionary *userInfo) {
         if (![data isKindOfClass:[NSData class]]) return;
         // v1.6 诊断: 记录path样本与body头部hex(判断是否压缩)
         @synchronized (dy4kMonPaths) {
-            if (dy4kMonPaths.count < 8) {
+            if (dy4kMonPaths.count < 40) {
                 NSString *pth = @"";
                 @try {
                     id r0 = [req valueForKey:@"request"];
@@ -332,7 +333,7 @@ static void DY4KInspectResponse(NSDictionary *userInfo) {
             }
         }
         @synchronized (dy4kMonHex) {
-            if (dy4kMonHex.count < 4 && data.length >= 8) {
+            if (dy4kMonHex.count < 8 && data.length >= 2000) {
                 const uint8_t *b = (const uint8_t *)data.bytes;
                 [dy4kMonHex addObject:[NSString stringWithFormat:@"%02x%02x%02x%02x%02x%02x%02x%02x", b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]]];
             }
@@ -562,6 +563,33 @@ static NSString *DY4KDigCurrentAid(NSString **outDesc, NSString **outAuthor) {
     return nil;
 }
 
+// v1.8: body前120字节预览(可打印显示文本, 否则hex) — 看清风控页真容
+static NSString *DY4KBodyPreview(NSData *d) {
+    if (!d.length) return @"empty";
+    NSUInteger n = d.length < 120 ? d.length : 120;
+    const uint8_t *b = (const uint8_t *)d.bytes;
+    NSUInteger printable = 0;
+    for (NSUInteger i = 0; i < n; i++) if (b[i] >= 0x20 && b[i] <= 0x7e) printable++;
+    if (printable * 10 >= n * 9) {
+        NSString *t = [[NSString alloc] initWithData:[d subdataWithRange:NSMakeRange(0, n)] encoding:NSASCIIStringEncoding];
+        return t ? [t stringByReplacingOccurrencesOfString:@"\n" withString:@" "] : @"?";
+    }
+    NSMutableString *h = [NSMutableString string];
+    NSUInteger hn = n < 32 ? n : 32;
+    for (NSUInteger i = 0; i < hn; i++) [h appendFormat:@"%02x", b[i]];
+    return h;
+}
+
+// v1.8: 记录系统会话请求path样本(确认feed是否走NSURLSession)
+static void DY4KRecordURLPath(NSString *u) {
+    if (dy4kURLPaths == nil || u.length == 0) return;
+    NSString *p = [NSURL URLWithString:u].path;
+    if (p.length == 0) return;
+    @synchronized (dy4kURLPaths) {
+        if (dy4kURLPaths.count < 12 && ![dy4kURLPaths containsObject:p]) [dy4kURLPaths addObject:p];
+    }
+}
+
 // v1.6 Web主动路(探针已验证: APP内带Cookie直发 www.douyin.com Web detail, 无需签名, 全档含4K)
 static NSString *DY4KCollectCookies(void) {
     NSMutableString *s = [NSMutableString string];
@@ -651,8 +679,10 @@ static void DY4KFetchDetailWeb(NSString *aid, void (^done)(BOOL ok)) {
                 [req setValue:ck forHTTPHeaderField:@"Cookie"];
                 req.timeoutInterval = 15;
                 dispatch_semaphore_t sem = dispatch_semaphore_create(0);
-                NSURLSessionDataTask *ask = [[NSURLSession sharedSession] dataTaskWithRequest:req completionHandler:^(NSData *d, __unused NSURLResponse *r, NSError *e) {
+                NSURLSessionDataTask *ask = [[NSURLSession sharedSession] dataTaskWithRequest:req completionHandler:^(NSData *d, NSURLResponse *r, NSError *e) {
                     @try {
+                        long scode = 0;
+                        if ([r isKindOfClass:[NSHTTPURLResponse class]]) scode = ((NSHTTPURLResponse *)r).statusCode;
                         if (d.length > 0) {
                             NSDictionary *j = [NSJSONSerialization JSONObjectWithData:d options:0 error:nil];
                             if ([j isKindOfClass:[NSDictionary class]]) {
@@ -670,10 +700,10 @@ static void DY4KFetchDetailWeb(NSString *aid, void (^done)(BOOL ok)) {
                                     @synchronized (dy4kMonNames) { dy4kLastErr = [NSString stringWithFormat:@"status_code=%@", j[@"status_code"]]; }
                                 }
                             } else {
-                                @synchronized (dy4kMonNames) { dy4kLastErr = @"响应非JSON"; }
+                                @synchronized (dy4kMonNames) { dy4kLastErr = [NSString stringWithFormat:@"响应非JSON HTTP%ld body=%@", scode, DY4KBodyPreview(d)]; }
                             }
                         } else {
-                            @synchronized (dy4kMonNames) { dy4kLastErr = e ? [NSString stringWithFormat:@"HTTP错误:%@", e.localizedDescription] : @"空响应"; }
+                            @synchronized (dy4kMonNames) { dy4kLastErr = e ? [NSString stringWithFormat:@"HTTP错误:%@", e.localizedDescription] : [NSString stringWithFormat:@"空响应 HTTP%ld", scode]; }
                         }
                     } @catch (NSException *ex) {}
                     dispatch_semaphore_signal(sem);
@@ -703,6 +733,11 @@ static void DY4KShowDiag(void) {
     @synchronized (dy4kMonNames) { lastErr = dy4kLastErr; }
     [msg appendFormat:@"\n主动路错误:%@", lastErr ?: @"无"];
     [msg appendFormat:@"\nURL拦截入库:%ld", dy4kURLHit];
+    NSString *upLst = nil;
+    @synchronized (dy4kURLPaths) {
+        if (dy4kURLPaths.count > 0) upLst = [dy4kURLPaths componentsJoinedByString:@", "];
+    }
+    [msg appendFormat:@"\nURL会话样本:%@", upLst ?: @"无"];
     NSString *pthLst = nil;
     NSString *hexLst = nil;
     @synchronized (dy4kMonPaths) {
@@ -727,7 +762,7 @@ static void DY4KShowDiag(void) {
     }
     @synchronized (dy4kNTMMethods) {
         if (dy4kNTMMethods.count > 0) {
-            NSArray *part = [dy4kNTMMethods subarrayWithRange:NSMakeRange(0, MIN((unsigned long)10, dy4kNTMMethods.count))];
+            NSArray *part = [dy4kNTMMethods subarrayWithRange:NSMakeRange(0, MIN((unsigned long)24, dy4kNTMMethods.count))];
             ntmLst = [part componentsJoinedByString:@", "];
         }
     }
@@ -1123,6 +1158,38 @@ static void DY4KProbeNTM(void) {
     @synchronized (dy4kNTMMethods) { [dy4kNTMMethods addObjectsFromArray:names]; }
 }
 
+// v1.8: 探测TTNet响应filter链(getResponseMutableDataFilterObjects=解压后明文, 下一步注册filter的路标)
+static void DY4KProbeFilters(void) {
+    Class ntm = NSClassFromString(@"TTNetworkManager");
+    if (!ntm) return;
+    id mgr = nil;
+    SEL s1 = NSSelectorFromString(@"sharedManager");
+    SEL s2 = NSSelectorFromString(@"sharedInstance");
+    if ([ntm respondsToSelector:s1]) mgr = ((id (*)(id, SEL))objc_msgSend)(ntm, s1);
+    else if ([ntm respondsToSelector:s2]) mgr = ((id (*)(id, SEL))objc_msgSend)(ntm, s2);
+    if (!mgr) {
+        @synchronized (dy4kNTMMethods) { [dy4kNTMMethods addObject:@"FLT:无实例"]; }
+        return;
+    }
+    SEL sf = NSSelectorFromString(@"getResponseMutableDataFilterObjects");
+    if (![mgr respondsToSelector:sf]) {
+        @synchronized (dy4kNTMMethods) { [dy4kNTMMethods addObject:@"FLT:无方法"]; }
+        return;
+    }
+    @try {
+        NSArray *arr = ((NSArray *(*)(id, SEL))objc_msgSend)(mgr, sf);
+        NSMutableArray *names = [NSMutableArray array];
+        [names addObject:[NSString stringWithFormat:@"FLT:共%lu个", (unsigned long)arr.count]];
+        for (id f in arr) {
+            if (names.count >= 9) break;
+            [names addObject:[@"FLT:" stringByAppendingString:NSStringFromClass([f class])]];
+        }
+        @synchronized (dy4kNTMMethods) { [dy4kNTMMethods addObjectsFromArray:names]; }
+    } @catch (NSException *e) {
+        @synchronized (dy4kNTMMethods) { [dy4kNTMMethods addObject:@"FLT:异常"]; }
+    }
+}
+
 // v1.7: 抖音API域过滤(feed流量在snssdk/amemv/zijieapi等域, 只match douyin会全漏)
 static BOOL DY4KIsAPIURL(NSString *u) {
     if (u.length == 0) return NO;
@@ -1140,6 +1207,7 @@ static BOOL DY4KIsAPIURL(NSString *u) {
 - (NSURLSessionDataTask *)dy4k_dataTaskWithRequest:(NSURLRequest *)request completionHandler:(void (^)(NSData *, NSURLResponse *, NSError *))handler {
     void (^wrapped)(NSData *, NSURLResponse *, NSError *) = handler;
     NSString *u = request.URL.absoluteString;
+    @try { if (u.length > 0) DY4KRecordURLPath(u); } @catch (__unused NSException *e9) {}
     if (handler && u.length > 0 && DY4KIsAPIURL(u)) {
         NSString *ourl = [u copy];
         wrapped = ^(NSData *d, NSURLResponse *r, NSError *e) {
@@ -1155,6 +1223,7 @@ static BOOL DY4KIsAPIURL(NSString *u) {
 - (NSURLSessionDataTask *)dy4k_dataTaskWithURL:(NSURL *)url completionHandler:(void (^)(NSData *, NSURLResponse *, NSError *))handler {
     void (^wrapped)(NSData *, NSURLResponse *, NSError *) = handler;
     NSString *u = url.absoluteString;
+    @try { if (u.length > 0) DY4KRecordURLPath(u); } @catch (__unused NSException *e9) {}
     if (handler && u.length > 0 && DY4KIsAPIURL(u)) {
         NSString *ourl = [u copy];
         wrapped = ^(NSData *d, NSURLResponse *r, NSError *e) {
@@ -1178,6 +1247,7 @@ static BOOL DY4KIsAPIURL(NSString *u) {
         dy4kNTMMethods = [NSMutableArray array];
         dy4kOldImps = [NSMutableDictionary dictionary];
         dy4kMonPaths = [NSMutableArray array];
+        dy4kURLPaths = [NSMutableArray array];
         dy4kMonHex = [NSMutableArray array];
         dy4kAllObs = [[NSNotificationCenter defaultCenter] addObserverForName:nil object:nil queue:nil usingBlock:^(NSNotification *note) {
             @try {
@@ -1216,6 +1286,7 @@ static BOOL DY4KIsAPIURL(NSString *u) {
             DY4KScanClasses();
             DY4KSwizzleWide();
             DY4KProbeNTM();
+            DY4KProbeFilters();
         });
     }
 }
