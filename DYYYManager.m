@@ -5038,11 +5038,38 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
         [DYYYUtils showToast:@"无法获取分享链接"];
         return;
     }
+    NSDictionary *cached = [self dyyyTikHubCacheGet:shareLink];
+    if (cached) {
+        [DYYYUtils showToast:@"接口5缓存命中"];
+        [self handleVideoData:cached];
+        return;
+    }
+    [self dyyyTikHubFetch:shareLink retryCount:retryCount silent:NO handler:^(NSDictionary *result, NSString *errMsg) {
+        if (result) {
+            [self dyyyTikHubCacheStore:shareLink data:result];
+            [self handleVideoData:result];
+        } else if (errMsg.length > 0) {
+            [DYYYUtils showToast:errMsg];
+        }
+    }];
+}
+
++ (void)dyyyPrewarmTikHub:(NSString *)shareLink {
+    if (shareLink.length == 0) return;
+    if ([self dyyyTikHubCacheGet:shareLink]) return;
+    [self dyyyTikHubFetch:shareLink retryCount:0 silent:YES handler:^(NSDictionary *result, NSString *errMsg) {
+        if (result) [self dyyyTikHubCacheStore:shareLink data:result];
+        // 静默预热：失败不打扰用户
+    }];
+}
+
++ (void)dyyyTikHubFetch:(NSString *)shareLink retryCount:(NSInteger)retryCount silent:(BOOL)silent handler:(void(^)(NSDictionary *result, NSString *errMsg))handler {
     NSString *encoded = [shareLink stringByAddingPercentEncodingWithAllowedCharacters:[NSCharacterSet URLQueryAllowedCharacterSet]];
     NSString *hybridUrlStr = [NSString stringWithFormat:@"https://api.tikhub.dev/api/v1/hybrid/video_data?url=%@&minimal=false", encoded];
     NSURL *hybridURL = [NSURL URLWithString:hybridUrlStr];
     if (!hybridURL) {
-        [DYYYUtils showToast:@"接口5请求构造失败"];
+        if (!silent) [DYYYUtils showToast:@"接口5请求构造失败"];
+        handler(nil, nil);
         return;
     }
     NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:hybridURL];
@@ -5057,19 +5084,21 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                 NSHTTPURLResponse *httpResponse = (NSHTTPURLResponse *)response;
                 if ([httpResponse isKindOfClass:[NSHTTPURLResponse class]] && httpResponse.statusCode >= 400) {
                     if (retryCount < 2) {
-                        [DYYYUtils showToast:[NSString stringWithFormat:@"接口5返回错误(%ld)，正在重试...", (long)httpResponse.statusCode]];
-                        [self parseAndDownloadVideoViaTikHub:shareLink retryCount:retryCount + 1];
+                        if (!silent) [DYYYUtils showToast:[NSString stringWithFormat:@"接口5返回错误(%ld)，正在重试...", (long)httpResponse.statusCode]];
+                        [self dyyyTikHubFetch:shareLink retryCount:retryCount + 1 silent:silent handler:handler];
                     } else {
-                        [DYYYUtils showToast:[NSString stringWithFormat:@"接口5请求失败(HTTP %ld)，检查网络或Key", (long)httpResponse.statusCode]];
+                        if (!silent) [DYYYUtils showToast:[NSString stringWithFormat:@"接口5请求失败(HTTP %ld)，检查网络或Key", (long)httpResponse.statusCode]];
+                        handler(nil, nil);
                     }
                     return;
                 }
                 if (error || data.length == 0) {
                     if (retryCount < 2) {
-                        [DYYYUtils showToast:@"接口5请求失败，正在重试..."];
-                        [self parseAndDownloadVideoViaTikHub:shareLink retryCount:retryCount + 1];
+                        if (!silent) [DYYYUtils showToast:@"接口5请求失败，正在重试..."];
+                        [self dyyyTikHubFetch:shareLink retryCount:retryCount + 1 silent:silent handler:handler];
                     } else {
-                        [DYYYUtils showToast:@"接口5请求失败，请检查网络"];
+                        if (!silent) [DYYYUtils showToast:@"接口5请求失败，请检查网络"];
+                        handler(nil, nil);
                     }
                     return;
                 }
@@ -5077,34 +5106,79 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                 id jsonObj = [NSJSONSerialization JSONObjectWithData:data options:0 error:&jsonError];
                 if (jsonError || ![jsonObj isKindOfClass:[NSDictionary class]]) {
                     if (retryCount < 2) {
-                        [DYYYUtils showToast:@"接口5解析失败，正在重试..."];
-                        [self parseAndDownloadVideoViaTikHub:shareLink retryCount:retryCount + 1];
+                        if (!silent) [DYYYUtils showToast:@"接口5解析失败，正在重试..."];
+                        [self dyyyTikHubFetch:shareLink retryCount:retryCount + 1 silent:silent handler:handler];
                     } else {
-                        [DYYYUtils showToast:@"接口5解析返回数据失败"];
+                        if (!silent) [DYYYUtils showToast:@"接口5解析返回数据失败"];
+                        handler(nil, nil);
                     }
                     return;
                 }
                 NSDictionary *json = (NSDictionary *)jsonObj;
                 NSInteger code = [json[@"code"] integerValue];
                 if (code != 200 && code != 0) {
-                    [DYYYUtils showToast:[NSString stringWithFormat:@"接口5返回错误: %@", json[@"message_zh"] ?: json[@"message"] ?: json[@"msg"] ?: @"未知错误"]];
+                    if (!silent) [DYYYUtils showToast:[NSString stringWithFormat:@"接口5返回错误: %@", json[@"message_zh"] ?: json[@"message"] ?: json[@"msg"] ?: @"未知错误"]];
+                    handler(nil, nil);
                     return;
                 }
                 NSDictionary *dataDict = json[@"data"];
                 if (![dataDict isKindOfClass:[NSDictionary class]]) {
-                    [DYYYUtils showToast:@"接口5返回数据为空"];
+                    if (!silent) [DYYYUtils showToast:@"接口5返回数据为空"];
+                    handler(nil, nil);
                     return;
                 }
-                [self dyyyMergeTikHubData:dataDict];
+                [self dyyyMergeTikHubData:dataDict handler:^(NSDictionary *result) {
+                    if (result) {
+                        handler(result, nil);
+                    } else {
+                        handler(nil, nil); // merge 内部已 toast
+                    }
+                }];
             } @catch (NSException *e) {
                 NSLog(@"[DYYY] tikhub5 exception: %@", e);
-                [DYYYUtils showToast:@"接口5处理异常，请重试"];
+                if (!silent) [DYYYUtils showToast:@"接口5处理异常，请重试"];
+                handler(nil, nil);
             }
         });
     }] resume];
 }
 
-+ (void)dyyyMergeTikHubData:(NSDictionary *)data {
+static NSMutableDictionary *_dyyyTikHubResultCache = nil;
+
++ (void)dyyyTikHubCacheStore:(NSString *)key data:(NSDictionary *)data {
+    if (key.length == 0 || !data) return;
+    @synchronized (self) {
+        if (!_dyyyTikHubResultCache) _dyyyTikHubResultCache = [NSMutableDictionary dictionary];
+        _dyyyTikHubResultCache[key] = @{@"ts": @([[NSDate date] timeIntervalSince1970]), @"data": data};
+        if (_dyyyTikHubResultCache.count > 20) {
+            NSString *oldest = nil;
+            NSTimeInterval ot = 1e18;
+            for (NSString *k in _dyyyTikHubResultCache) {
+                NSTimeInterval t = [_dyyyTikHubResultCache[k][@"ts"] doubleValue];
+                if (t < ot) { ot = t; oldest = k; }
+            }
+            if (oldest) [_dyyyTikHubResultCache removeObjectForKey:oldest];
+        }
+    }
+}
+
++ (NSDictionary *)dyyyTikHubCacheGet:(NSString *)key {
+    if (key.length == 0) return nil;
+    @synchronized (self) {
+        if (!_dyyyTikHubResultCache) return nil;
+        NSDictionary *entry = _dyyyTikHubResultCache[key];
+        if (![entry isKindOfClass:[NSDictionary class]]) return nil;
+        NSTimeInterval ts = [entry[@"ts"] doubleValue];
+        if ([[NSDate date] timeIntervalSince1970] - ts > 1800) {
+            [_dyyyTikHubResultCache removeObjectForKey:key];
+            return nil;
+        }
+        NSDictionary *d = entry[@"data"];
+        return [d isKindOfClass:[NSDictionary class]] ? d : nil;
+    }
+}
+
++ (void)dyyyMergeTikHubData:(NSDictionary *)data handler:(void(^)(NSDictionary *result))handler {
     NSString *awemeId = [NSString stringWithFormat:@"%@", data[@"aweme_id"] ?: @""];
     NSMutableArray *videoList = [NSMutableArray array];
     NSMutableArray *imageArr = [NSMutableArray array];
@@ -5263,6 +5337,7 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                     if (ra > rb) return (NSComparisonResult)NSOrderedAscending;
                     return (NSComparisonResult)NSOrderedSame;
                 }];
+                NSMutableArray *seenGears = [NSMutableArray array];
                 for (NSDictionary *br in sorted) {
                     if (![br isKindOfClass:[NSDictionary class]]) continue;
                     NSDictionary *pa = br[@"play_addr"];
@@ -5274,6 +5349,10 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                     NSInteger height = [(pa[@"height"] ?: @0) integerValue];
                     NSInteger shortSide = width < height ? width : height;
                     NSInteger fps = [(br[@"FPS"] ?: br[@"frame_rate"] ?: videoInfo[@"frame_rate"] ?: (id) @0) integerValue];
+                    // 同档位(分辨率+FPS)去重：sorted已按码率降序，每档只保留码率最高的一条
+                    NSString *gearKey = [NSString stringWithFormat:@"%ld_%ld", (long)shortSide, (long)fps];
+                    if ([seenGears containsObject:gearKey]) continue;
+                    [seenGears addObject:gearKey];
                     [videoList addObject:@{@"url": urls[0],
                                            @"level": [self dyyyQualityLabelForWidth:shortSide gearName:(br[@"gear_name"] ?: @"") fps:fps size:vsize],
                                            @"size": @(vsize)}];
@@ -5302,9 +5381,10 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
 
             if (result.count == 0) {
                 [DYYYUtils showToast:@"接口5未解析到可保存内容"];
+                handler(nil);
                 return;
             }
-            [self handleVideoData:result];
+            handler(result);
         } @catch (NSException *e) {
             NSLog(@"[DYYY] tikhub5 merge exception: %@", e);
             [DYYYUtils showToast:@"接口5数据处理异常"];

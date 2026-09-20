@@ -158,7 +158,11 @@
  */
 + (void)parseAndDownloadVideoWithShareLink:(NSString *)shareLink apiKey:(NSString *)apiKey retryCount:(NSInteger)retryCount;
 + (void)parseAndDownloadVideoViaTikHub:(NSString *)shareLink retryCount:(NSInteger)retryCount;
-+ (void)dyyyMergeTikHubData:(NSDictionary *)data;
++ (void)dyyyPrewarmTikHub:(NSString *)shareLink;
++ (void)dyyyTikHubFetch:(NSString *)shareLink retryCount:(NSInteger)retryCount silent:(BOOL)silent handler:(void(^)(NSDictionary *result, NSString *errMsg))handler;
++ (void)dyyyMergeTikHubData:(NSDictionary *)data handler:(void(^)(NSDictionary *result))handler;
++ (void)dyyyTikHubCacheStore:(NSString *)key data:(NSDictionary *)data;
++ (NSDictionary *)dyyyTikHubCacheGet:(NSString *)key;
 + (NSString *)dyyyTikHubKey;
 + (NSString *)dyyyQualityLabelForWidth:(NSInteger)width gearName:(NSString *)gearName fps:(NSInteger)fps size:(long long)sizeBytes;
 

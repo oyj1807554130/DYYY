@@ -661,6 +661,11 @@
         AWEAwemeModel *capturedAwemeModelTH = self.awemeModel;
         NSInteger capturedImageIndexTH = self.awemeModel.currentImageIndex;
         NSString *capturedShareLink5 = [capturedAwemeModelTH valueForKey:@"shareURL"];
+        // 面板弹出即后台预热解析（静默），点保存时大概率已完成，体感秒出
+        NSString *shareLinkForPrewarm5 = capturedShareLink5;
+        dispatch_async(dispatch_get_global_queue(0, 0), ^{
+            [DYYYManager dyyyPrewarmTikHub:shareLinkForPrewarm5];
+        });
         tikhubVM.action = ^{
           @try {
           [DYYYManager storeMetadataFromAwemeModel:capturedAwemeModelTH];
@@ -1775,6 +1780,11 @@
         AWEAwemeModel *capturedAwemeModelTH = self.awemeModel;
         NSInteger capturedImageIndexTH = self.awemeModel.currentImageIndex;
         NSString *capturedShareLink5 = [capturedAwemeModelTH valueForKey:@"shareURL"];
+        // 面板弹出即后台预热解析（静默），点保存时大概率已完成，体感秒出
+        NSString *shareLinkForPrewarm5 = capturedShareLink5;
+        dispatch_async(dispatch_get_global_queue(0, 0), ^{
+            [DYYYManager dyyyPrewarmTikHub:shareLinkForPrewarm5];
+        });
         tikhubVM.action = ^{
           @try {
           [DYYYManager storeMetadataFromAwemeModel:capturedAwemeModelTH];
