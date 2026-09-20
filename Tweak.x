@@ -1,11 +1,14 @@
 // DY4K - 独立抖音4K解析悬浮球 (不依赖DYYY)
-// 原理: 常驻监听 TTNet Monitor Finish 通知, 截获 App 原生响应JSON(feed/detail等,含全档bit_rate),
-//       按 aweme_id 缓存全档直链; 悬浮球点选画质 → 直连下载 → 存相册。
-//       全程零外部解析请求, 不碰签名/Argus。历史依据: DYYY dcf609e 已验证该通知可截获大JSON。
+// 原理: ①常驻监听 TTNet Monitor Finish 通知截获 App 原生响应JSON(含bit_rate);
+//       ②v1.3 runtime swizzle AWEDPlayerVideoModel setBitrateModels 被动截获播放码率模型;
+//       ③v1.4 主动路: 播放页挖 aweme_id → 用APP内 TTNetworkManager 主动发 detail 请求,
+//         请求走APP自身签名链路(Argus等自动注入), 服务端必认 → 全档画质主动到手。
+//       悬浮球点选画质 → 直连下载 → 存相册。零外部解析请求, 不碰签名/Argus。
 
 #import <UIKit/UIKit.h>
 #import <Photos/Photos.h>
 #import <objc/runtime.h>
+#import <objc/message.h>
 
 #pragma mark - 模型
 
@@ -84,6 +87,12 @@ static long dy4kBigHit = 0;
 static long dy4kBRHit = 0;
 static int dy4kSwizzled = 0;
 static NSMutableArray *dy4kMonNames = nil;
+// v1.4 主动路诊断
+static long dy4kDigHit = 0;        // 播放页挖到 aweme_id 次数
+static long dy4kNTMFired = 0;      // TTNetworkManager 请求发出次数
+static long dy4kNTMOk = 0;         // 请求成功且解析入库次数
+static NSString *dy4kNTMSel = nil; // 命中的 GET selector
+static NSString *dy4kLastErr = nil; // 最近一次主动路失败原因
 
 static NSArray<DY4KVideo *> *DY4KRecentVideos(void) {
     NSMutableArray<DY4KVideo *> *arr = [NSMutableArray array];
@@ -266,6 +275,34 @@ static void DY4KWalk(id node, NSString *pAid, NSString *pDesc, NSString *pAuthor
     }
 }
 
+// v1.4: 解析结果统一入库(通知路/主动路共用)
+static void DY4KAbsorb(NSDictionary<NSString *, DY4KVideo *> *acc) {
+    if (!acc.count) return;
+    @synchronized (dy4kCache) {
+        for (NSString *aid in acc) {
+            DY4KVideo *nv = acc[aid];
+            DY4KVideo *ov = dy4kCache[aid];
+            if (!ov) {
+                dy4kCache[aid] = nv;
+            } else {
+                for (DY4KGear *g in nv.gears) [ov mergeGear:g];
+                if (ov.desc.length == 0 && nv.desc.length > 0) ov.desc = nv.desc;
+                if (ov.author.length == 0 && nv.author.length > 0) ov.author = nv.author;
+                ov.time = nv.time;
+            }
+        }
+        // 上限清理: 只保留最近40条
+        if (dy4kCache.count > 40) {
+            NSArray *keys = [dy4kCache keysSortedByValueUsingComparator:^NSComparisonResult(DY4KVideo *a, DY4KVideo *b) {
+                if (a.time > b.time) return NSOrderedDescending;
+                if (a.time < b.time) return NSOrderedAscending;
+                return NSOrderedSame;
+            }];
+            for (NSUInteger i = 40; i < keys.count; i++) [dy4kCache removeObjectForKey:keys[i]];
+        }
+    }
+}
+
 static void DY4KInspectResponse(NSDictionary *userInfo) {
     @try {
         if (![userInfo isKindOfClass:[NSDictionary class]]) return;
@@ -279,30 +316,8 @@ static void DY4KInspectResponse(NSDictionary *userInfo) {
             @try {
                 NSMutableDictionary<NSString *, DY4KVideo *> *acc = [NSMutableDictionary dictionary];
                 DY4KWalk(json, nil, nil, nil, acc);
-                if (acc.count == 0) return;
                 dy4kBigHit += (long)acc.count;
-                @synchronized (dy4kCache) {
-                    for (NSString *aid in acc) {
-                        DY4KVideo *nv = acc[aid];
-                        DY4KVideo *ov = dy4kCache[aid];
-                        if (!ov) {
-                            dy4kCache[aid] = nv;
-                        } else {
-                            for (DY4KGear *g in nv.gears) [ov mergeGear:g];
-                            if (ov.desc.length == 0 && nv.desc.length > 0) ov.desc = nv.desc;
-                            if (ov.author.length == 0 && nv.author.length > 0) ov.author = nv.author;
-                            ov.time = nv.time;
-                        }
-                    }
-                    if (dy4kCache.count > 40) {
-                        NSArray *keys = [dy4kCache keysSortedByValueUsingComparator:^NSComparisonResult(DY4KVideo *a, DY4KVideo *b) {
-                            if (a.time > b.time) return NSOrderedDescending;
-                            if (a.time < b.time) return NSOrderedAscending;
-                            return NSOrderedSame;
-                        }];
-                        for (NSUInteger i = 40; i < keys.count; i++) [dy4kCache removeObjectForKey:keys[i]];
-                    }
-                }
+                DY4KAbsorb(acc);
             } @catch (NSException *e3) {}
         });
     } @catch (NSException *e) {}
@@ -430,6 +445,112 @@ static void DY4KAlert(NSString *msg, NSArray<UIAlertAction *> *actions) {
     [top presentViewController:ac animated:YES completion:nil];
 }
 
+// v1.4: 从当前播放页VC树挖当前视频 aweme_id (AWEPlayInteractionViewController.model.itemID)
+static NSString *DY4KDigCurrentAid(NSString **outDesc, NSString **outAuthor) {
+    UIViewController *top = DY4KTopVC();
+    if (!top) {
+        @synchronized (dy4kMonNames) { dy4kLastErr = @"无TopVC"; }
+        return nil;
+    }
+    NSMutableArray<UIViewController *> *queue = [NSMutableArray arrayWithObject:top];
+    int steps = 0;
+    while (queue.count > 0 && steps < 64) {
+        steps++;
+        UIViewController *vc = queue.firstObject;
+        [queue removeObjectAtIndex:0];
+        if (!vc) continue;
+        NSString *cls = NSStringFromClass([vc class]);
+        if ([cls containsString:@"PlayInteraction"] || [cls containsString:@"AwemeDetail"]) {
+            for (NSString *mk in @[@"model", @"awemeModel", @"currentAwemeModel"]) {
+                @try {
+                    id m = [vc valueForKey:mk];
+                    if (!m || [m isKindOfClass:[NSNull class]]) continue;
+                    id aid = [m valueForKey:@"itemID"];
+                    if (![aid isKindOfClass:[NSString class]] || [(NSString *)aid length] < 10) continue;
+                    dy4kDigHit++;
+                    if (outDesc) {
+                        id d = [m valueForKey:@"descriptionString"];
+                        if (![d isKindOfClass:[NSString class]] || [(NSString *)d length] == 0) d = [m valueForKey:@"itemTitle"];
+                        *outDesc = [d isKindOfClass:[NSString class]] ? d : nil;
+                    }
+                    if (outAuthor) {
+                        id au = [m valueForKeyPath:@"author.nickname"];
+                        *outAuthor = [au isKindOfClass:[NSString class]] ? au : nil;
+                    }
+                    return aid;
+                } @catch (NSException *e) {}
+            }
+        }
+        [queue addObjectsFromArray:vc.childViewControllers];
+        if (vc.presentedViewController) [queue addObject:vc.presentedViewController];
+    }
+    @synchronized (dy4kMonNames) { dy4kLastErr = @"未找到播放页VC"; }
+    return nil;
+}
+
+// v1.4: 用APP内TTNetworkManager主动发detail请求(走APP自身签名链路, Argus等自动注入, 服务端必认)
+static void DY4KFetchDetail(NSString *aid, void (^done)(BOOL ok)) {
+    dispatch_async(dy4kParseQueue, ^{
+        __block BOOL ok = NO;
+        @try {
+            Class ntm = NSClassFromString(@"TTNetworkManager");
+            id mgr = ntm ? [ntm performSelector:NSSelectorFromString(@"sharedManager")] : nil;
+            if (!mgr) {
+                @synchronized (dy4kMonNames) { dy4kLastErr = @"TTNetworkManager不可用"; }
+            } else {
+                SEL sels[2] = {NSSelectorFromString(@"GET:parameters:completionHandler:"), NSSelectorFromString(@"GET:parameters:headers:completionHandler:")};
+                SEL sel = nil;
+                for (int i = 0; i < 2; i++) {
+                    if ([mgr respondsToSelector:sels[i]]) {
+                        sel = sels[i];
+                        @synchronized (dy4kMonNames) { dy4kNTMSel = NSStringFromSelector(sels[i]); }
+                        break;
+                    }
+                }
+                if (!sel) {
+                    @synchronized (dy4kMonNames) { dy4kLastErr = @"无匹配GET方法"; }
+                } else {
+                    dy4kNTMFired++;
+                    NSString *url = [NSString stringWithFormat:@"https://api.snssdk.com/aweme/v1/feed/detail/?aweme_id=%@", aid];
+                    dispatch_semaphore_t sem = dispatch_semaphore_create(0);
+                    void (^handler)(id, NSError *) = ^(id data, NSError *err) {
+                        @try {
+                            NSDictionary *json = nil;
+                            if ([data isKindOfClass:[NSDictionary class]]) json = data;
+                            else if ([data isKindOfClass:[NSData class]]) json = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
+                            if (![json isKindOfClass:[NSDictionary class]]) {
+                                @synchronized (dy4kMonNames) { dy4kLastErr = err ? [NSString stringWithFormat:@"HTTP错误:%@", err.localizedDescription] : @"响应非JSON"; }
+                            } else {
+                                NSMutableDictionary<NSString *, DY4KVideo *> *acc = [NSMutableDictionary dictionary];
+                                DY4KWalk(json, nil, nil, nil, acc);
+                                DY4KAbsorb(acc);
+                                if (acc.count > 0) {
+                                    dy4kNTMOk++;
+                                    ok = YES;
+                                } else {
+                                    @synchronized (dy4kMonNames) { dy4kLastErr = @"响应无bit_rate"; }
+                                }
+                            }
+                        } @catch (NSException *e) {}
+                        dispatch_semaphore_signal(sem);
+                    };
+                    if (sel == sels[0]) {
+                        ((void (*)(id, SEL, NSString *, NSDictionary *, id))objc_msgSend)(mgr, sel, url, @{}, handler);
+                    } else {
+                        ((void (*)(id, SEL, NSString *, NSDictionary *, NSDictionary *, id))objc_msgSend)(mgr, sel, url, @{}, @{}, handler);
+                    }
+                    dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, 12LL * NSEC_PER_SEC));
+                }
+            }
+        } @catch (NSException *e) {
+            @synchronized (dy4kMonNames) { dy4kLastErr = e.reason ?: @"未知异常"; }
+        }
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (done) done(ok);
+        });
+    });
+}
+
 static void DY4KShowDiag(void) {
     NSMutableString *msg = [NSMutableString string];
     [msg appendFormat:@"通知总数:%ld", dy4kNotifCount];
@@ -437,6 +558,13 @@ static void DY4KShowDiag(void) {
     [msg appendFormat:@"\n大响应入库:%ld", dy4kBigHit];
     [msg appendFormat:@"\n码率模型:%ld", dy4kBRHit];
     [msg appendFormat:@"\nswizzle:%d", dy4kSwizzled];
+    [msg appendFormat:@"\n挖aid:%ld", dy4kDigHit];
+    [msg appendFormat:@"\n主动请求:%ld/%ld", dy4kNTMOk, dy4kNTMFired];
+    NSString *ntmSel = nil;
+    NSString *lastErr = nil;
+    @synchronized (dy4kMonNames) { ntmSel = dy4kNTMSel; lastErr = dy4kLastErr; }
+    if (ntmSel.length > 0) [msg appendFormat:@"\nGET方法:%@", ntmSel];
+    [msg appendFormat:@"\n主动路错误:%@", lastErr ?: @"无"];
     [msg appendFormat:@"\n缓存:%lu条", (unsigned long)dy4kCache.count];
     NSString *names = nil;
     @synchronized (dy4kMonNames) { names = [dy4kMonNames componentsJoinedByString:@", "]; }
@@ -506,7 +634,7 @@ static void DY4KShowQuality(DY4KVideo *v) {
     [top presentViewController:sheet animated:YES completion:nil];
 }
 
-static void DY4KShowMenu(void) {
+static void DY4KShowMenuLegacy(void) {
     NSArray<DY4KVideo *> *recent = DY4KRecentVideos();
     if (recent.count == 0) {
         DY4KAlert(@"暂无截获数据\n先在抖音刷一两个视频(滑动切换), 再点悬浮球", nil);
@@ -528,6 +656,44 @@ static void DY4KShowMenu(void) {
     }
     [pick addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
     [top presentViewController:pick animated:YES completion:nil];
+}
+
+// v1.4 入口: 先挖当前播放视频主动拉全档, 失败退回截获缓存
+static void DY4KShowMenu(void) {
+    NSString *aid = DY4KDigCurrentAid(nil, nil);
+    if (aid.length > 0) {
+        UIViewController *top = DY4KTopVC();
+        if (!top) return;
+        __block BOOL cancelled = NO;
+        UIAlertController *busy = [UIAlertController alertControllerWithTitle:@"DY4K 拉取全档画质中…" message:nil preferredStyle:UIAlertControllerStyleAlert];
+        [busy addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:^(__unused UIAlertAction *a) {
+            cancelled = YES;
+        }]];
+        [top presentViewController:busy animated:YES completion:nil];
+        DY4KFetchDetail(aid, ^(BOOL ok) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                if (cancelled) return;
+                [busy dismissViewControllerAnimated:NO completion:nil];
+                DY4KVideo *v = nil;
+                @synchronized (dy4kCache) { v = dy4kCache[aid]; }
+                if (v && v.gears.count > 0) {
+                    DY4KShowQuality(v);
+                    return;
+                }
+                NSString *err = nil;
+                @synchronized (dy4kMonNames) { err = dy4kLastErr; }
+                UIAlertController *info = [UIAlertController alertControllerWithTitle:nil message:[NSString stringWithFormat:@"主动请求未拿到档位(%@)\n\n可看已截获的缓存数据", err ?: @"超时"] preferredStyle:UIAlertControllerStyleAlert];
+                [info addAction:[UIAlertAction actionWithTitle:@"看缓存" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a) {
+                    DY4KShowMenuLegacy();
+                }]];
+                [info addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+                UIViewController *t2 = DY4KTopVC();
+                if (t2) [t2 presentViewController:info animated:YES completion:nil];
+            });
+        });
+        return;
+    }
+    DY4KShowMenuLegacy();
 }
 
 #pragma mark - 悬浮球
