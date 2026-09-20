@@ -4214,12 +4214,53 @@ static NSString *DYYYFetchAwemeDetailViaWebView(NSString *awemeId, NSMutableStri
                 dispatch_semaphore_wait(healApiSem, dispatch_time(DISPATCH_TIME_NOW, 15 * NSEC_PER_SEC));
                 [probeLog appendFormat:@"自愈重试结果: HTTP %ld status_code=%ld 成功=%@\n", (long)healHttpStatus, (long)healStatusCode, awemeDetail ? @"YES" : @"NO"];
             }
+            // ===== 2.2-30 feed兜底: App端v1/feed游客态免签名(不走Argus), WebAPI全灭时的稳定底层 =====
+            BOOL feedRescued = NO;
             if (!awemeDetail || ![awemeDetail isKindOfClass:[NSDictionary class]]) {
-                [probeLog appendFormat:@"\n[失败] 自愈重试仍失败\n"];
+                [probeLog appendFormat:@"\n[Step2.8 feed兜底] aweme.snssdk.com v1/feed 游客态\n"];
+                NSString *feedURL = [NSString stringWithFormat:@"https://aweme.snssdk.com/aweme/v1/feed/?aweme_id=%@&version_code=26.0.4&app_name=aweme&channel=App%%20Store&device_platform=iphone&device_type=iPhone15,3&os_version=18.0&aid=1128", awemeId];
+                NSMutableURLRequest *feedReq = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:feedURL]];
+                feedReq.timeoutInterval = 8;
+                [feedReq setValue:@"Aweme/260400 CFNetwork/1498 Darwin/23.0.0" forHTTPHeaderField:@"User-Agent"];
+                __block NSData *feedData = nil;
+                __block NSInteger feedStatus = 0;
+                dispatch_semaphore_t feedSem = dispatch_semaphore_create(0);
+                NSURLSessionDataTask *feedTask = [[NSURLSession sharedSession] dataTaskWithRequest:feedReq completionHandler:^(NSData *fd, NSURLResponse *fr, NSError *fe) {
+                    if ([fr isKindOfClass:[NSHTTPURLResponse class]]) feedStatus = [(NSHTTPURLResponse *)fr statusCode];
+                    feedData = fd;
+                    dispatch_semaphore_signal(feedSem);
+                }];
+                [feedTask resume];
+                dispatch_semaphore_wait(feedSem, dispatch_time(DISPATCH_TIME_NOW, 8 * NSEC_PER_SEC));
+                [probeLog appendFormat:@"feed响应: HTTP %ld body=%lu\n", (long)feedStatus, (unsigned long)feedData.length];
+                if (feedData.length > 1000) {
+                    @try {
+                        id fjson = [NSJSONSerialization JSONObjectWithData:feedData options:0 error:nil];
+                        id fitem = nil;
+                        if ([fjson isKindOfClass:[NSDictionary class]]) {
+                            NSArray *flist = fjson[@"aweme_list"];
+                            if ([flist isKindOfClass:[NSArray class]] && flist.count > 0) fitem = flist[0];
+                            if (!fitem) fitem = fjson[@"aweme_detail"];
+                        }
+                        NSDictionary *fvideo = [fitem isKindOfClass:[NSDictionary class]] ? fitem[@"video"] : nil;
+                        NSArray *fbr = [fvideo isKindOfClass:[NSDictionary class]] ? fvideo[@"bit_rate"] : nil;
+                        if ([fitem isKindOfClass:[NSDictionary class]] && [fbr isKindOfClass:[NSArray class]] && fbr.count > 0) {
+                            awemeDetail = fitem;
+                            feedRescued = YES;
+                            [probeLog appendFormat:@"[feed兜底成功] bit_rate %lu条 gears=%@\n", (unsigned long)fbr.count, [fbr valueForKeyPath:@"gear_name"]];
+                        } else {
+                            [probeLog appendFormat:@"feed无bit_rate数据\n"];
+                        }
+                    } @catch (NSException *fe2) { [probeLog appendFormat:@"feed解析异常: %@\n", fe2]; }
+                }
+            }
+            if (!awemeDetail || ![awemeDetail isKindOfClass:[NSDictionary class]]) {
+                [probeLog appendFormat:@"\n[失败] Step2+自愈+feed兜底全失败\n"];
                 [[NSNotificationCenter defaultCenter] postNotificationName:@"DYYYProbeNotification" object:nil userInfo:@{@"text": [probeLog copy]}];
                 if (completion) completion(nil);
                 return;
             }
+            if (feedRescued) [probeLog appendFormat:@"[feed救回] 本次画质来自App端feed接口\n"];
         }
         // Step 3: bit_rate全画质解析（JS规则）
         NSDictionary *videoObj = awemeDetail[@"video"] ?: @{};
