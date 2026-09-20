@@ -5050,7 +5050,7 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
     [request setValue:[NSString stringWithFormat:@"Bearer %@", [self dyyyTikHubKey]] forHTTPHeaderField:@"Authorization"];
     [request setValue:@"application/json" forHTTPHeaderField:@"Accept"];
 
-    [[NSURLSession sharedSession] dataTaskWithRequest:request
+    [[[NSURLSession sharedSession] dataTaskWithRequest:request
                                     completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
         dispatch_async(dispatch_get_main_queue(), ^{
             @try {
@@ -5192,7 +5192,7 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
             [webReq setValue:[NSString stringWithFormat:@"Bearer %@", [self dyyyTikHubKey]] forHTTPHeaderField:@"Authorization"];
             [webReq setValue:@"application/json" forHTTPHeaderField:@"Accept"];
             dispatch_group_enter(group);
-            [[NSURLSession sharedSession] dataTaskWithRequest:webReq completionHandler:^(NSData *d, NSURLResponse *r, NSError *e) {
+            [[[NSURLSession sharedSession] dataTaskWithRequest:webReq completionHandler:^(NSData *d, NSURLResponse *r, NSError *e) {
                 if (!e && d.length > 0) {
                     NSDictionary *j = [NSJSONSerialization JSONObjectWithData:d options:0 error:nil];
                     if ([j isKindOfClass:[NSDictionary class]] && [j[@"code"] integerValue] == 200) {
@@ -5206,7 +5206,7 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                     }
                 }
                 dispatch_group_leave(group);
-            }] resume;
+            }] resume];
         }
         // 请求3：原画
         NSString *originUrlStr = [NSString stringWithFormat:@"https://api.tikhub.dev/api/v1/douyin/app/v3/fetch_video_high_quality_play_url?aweme_id=%@&region=CN", awemeId];
@@ -5217,7 +5217,7 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
             [originReq setValue:[NSString stringWithFormat:@"Bearer %@", [self dyyyTikHubKey]] forHTTPHeaderField:@"Authorization"];
             [originReq setValue:@"application/json" forHTTPHeaderField:@"Accept"];
             dispatch_group_enter(group);
-            [[NSURLSession sharedSession] dataTaskWithRequest:originReq completionHandler:^(NSData *d, NSURLResponse *r, NSError *e) {
+            [[[NSURLSession sharedSession] dataTaskWithRequest:originReq completionHandler:^(NSData *d, NSURLResponse *r, NSError *e) {
                 if (!e && d.length > 0) {
                     NSDictionary *j = [NSJSONSerialization JSONObjectWithData:d options:0 error:nil];
                     if ([j isKindOfClass:[NSDictionary class]] && [j[@"code"] integerValue] == 200) {
@@ -5226,7 +5226,7 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                     }
                 }
                 dispatch_group_leave(group);
-            }] resume;
+            }] resume];
         }
     }
 
@@ -5257,8 +5257,8 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
             NSArray *bitRates = [videoInfo isKindOfClass:[NSDictionary class]] ? videoInfo[@"bit_rate"] : nil;
             if ([bitRates isKindOfClass:[NSArray class]] && bitRates.count > 0) {
                 NSArray *sorted = [bitRates sortedArrayUsingComparator:^NSComparisonResult(id a, id b) {
-                    NSInteger ra = [a isKindOfClass:[NSDictionary class]] ? [(NSDictionary *)a[@"bit_rate"] integerValue] : 0;
-                    NSInteger rb = [b isKindOfClass:[NSDictionary class]] ? [(NSDictionary *)b[@"bit_rate"] integerValue] : 0;
+                    NSInteger ra = [a isKindOfClass:[NSDictionary class]] ? [a[@"bit_rate"] integerValue] : 0;
+                    NSInteger rb = [b isKindOfClass:[NSDictionary class]] ? [b[@"bit_rate"] integerValue] : 0;
                     if (ra < rb) return (NSComparisonResult)NSOrderedDescending;
                     if (ra > rb) return (NSComparisonResult)NSOrderedAscending;
                     return (NSComparisonResult)NSOrderedSame;
