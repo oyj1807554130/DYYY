@@ -163,9 +163,15 @@ static NSString *DY4KFindURL(id node, int depth) {
 }
 
 // 竞品同款思路: 播放器设置码率模型时截获(运行时swizzle,不依赖通知)
-// v2.1 前向声明: 码率回调时同步挖真aid, 让缓存按视频分开
+// v2.1/v2.2 前向声明: 码率回调时同步挖真aid, 让缓存按视频分开
 static NSString *DY4KDigCurrentAid(NSString **outDesc, NSString **outAuthor, BOOL quiet);
-static void DY4KOnBitrateModels(id models) {
+static NSString *DY4KDigAidFromHolder(id holder, NSString **outDesc, NSString **outAuthor);
+// v2.2: 码率回调记录的"正在播放"视频(播放事实, 比BFS挖VC可靠)
+static NSString *dy4kPlayingAid = nil;
+static NSString *dy4kPlayingDesc = nil;
+static NSString *dy4kPlayingAuthor = nil;
+static double dy4kPlayingTime = 0;
+static void DY4KOnBitrateModels(id self, id models) {
     @try {
         if (!models) return;
         if ([models isKindOfClass:[NSDictionary class]]) models = [(NSDictionary *)models allValues];
@@ -196,9 +202,16 @@ static void DY4KOnBitrateModels(id models) {
             if (!best || g.bitrate > best.bitrate) best = g;
         }
         if (!best) return;
-        // v2.1: 回调时同步挖真aid+文案, 缓存按视频分开, 杜绝切视频还显示上一个
+        // v2.2: 优先从播放器self挖(真正在播), BFS TopVC可能命中预加载页
         NSString *dgDesc = nil, *dgAuthor = nil;
-        NSString *curAid = DY4KDigCurrentAid(&dgDesc, &dgAuthor, YES);
+        NSString *curAid = DY4KDigAidFromHolder(self, &dgDesc, &dgAuthor);
+        if (curAid.length < 10) curAid = DY4KDigCurrentAid(&dgDesc, &dgAuthor, YES);
+        @synchronized (dy4kMonNames) {
+            dy4kPlayingAid = curAid;
+            dy4kPlayingDesc = dgDesc;
+            dy4kPlayingAuthor = dgAuthor;
+            dy4kPlayingTime = [[NSDate date] timeIntervalSince1970];
+        }
         @synchronized (dy4kCache) {
             if (curAid.length >= 10 && ![curAid hasPrefix:@"__"]) {
                 DY4KVideo *v = dy4kCache[curAid];
@@ -560,6 +573,31 @@ static UIViewController *DY4KAppTopVC(void) {
 }
 
 // v1.4: 从当前播放页VC树挖当前视频 aweme_id (AWEPlayInteractionViewController.model.itemID)
+// v2.2: 从单个对象(播放器self等)挖当前aweme的aid+文案+作者
+static NSString *DY4KDigAidFromHolder(id holder, NSString **outDesc, NSString **outAuthor) {
+    if (!holder) return nil;
+    for (NSString *mk in @[@"model", @"awemeModel", @"currentAwemeModel", @"awemeDetailModel", @"itemModel", @"currentItem"]) {
+        @try {
+            id m = DY4KTryKVC(holder, mk);
+            if (!m || [m isKindOfClass:[NSNull class]] || [m isKindOfClass:[UIViewController class]] || [m isKindOfClass:[UIView class]]) continue;
+            id aid = DY4KTryKVC(m, @"itemID");
+            if (![aid isKindOfClass:[NSString class]] || [(NSString *)aid length] < 10) continue;
+            if (outDesc) {
+                id d = DY4KTryKVC(m, @"descriptionString");
+                if (![d isKindOfClass:[NSString class]] || [(NSString *)d length] == 0) d = DY4KTryKVC(m, @"itemTitle");
+                *outDesc = [d isKindOfClass:[NSString class]] ? d : nil;
+            }
+            if (outAuthor) {
+                id au0 = DY4KTryKVC(m, @"author");
+                id au = (au0 && ![au0 isKindOfClass:[NSString class]]) ? DY4KTryKVC(au0, @"nickname") : au0;
+                *outAuthor = [au isKindOfClass:[NSString class]] ? au : nil;
+            }
+            return aid;
+        } @catch (NSException *e) {}
+    }
+    return nil;
+}
+
 static NSString *DY4KDigCurrentAid(NSString **outDesc, NSString **outAuthor, BOOL quiet) {
     UIViewController *top = DY4KAppTopVC();
     if (!top) {
@@ -886,7 +924,19 @@ static void DY4KShowMenuLegacy(void) {
 // v1.4 入口: 先挖当前播放视频主动拉全档, 失败退回截获缓存
 static void DY4KShowMenu(void) {
     NSString *dgDesc = nil, *dgAuthor = nil;
-    NSString *aid = DY4KDigCurrentAid(&dgDesc, &dgAuthor, NO);
+    NSString *aid = nil;
+    // v2.2: 优先用码率回调记录的"正在播放"aid(60秒内), BFS挖VC model可能命中预加载页
+    NSString *pa = nil, *pd = nil, *pau = nil;
+    double pt = 0;
+    @synchronized (dy4kMonNames) { pa = dy4kPlayingAid; pd = dy4kPlayingDesc; pau = dy4kPlayingAuthor; pt = dy4kPlayingTime; }
+    if (pa.length >= 10 && ![pa hasPrefix:@"__"] && [[NSDate date] timeIntervalSince1970] - pt < 60) {
+        aid = pa;
+        dgDesc = pd;
+        dgAuthor = pau;
+    }
+    if (aid.length == 0) {
+        aid = DY4KDigCurrentAid(&dgDesc, &dgAuthor, NO);
+    }
     BOOL usedFallback = NO;
     if (aid.length == 0) {
         // v1.6: VC挖不到就用缓存里最近的真aid(URLSession拦截/feed响应入库的)
@@ -1075,7 +1125,7 @@ static id dy4kActiveObs = nil;
 
 // v1.5 广撒网统一IMP: 先截获, 再沿继承链找原实现调用
 static void dy4kWideHookIMP(id self, SEL _cmd, id models) {
-    DY4KOnBitrateModels(models);
+    DY4KOnBitrateModels(self, models);
     IMP old = NULL;
     @synchronized (dy4kOldImps) {
         Class c = object_getClass(self);
