@@ -3731,11 +3731,12 @@ static NSString *DYYYFetchAwemeDetailViaWebView(NSString *awemeId, NSMutableStri
             WKUserScript *fpScript = [[WKUserScript alloc] initWithSource:fpJS injectionTime:WKUserScriptInjectionTimeAtDocumentStart forMainFrameOnly:YES];
             [cfg.userContentController addUserScript:fpScript];
             // 2.2-24 API拦截: hook fetch/XHR, 页面自身调detail接口时截获响应体存入__dyDetailJSON; 同时记录所有请求URL到__dyReqLog(哨兵)
-            NSString *hookJS = @"(function(){"
+            NSString *hookJS = [NSString stringWithFormat:@"(function(){"
                                  @"try{if(window.__dyHookInstalled)return;}catch(e){}"
                                  @"window.__dyHookInstalled=true;window.__dyDetailJSON='';window.__dyReqLog=[];"
+                                 @"var __dyTarget='%@';"
                                  @"function isDetail(u){return u&&(u.indexOf('aweme/detail')>-1||u.indexOf('aweme_detail')>-1);}"
-                                 @"function save(t){try{if(t&&t.length>100&&t.indexOf('aweme_id')>-1&&!window.__dyDetailJSON)window.__dyDetailJSON=t;}catch(e){}}"
+                                 @"function save(t){try{if(!t||t.length<100)return;if(t.indexOf('aweme_detail')<0)return;if(__dyTarget&&t.indexOf(__dyTarget)<0)return;if(!window.__dyDetailJSON)window.__dyDetailJSON=t;}catch(e){}}"
                                  @"function logReq(u){try{if(u&&window.__dyReqLog.length<50)window.__dyReqLog.push(''+u);}catch(e){}}"
                                  @"var of=window.fetch;"
                                  @"if(of){window.fetch=function(){"
@@ -3750,7 +3751,7 @@ static NSString *DYYYFetchAwemeDetailViaWebView(NSString *awemeId, NSMutableStri
                                  @"XMLHttpRequest.prototype.send=function(){var x=this;try{logReq(x.__dyUrl);}catch(e){}"
                                  @"x.addEventListener('load',function(){try{if(isDetail(x.__dyUrl))save(x.responseText);}catch(e){}});"
                                  @"return os.apply(this,arguments);};"
-                                 @"})();";
+                                 @"})();", awemeId];
             WKUserScript *hookScript = [[WKUserScript alloc] initWithSource:hookJS injectionTime:WKUserScriptInjectionTimeAtDocumentStart forMainFrameOnly:NO];
             [cfg.userContentController addUserScript:hookScript];
             // 加载阶段用桌面视口大frame, 模拟真实桌面窗口宽度
@@ -4191,6 +4192,7 @@ static NSString *DYYYFetchAwemeDetailViaWebView(NSString *awemeId, NSMutableStri
                 }
             }
 
+            BOOL rescuedViaJSON = NO;
             if (!awemeDetail || ![awemeDetail isKindOfClass:[NSDictionary class]]) {
                 // 2.2-24: RENDER_DATA已判死(SSR只含环境配置无视频详情,appKeys实锤), 改为WKWebView拦截页面自身detail API
                 if (!awemeDetail || ![awemeDetail isKindOfClass:[NSDictionary class]]) {
@@ -4203,12 +4205,53 @@ static NSString *DYYYFetchAwemeDetailViaWebView(NSString *awemeId, NSMutableStri
                             if (![rd isKindOfClass:[NSDictionary class]]) rd = rj[@"data"][@"aweme_detail"];
                             if (![rd isKindOfClass:[NSDictionary class]] && [rj[@"item_list"] isKindOfClass:[NSArray class]] && [rj[@"item_list"] count] > 0) rd = rj[@"item_list"][0];
                         }
-                        if ([rd isKindOfClass:[NSDictionary class]] && rd[@"aweme_id"] && rd[@"video"]) {
+                        NSString *gotId = ([rd isKindOfClass:[NSDictionary class]] && rd[@"aweme_id"]) ? [NSString stringWithFormat:@"%@", rd[@"aweme_id"]] : @"";
+                        BOOL idOk = gotId.length > 0 && [gotId isEqualToString:awemeId];
+                        if ([rd isKindOfClass:[NSDictionary class]] && idOk && rd[@"video"]) {
                             awemeDetail = rd;
+                            rescuedViaJSON = YES;
                             [probeLog appendFormat:@"[WKWebView救援] detail解析成功! aweme_id=%@ bit_rate档数=%lu\n", rd[@"aweme_id"], (unsigned long)([(rd[@"video"][@"bit_rate"] ?: @[]) count])];
                         } else {
-                            [probeLog appendFormat:@"[WKWebView救援] JSON中无aweme_detail, topKeys=%@\n", ([rj isKindOfClass:[NSDictionary class]] ? [rj allKeys] : @"(非字典)")];
+                            [probeLog appendFormat:@"[WKWebView救援] 无匹配详情(topKeys=%@, 拦截aweme_id=%@, 请求=%@)\n", ([rj isKindOfClass:[NSDictionary class]] ? [rj allKeys] : @"(非字典)"), gotId.length ? gotId : @"无", awemeId];
                         }
+                    }
+                }
+
+                // 2.2-25: 救援结束(无论成败)指纹cookie已回填, 用新cookie重试一次原版API(数据保真)
+                if (!awemeDetail || ![awemeDetail isKindOfClass:[NSDictionary class]]) {
+                    NSMutableString *retryCookie = [NSMutableString string];
+                    NSArray *retryCks = [cookieStore cookiesForURL:[NSURL URLWithString:@"https://www.douyin.com/"]];
+                    for (NSHTTPCookie *c in retryCks) {
+                        if (retryCookie.length > 0) [retryCookie appendString:@"; "];
+                        [retryCookie appendFormat:@"%@=%@", [c name], [c value]];
+                    }
+                    NSMutableURLRequest *retryReq = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:apiURL]];
+                    [retryReq setValue:@"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36" forHTTPHeaderField:@"User-Agent"];
+                    [retryReq setValue:@"https://www.douyin.com/" forHTTPHeaderField:@"Referer"];
+                    [retryReq setValue:retryCookie forHTTPHeaderField:@"Cookie"];
+                    __block NSInteger retryHttpStatus = 0;
+                    __block NSInteger retryStatusCode = -1;
+                    dispatch_semaphore_t retrySem = dispatch_semaphore_create(0);
+                    NSURLSessionDataTask *retryTask = [[NSURLSession sharedSession] dataTaskWithRequest:retryReq completionHandler:^(NSData *rtData, NSURLResponse *rtResp, NSError *rtErr) {
+                        @try {
+                            NSHTTPURLResponse *rtHttp = (NSHTTPURLResponse *)rtResp;
+                            retryHttpStatus = [rtHttp statusCode];
+                            if (rtData.length > 0) {
+                                NSDictionary *rtJson = [NSJSONSerialization JSONObjectWithData:rtData options:0 error:nil];
+                                if ([rtJson isKindOfClass:[NSDictionary class]]) {
+                                    retryStatusCode = [rtJson[@"status_code"] integerValue];
+                                    if (retryStatusCode == 0) awemeDetail = rtJson[@"aweme_detail"];
+                                }
+                            }
+                        } @catch (NSException *rtEx) {}
+                        dispatch_semaphore_signal(retrySem);
+                    }];
+                    [retryTask resume];
+                    dispatch_semaphore_wait(retrySem, dispatch_time(DISPATCH_TIME_NOW, 15 * NSEC_PER_SEC));
+                    if ([awemeDetail isKindOfClass:[NSDictionary class]]) {
+                        [probeLog appendFormat:@"[Step2.7 指纹重试] HTTP %ld status_code=%ld 成功! bit_rate档数=%lu\n", (long)retryHttpStatus, (long)retryStatusCode, (unsigned long)([(awemeDetail[@"video"][@"bit_rate"] ?: @[]) count])];
+                    } else {
+                        [probeLog appendFormat:@"[Step2.7 指纹重试] HTTP %ld status_code=%ld 成功=NO\n", (long)retryHttpStatus, (long)retryStatusCode];
                     }
                 }
 
@@ -4219,7 +4262,11 @@ static NSString *DYYYFetchAwemeDetailViaWebView(NSString *awemeId, NSMutableStri
                     if (completion) completion(nil);
                     return;
                 }
-                [probeLog appendFormat:@"[Step2.6成功] WebView API拦截获取4K数据成功\n"];
+                if (rescuedViaJSON) {
+                    [probeLog appendFormat:@"[Step2.6成功] WebView API拦截获取4K数据成功\n"];
+                } else {
+                    [probeLog appendFormat:@"[Step2.7成功] 指纹重试获取4K数据成功\n"];
+                }
             }
         }
 
