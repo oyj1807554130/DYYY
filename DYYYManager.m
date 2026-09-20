@@ -4107,13 +4107,18 @@ static NSString *DYYYFetchAwemeDetailViaWebView(NSString *awemeId, NSMutableStri
                         unsigned int rc = 0;
                         Class *rclasses = objc_copyClassList(&rc);
                         if (!rclasses) return;
-                        NSArray *rkw = @[@"Uifid", @"uifid", @"TokenManager", @"DeviceManager", @"DeviceInfo", @"Fingerprint", @"MSKernel"];
+                        NSArray *rkw = @[@"Uifid", @"uifid", @"AppLog", @"Applog", @"applog", @"TokenManager", @"DeviceManager", @"DeviceInfo", @"Fingerprint", @"MSKernel"];
                         int rdump = 0;
-                        for (unsigned int ri = 0; ri < rc && rdump < 20; ri++) {
+                        for (unsigned int ri = 0; ri < rc && rdump < 40; ri++) {
                             NSString *rcn = NSStringFromClass(rclasses[ri]);
                             BOOL rhit = NO;
                             for (NSString *rk in rkw) if ([rcn containsString:rk]) { rhit = YES; break; }
                             if (!rhit) continue;
+                            NSArray *rexcl = @[@"ByteCast", @"TIMX", @"IESEC", @"AWETeen", @"Lynx", @"Salamander", @"CoreODIE", @"VisualIntelligence", @"SavedDelete", @"UltraCreation"];
+                            BOOL rskip = NO;
+                            for (NSString *rx in rexcl) if ([rcn containsString:rx]) { rskip = YES; break; }
+                            if (rskip) continue;
+                            BOOL rdeep = [rcn containsString:@"AppLog"] || [rcn containsString:@"Applog"];
                             rdump++;
                             Class rcls = rclasses[ri];
                             id rinst = nil;
@@ -4135,7 +4140,7 @@ static NSString *DYYYFetchAwemeDetailViaWebView(NSString *awemeId, NSMutableStri
                                 free(rrtc);
                                 [rgetters appendFormat:@"%@+ ", rmn];
                                 NSString *rl = rmn.lowercaseString;
-                                BOOL rtarget = [rl containsString:@"uifid"] || [rl containsString:@"mstoken"];
+                                BOOL rtarget = rdeep || [rl containsString:@"uifid"] || [rl containsString:@"mstoken"];
                                 if (!rtarget) continue;
                                 @try {
                                     id rv = ((id (*)(id, SEL))objc_msgSend)(rcls, NSSelectorFromString(rmn));
@@ -4157,7 +4162,7 @@ static NSString *DYYYFetchAwemeDetailViaWebView(NSString *awemeId, NSMutableStri
                                     free(rrtc);
                                     [rgetters appendFormat:@"%@- ", rmn];
                                     NSString *rl = rmn.lowercaseString;
-                                    BOOL rtarget = [rl containsString:@"uifid"] || [rl containsString:@"mstoken"];
+                                    BOOL rtarget = rdeep || [rl containsString:@"uifid"] || [rl containsString:@"mstoken"];
                                     if (!rtarget) continue;
                                     @try {
                                         id rv = ((id (*)(id, SEL))objc_msgSend)(rinst, NSSelectorFromString(rmn));
@@ -4317,11 +4322,25 @@ static NSString *DYYYFetchAwemeDetailViaWebView(NSString *awemeId, NSMutableStri
                     @try {
                         id fjson = [NSJSONSerialization JSONObjectWithData:feedData options:0 error:nil];
                         id fitem = nil;
+                        int flistCnt = 0;
                         if ([fjson isKindOfClass:[NSDictionary class]]) {
                             NSArray *flist = fjson[@"aweme_list"];
-                            if ([flist isKindOfClass:[NSArray class]] && flist.count > 0) fitem = flist[0];
-                            if (!fitem) fitem = fjson[@"aweme_detail"];
+                            // 2.2-32: 逐条校验aweme_id, 游客态可能降级推荐流, 严禁取别人的视频
+                            if ([flist isKindOfClass:[NSArray class]]) {
+                                for (NSDictionary *fc in flist) {
+                                    if (![fc isKindOfClass:[NSDictionary class]]) continue;
+                                    flistCnt++;
+                                    NSString *fid = [fc[@"aweme_id"] isKindOfClass:[NSString class]] ? fc[@"aweme_id"] : [NSString stringWithFormat:@"%@", fc[@"aweme_id"] ?: @""];
+                                    if ([fid isEqualToString:awemeId]) { fitem = fc; break; }
+                                }
+                            }
+                            if (!fitem && [fjson[@"aweme_detail"] isKindOfClass:[NSDictionary class]]) {
+                                NSDictionary *fd1 = fjson[@"aweme_detail"];
+                                NSString *did1 = [fd1[@"aweme_id"] isKindOfClass:[NSString class]] ? fd1[@"aweme_id"] : [NSString stringWithFormat:@"%@", fd1[@"aweme_id"] ?: @""];
+                                if ([did1 isEqualToString:awemeId]) fitem = fd1;
+                            }
                         }
+                        [probeLog appendFormat:@"feed条目=%d ID匹配=%@\n", flistCnt, fitem ? @"YES" : @"NO"];
                         NSDictionary *fvideo = [fitem isKindOfClass:[NSDictionary class]] ? fitem[@"video"] : nil;
                         NSArray *fbr = [fvideo isKindOfClass:[NSDictionary class]] ? fvideo[@"bit_rate"] : nil;
                         if ([fitem isKindOfClass:[NSDictionary class]] && [fbr isKindOfClass:[NSArray class]] && fbr.count > 0) {
@@ -4329,7 +4348,7 @@ static NSString *DYYYFetchAwemeDetailViaWebView(NSString *awemeId, NSMutableStri
                             feedRescued = YES;
                             [probeLog appendFormat:@"[feed兜底成功] bit_rate %lu条 gears=%@\n", (unsigned long)fbr.count, [fbr valueForKeyPath:@"gear_name"]];
                         } else {
-                            [probeLog appendFormat:@"feed无bit_rate数据\n"];
+                            [probeLog appendFormat:@"feed无匹配ID或无bit_rate(疑似推荐流降级)\n"];
                         }
                     } @catch (NSException *fe2) { [probeLog appendFormat:@"feed解析异常: %@\n", fe2]; }
                 }
