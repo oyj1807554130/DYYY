@@ -4091,7 +4091,8 @@ static NSString *DYYYFetchAwemeDetailViaWebView(NSString *awemeId, NSMutableStri
             NSHTTPCookieStorage *healStore = [NSHTTPCookieStorage sharedHTTPCookieStorage];
             NSURL *healURL = [NSURL URLWithString:@"https://www.douyin.com/"];
             NSUInteger healPurged = 0;
-            NSString *healUifid = nil, *healMsToken = nil, *healSvwebid = nil;
+            __block NSString *healUifid = nil, *healMsToken = nil;
+            NSString *healSvwebid = nil;
             for (NSHTTPCookie *hs in [healStore cookiesForURL:healURL]) {
                 if ([[hs name] isEqualToString:@"UIFID_TEMP"]) healUifid = [hs value];
                 else if ([[hs name] isEqualToString:@"msToken"]) healMsToken = [hs value];
@@ -4129,7 +4130,9 @@ static NSString *DYYYFetchAwemeDetailViaWebView(NSString *awemeId, NSMutableStri
                             Method *rmeths = class_copyMethodList(object_getClass(rcls), &rmc);
                             for (unsigned int rj = 0; rj < rmc; rj++) {
                                 NSString *rmn = NSStringFromSelector(method_getName(rmeths[rj]));
-                                if (method_getNumberOfArguments(rmeths[rj]) != 2 || *method_getReturnType(rmeths[rj]) != '@') continue;
+                                char *rrtc = method_copyReturnType(rmeths[rj]);
+                                if (method_getNumberOfArguments(rmeths[rj]) != 2 || !rrtc || rrtc[0] != '@') { if (rrtc) free(rrtc); continue; }
+                                free(rrtc);
                                 [rgetters appendFormat:@"%@+ ", rmn];
                                 NSString *rl = rmn.lowercaseString;
                                 BOOL rtarget = [rl containsString:@"uifid"] || [rl containsString:@"mstoken"];
@@ -4149,7 +4152,9 @@ static NSString *DYYYFetchAwemeDetailViaWebView(NSString *awemeId, NSMutableStri
                                 Method *rims = class_copyMethodList(rcls, &rmc);
                                 for (unsigned int rj = 0; rj < rmc; rj++) {
                                     NSString *rmn = NSStringFromSelector(method_getName(rims[rj]));
-                                    if (method_getNumberOfArguments(rims[rj]) != 2 || *method_getReturnType(rims[rj]) != '@') continue;
+                                    char *rrtc = method_copyReturnType(rims[rj]);
+                                    if (method_getNumberOfArguments(rims[rj]) != 2 || !rrtc || rrtc[0] != '@') { if (rrtc) free(rrtc); continue; }
+                                    free(rrtc);
                                     [rgetters appendFormat:@"%@- ", rmn];
                                     NSString *rl = rmn.lowercaseString;
                                     BOOL rtarget = [rl containsString:@"uifid"] || [rl containsString:@"mstoken"];
