@@ -3711,6 +3711,8 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
     }
     if (!awemeId || awemeId.length == 0) {
         dispatch_async(dispatch_get_main_queue(), ^{ [DYYYUtils showToast:@"本地解析失败: 无法获取awemeId"]; });
+        // 失败探针全覆盖：awemeId失败也上报剪贴板
+        [[NSNotificationCenter defaultCenter] postNotificationName:@"DYYYProbeNotification" object:nil userInfo:@{@"text": @"[接口4探针][失败] 无法获取awemeId（awemeModel异常或非视频帖）"}];
         if (completion) completion(nil);
         return;
     }
@@ -4081,86 +4083,6 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                     return;
                 }
                 [probeLog appendFormat:@"[Step2.5成功] 页面降级获取4K数据成功\n"];
-            }
-        }
-
-        // ===== 对照实验（仅测试版）：成功路径下用注册接口新ttwid直连WebAPI，验证新会话能否过403门禁；不影响正常结果，不动cookie存储 =====
-        if (awemeDetail && [awemeDetail isKindOfClass:[NSDictionary class]]) {
-            [probeLog appendFormat:@"\n[对照实验] 开始：注册接口拿新ttwid直连WebAPI\n"];
-            NSHTTPCookieStorage *expStore = [NSHTTPCookieStorage sharedHTTPCookieStorage];
-            NSURL *expURL = [NSURL URLWithString:@"https://www.douyin.com/"];
-            __block NSString *expTtwid = nil;
-            __block NSInteger expTtwidStatus = 0;
-            NSString *expTtwidURL = @"https://ttwid.bytedance.com/ttwid/union/register/";
-            NSString *expTtwidBody = @"{\"region\":\"cn\",\"aid\":6383,\"needFid\":false,\"service\":\"www.douyin.com\",\"migrate_info\":{\"ticket\":\"\",\"source\":\"node\"},\"cbUrlProtocol\":\"https\",\"union\":true}";
-            NSMutableURLRequest *expTtwidReq = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:expTtwidURL]];
-            expTtwidReq.HTTPMethod = @"POST";
-            expTtwidReq.HTTPBody = [expTtwidBody dataUsingEncoding:NSUTF8StringEncoding];
-            [expTtwidReq setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
-            [expTtwidReq setValue:@"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36" forHTTPHeaderField:@"User-Agent"];
-            dispatch_semaphore_t expTtwidSem = dispatch_semaphore_create(0);
-            NSURLSessionDataTask *expTtwidTask = [[NSURLSession sharedSession] dataTaskWithRequest:expTtwidReq completionHandler:^(NSData *etData, NSURLResponse *etResp, NSError *etErr) {
-                @try {
-                    NSHTTPURLResponse *etHttp = (NSHTTPURLResponse *)etResp;
-                    expTtwidStatus = [etHttp statusCode];
-                    NSString *etSetCookie = [etHttp allHeaderFields][@"Set-Cookie"];
-                    if (etSetCookie.length > 0) {
-                        NSRange er = [etSetCookie rangeOfString:@"ttwid="];
-                        if (er.location != NSNotFound) {
-                            NSString *esub = [etSetCookie substringFromIndex:er.location + 6];
-                            NSRange esemi = [esub rangeOfString:@";"];
-                            expTtwid = esemi.location != NSNotFound ? [esub substringToIndex:esemi.location] : esub;
-                        }
-                    }
-                    if (!expTtwid || expTtwid.length == 0) {
-                        if (etData.length > 0) {
-                            NSDictionary *etJson = [NSJSONSerialization JSONObjectWithData:etData options:0 error:nil];
-                            if ([etJson isKindOfClass:[NSDictionary class]]) expTtwid = etJson[@"ttwid"];
-                        }
-                    }
-                } @catch (NSException *etEx) {}
-                dispatch_semaphore_signal(expTtwidSem);
-            }];
-            [expTtwidTask resume];
-            dispatch_semaphore_wait(expTtwidSem, dispatch_time(DISPATCH_TIME_NOW, 10 * NSEC_PER_SEC));
-            if (expTtwid.length > 0) {
-                NSMutableString *expCookieStr = [NSMutableString string];
-                for (NSHTTPCookie *ec2 in [expStore cookiesForURL:expURL]) {
-                    if ([[ec2 name] isEqualToString:@"ttwid"]) continue;
-                    if (expCookieStr.length > 0) [expCookieStr appendString:@"; "];
-                    [expCookieStr appendFormat:@"%@=%@", [ec2 name], [ec2 value]];
-                }
-                if (expCookieStr.length > 0) [expCookieStr appendString:@"; "];
-                [expCookieStr appendFormat:@"ttwid=%@", expTtwid];
-                NSMutableURLRequest *expApiReq = [apiReq mutableCopy];
-                [expApiReq setValue:expCookieStr forHTTPHeaderField:@"Cookie"];
-                __block NSInteger expHttpStatus = 0;
-                __block NSInteger expStatusCode = -999;
-                __block NSUInteger expBrCount = 0;
-                dispatch_semaphore_t expApiSem = dispatch_semaphore_create(0);
-                NSURLSessionDataTask *expApiTask = [[NSURLSession sharedSession] dataTaskWithRequest:expApiReq completionHandler:^(NSData *eaData, NSURLResponse *eaResp, NSError *eaErr) {
-                    @try {
-                        NSHTTPURLResponse *eaHttp = (NSHTTPURLResponse *)eaResp;
-                        expHttpStatus = [eaHttp statusCode];
-                        if (eaData.length > 0) {
-                            NSDictionary *eaJson = [NSJSONSerialization JSONObjectWithData:eaData options:0 error:nil];
-                            if ([eaJson isKindOfClass:[NSDictionary class]]) {
-                                expStatusCode = [eaJson[@"status_code"] integerValue];
-                                if (expStatusCode == 0) {
-                                    NSDictionary *eaDetail = eaJson[@"aweme_detail"];
-                                    NSArray *eaBr = eaDetail[@"video"][@"bit_rate"];
-                                    expBrCount = eaBr ? eaBr.count : 0;
-                                }
-                            }
-                        }
-                    } @catch (NSException *eaEx) {}
-                    dispatch_semaphore_signal(expApiSem);
-                }];
-                [expApiTask resume];
-                dispatch_semaphore_wait(expApiSem, dispatch_time(DISPATCH_TIME_NOW, 15 * NSEC_PER_SEC));
-                [probeLog appendFormat:@"[对照实验] 新ttwid直连结果: HTTP %ld status_code=%ld bit_rate条数=%lu → 新会话%@403门禁\n", (long)expHttpStatus, (long)expStatusCode, (unsigned long)expBrCount, (expStatusCode == 0) ? @"能过" : @"不能过"];
-            } else {
-                [probeLog appendFormat:@"[对照实验] 新ttwid注册失败 HTTP %ld（对照未执行）\n", (long)expTtwidStatus];
             }
         }
 
