@@ -163,6 +163,8 @@ static NSString *DY4KFindURL(id node, int depth) {
 }
 
 // 竞品同款思路: 播放器设置码率模型时截获(运行时swizzle,不依赖通知)
+// v2.1 前向声明: 码率回调时同步挖真aid, 让缓存按视频分开
+static NSString *DY4KDigCurrentAid(NSString **outDesc, NSString **outAuthor, BOOL quiet);
 static void DY4KOnBitrateModels(id models) {
     @try {
         if (!models) return;
@@ -194,16 +196,33 @@ static void DY4KOnBitrateModels(id models) {
             if (!best || g.bitrate > best.bitrate) best = g;
         }
         if (!best) return;
+        // v2.1: 回调时同步挖真aid+文案, 缓存按视频分开, 杜绝切视频还显示上一个
+        NSString *dgDesc = nil, *dgAuthor = nil;
+        NSString *curAid = DY4KDigCurrentAid(&dgDesc, &dgAuthor, YES);
         @synchronized (dy4kCache) {
-            DY4KVideo *v = dy4kCache[@"__current__"];
-            if (!v) {
-                v = [DY4KVideo new];
-                v.aid = @"__current__";
-                v.desc = @"当前播放视频";
-                dy4kCache[@"__current__"] = v;
+            if (curAid.length >= 10 && ![curAid hasPrefix:@"__"]) {
+                DY4KVideo *v = dy4kCache[curAid];
+                if (!v) {
+                    v = [DY4KVideo new];
+                    v.aid = curAid;
+                    dy4kCache[curAid] = v;
+                }
+                if (dgDesc.length > 0) v.desc = dgDesc;
+                if (dgAuthor.length > 0) v.author = dgAuthor;
+                v.time = [[NSDate date] timeIntervalSince1970];
+                [v mergeGear:best];
+            } else {
+                // v2.1: 挖不到aid时按3秒窗口判断换视频, 换视频清空重建防串台
+                double now = [[NSDate date] timeIntervalSince1970];
+                DY4KVideo *v = dy4kCache[@"__current__"];
+                if (!v || now - v.time > 3.0) {
+                    v = [DY4KVideo new];
+                    v.aid = @"__current__";
+                    dy4kCache[@"__current__"] = v;
+                }
+                v.time = now;
+                [v mergeGear:best];
             }
-            v.time = [[NSDate date] timeIntervalSince1970];
-            [v mergeGear:best];
         }
     } @catch (NSException *e) {}
 }
@@ -541,10 +560,10 @@ static UIViewController *DY4KAppTopVC(void) {
 }
 
 // v1.4: 从当前播放页VC树挖当前视频 aweme_id (AWEPlayInteractionViewController.model.itemID)
-static NSString *DY4KDigCurrentAid(NSString **outDesc, NSString **outAuthor) {
+static NSString *DY4KDigCurrentAid(NSString **outDesc, NSString **outAuthor, BOOL quiet) {
     UIViewController *top = DY4KAppTopVC();
     if (!top) {
-        @synchronized (dy4kMonNames) { dy4kLastErr = @"无TopVC"; }
+        if (!quiet) { @synchronized (dy4kMonNames) { dy4kLastErr = @"无TopVC"; } }
         return nil;
     }
     NSMutableArray<UIViewController *> *queue = [NSMutableArray arrayWithObject:top];
@@ -578,7 +597,7 @@ static NSString *DY4KDigCurrentAid(NSString **outDesc, NSString **outAuthor) {
         [queue addObjectsFromArray:vc.childViewControllers];
         if (vc.presentedViewController) [queue addObject:vc.presentedViewController];
     }
-    @synchronized (dy4kMonNames) { dy4kLastErr = @"未找到播放页VC"; }
+    if (!quiet) { @synchronized (dy4kMonNames) { dy4kLastErr = @"未找到播放页VC"; } }
     return nil;
 }
 
@@ -866,19 +885,22 @@ static void DY4KShowMenuLegacy(void) {
 
 // v1.4 入口: 先挖当前播放视频主动拉全档, 失败退回截获缓存
 static void DY4KShowMenu(void) {
-    NSString *aid = DY4KDigCurrentAid(nil, nil);
+    NSString *dgDesc = nil, *dgAuthor = nil;
+    NSString *aid = DY4KDigCurrentAid(&dgDesc, &dgAuthor, NO);
+    BOOL usedFallback = NO;
     if (aid.length == 0) {
         // v1.6: VC挖不到就用缓存里最近的真aid(URLSession拦截/feed响应入库的)
         NSArray<DY4KVideo *> *recent = DY4KRecentVideos();
         if (recent.count > 0 && recent.firstObject.aid.length >= 10 && ![recent.firstObject.aid hasPrefix:@"__"]) {
             aid = recent.firstObject.aid;
+            usedFallback = YES; // v2.1: 明确标记非当前识别
         }
     }
     if (aid.length > 0) {
         UIViewController *top = DY4KTopVC();
         if (!top) return;
         __block BOOL cancelled = NO;
-        UIAlertController *busy = [UIAlertController alertControllerWithTitle:@"DY4K 拉取全档画质中…" message:nil preferredStyle:UIAlertControllerStyleAlert];
+        UIAlertController *busy = [UIAlertController alertControllerWithTitle:(usedFallback ? @"DY4K 拉取全档画质中…(未识别当前视频,用最近缓存)" : @"DY4K 拉取全档画质中…") message:nil preferredStyle:UIAlertControllerStyleAlert];
         [busy addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:^(__unused UIAlertAction *a) {
             cancelled = YES;
         }]];
@@ -891,6 +913,9 @@ static void DY4KShowMenu(void) {
                     DY4KVideo *v = nil;
                     @synchronized (dy4kCache) { v = dy4kCache[aid]; }
                     if (v && v.gears.count > 0) {
+                        if (dgDesc.length > 0) v.desc = dgDesc;
+                        if (dgAuthor.length > 0) v.author = dgAuthor;
+                        if (usedFallback) v.desc = [@"【缓存识别·未必是当前视频】" stringByAppendingString:(v.desc.length > 0 ? v.desc : @"")];
                         DY4KShowQuality(v);
                         return;
                     }
