@@ -4973,6 +4973,345 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
 }
 
 
+#pragma mark - 接口5：TikHub 直连（web全档bit_rate + 原画 + hybrid兜底）
+
++ (NSString *)dyyyTikHubKey {
+    NSString *custom = [[NSUserDefaults standardUserDefaults] stringForKey:@"DYYYTikHubKey"];
+    if (custom.length > 0) return custom;
+    // 内置默认 Key（拆段混淆存储）
+    NSString *p1 = @"Zzgwek91OHUvMnlRbDFQSUdLNkYyeFBiQ2dtdWFv";
+    NSString *p2 = @"RTd4RUxjZ1IvWlZQVzkxMjdoS251S1Z4R0VHUT09";
+    NSData *keyData = [[NSData alloc] initWithBase64EncodedString:[p1 stringByAppendingString:p2] options:0];
+    NSString *key = keyData ? [[NSString alloc] initWithData:keyData encoding:NSUTF8StringEncoding] : @"";
+    return key ?: @"";
+}
+
++ (NSString *)dyyyQualityLabelForWidth:(NSInteger)width gearName:(NSString *)gearName fps:(NSInteger)fps size:(long long)sizeBytes {
+    NSString *quality = nil;
+    NSInteger height = 0;
+    NSInteger shortSide = width;
+    if (shortSide >= 1920) {
+        quality = @"极致4K";
+    } else if (shortSide >= 1440) {
+        quality = @"高清2K";
+    } else if (shortSide >= 1080) {
+        quality = @"清晰1080P";
+    } else if (shortSide >= 720) {
+        quality = @"标准720P";
+    } else if (shortSide >= 540) {
+        quality = @"模糊540P";
+    } else if (shortSide >= 480) {
+        quality = @"模糊480P";
+    } else if (shortSide >= 360) {
+        quality = @"模糊360P";
+    }
+    if (!quality) {
+        NSString *gn = [gearName.lowercaseString copy];
+        if ([gn containsString:@"2k"] || [gn containsString:@"1440"] || [gn containsString:@"2048"]) {
+            quality = @"高清2K";
+        } else if ([gn containsString:@"1080"]) {
+            quality = @"清晰1080P";
+        } else if ([gn containsString:@"720"]) {
+            quality = @"标准720P";
+        } else if ([gn containsString:@"540"]) {
+            quality = @"模糊540P";
+        } else {
+            quality = @"默认";
+        }
+    }
+    (void)height;
+    double mb = (double)sizeBytes / 1048576.0;
+    NSString *sizeStr = nil;
+    if (mb >= 1024.0) {
+        sizeStr = [NSString stringWithFormat:@"%.2fGB", mb / 1024.0];
+    } else if (mb >= 1.0) {
+        sizeStr = [NSString stringWithFormat:@"%.2fMB", mb];
+    } else {
+        sizeStr = [NSString stringWithFormat:@"%.0fKB", mb * 1024.0];
+    }
+    if (fps <= 0) fps = 30;
+    return [NSString stringWithFormat:@"[%@]-[%ldFPS]-[%@]", quality, (long)fps, sizeStr];
+}
+
++ (void)parseAndDownloadVideoViaTikHub:(NSString *)shareLink retryCount:(NSInteger)retryCount {
+    if (shareLink.length == 0) {
+        [DYYYUtils showToast:@"无法获取分享链接"];
+        return;
+    }
+    NSString *encoded = [shareLink stringByAddingPercentEncodingWithAllowedCharacters:[NSCharacterSet URLQueryAllowedCharacterSet]];
+    NSString *hybridUrlStr = [NSString stringWithFormat:@"https://api.tikhub.dev/api/v1/hybrid/video_data?url=%@&minimal=false", encoded];
+    NSURL *hybridURL = [NSURL URLWithString:hybridUrlStr];
+    if (!hybridURL) {
+        [DYYYUtils showToast:@"接口5请求构造失败"];
+        return;
+    }
+    NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:hybridURL];
+    request.timeoutInterval = 30;
+    [request setValue:[NSString stringWithFormat:@"Bearer %@", [self dyyyTikHubKey]] forHTTPHeaderField:@"Authorization"];
+    [request setValue:@"application/json" forHTTPHeaderField:@"Accept"];
+
+    [[NSURLSession sharedSession] dataTaskWithRequest:request
+                                    completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            @try {
+                NSHTTPURLResponse *httpResponse = (NSHTTPURLResponse *)response;
+                if ([httpResponse isKindOfClass:[NSHTTPURLResponse class]] && httpResponse.statusCode >= 400) {
+                    if (retryCount < 2) {
+                        [DYYYUtils showToast:[NSString stringWithFormat:@"接口5返回错误(%ld)，正在重试...", (long)httpResponse.statusCode]];
+                        [self parseAndDownloadVideoViaTikHub:shareLink retryCount:retryCount + 1];
+                    } else {
+                        [DYYYUtils showToast:[NSString stringWithFormat:@"接口5请求失败(HTTP %ld)，检查网络或Key", (long)httpResponse.statusCode]];
+                    }
+                    return;
+                }
+                if (error || data.length == 0) {
+                    if (retryCount < 2) {
+                        [DYYYUtils showToast:@"接口5请求失败，正在重试..."];
+                        [self parseAndDownloadVideoViaTikHub:shareLink retryCount:retryCount + 1];
+                    } else {
+                        [DYYYUtils showToast:@"接口5请求失败，请检查网络"];
+                    }
+                    return;
+                }
+                NSError *jsonError = nil;
+                id jsonObj = [NSJSONSerialization JSONObjectWithData:data options:0 error:&jsonError];
+                if (jsonError || ![jsonObj isKindOfClass:[NSDictionary class]]) {
+                    if (retryCount < 2) {
+                        [DYYYUtils showToast:@"接口5解析失败，正在重试..."];
+                        [self parseAndDownloadVideoViaTikHub:shareLink retryCount:retryCount + 1];
+                    } else {
+                        [DYYYUtils showToast:@"接口5解析返回数据失败"];
+                    }
+                    return;
+                }
+                NSDictionary *json = (NSDictionary *)jsonObj;
+                NSInteger code = [json[@"code"] integerValue];
+                if (code != 200 && code != 0) {
+                    [DYYYUtils showToast:[NSString stringWithFormat:@"接口5返回错误: %@", json[@"message_zh"] ?: json[@"message"] ?: json[@"msg"] ?: @"未知错误"]];
+                    return;
+                }
+                NSDictionary *dataDict = json[@"data"];
+                if (![dataDict isKindOfClass:[NSDictionary class]]) {
+                    [DYYYUtils showToast:@"接口5返回数据为空"];
+                    return;
+                }
+                [self dyyyMergeTikHubData:dataDict];
+            } @catch (NSException *e) {
+                NSLog(@"[DYYY] tikhub5 exception: %@", e);
+                [DYYYUtils showToast:@"接口5处理异常，请重试"];
+            }
+        });
+    }] resume];
+}
+
++ (void)dyyyMergeTikHubData:(NSDictionary *)data {
+    NSString *awemeId = [NSString stringWithFormat:@"%@", data[@"aweme_id"] ?: @""];
+    NSMutableArray *videoList = [NSMutableArray array];
+    NSMutableArray *imageArr = [NSMutableArray array];
+
+    // 音乐
+    NSString *musicUrl = @"";
+    NSString *musicTitle = @"";
+    NSString *musicAuthor = @"";
+    NSDictionary *music = data[@"music"];
+    if ([music isKindOfClass:[NSDictionary class]]) {
+        NSDictionary *playUrl = music[@"play_url"];
+        if ([playUrl isKindOfClass:[NSDictionary class]]) {
+            NSArray *murls = playUrl[@"url_list"];
+            if ([murls isKindOfClass:[NSArray class]] && murls.count > 0 && [murls[0] isKindOfClass:[NSString class]]) {
+                musicUrl = murls[0];
+            }
+        }
+        musicTitle = [NSString stringWithFormat:@"%@", music[@"title"] ?: @""];
+        musicAuthor = [NSString stringWithFormat:@"%@", music[@"owner_nickname"] ?: @""];
+    }
+
+    // 封面
+    NSString *coverUrl = @"";
+    NSDictionary *hybridVideo = data[@"video"];
+    if ([hybridVideo isKindOfClass:[NSDictionary class]]) {
+        NSDictionary *cover = hybridVideo[@"cover"];
+        if ([cover isKindOfClass:[NSDictionary class]]) {
+            NSArray *curls = cover[@"url_list"];
+            if ([curls isKindOfClass:[NSArray class]] && curls.count > 0 && [curls[0] isKindOfClass:[NSString class]]) {
+                coverUrl = curls[0];
+            }
+        }
+    }
+
+    // 图集 images（实况帖直接引导走接口2/4）
+    NSArray *imagesData = data[@"images"];
+    if ([imagesData isKindOfClass:[NSArray class]] && imagesData.count > 0) {
+        BOOL hasLivePhoto = NO;
+        for (NSDictionary *img in imagesData) {
+            if (![img isKindOfClass:[NSDictionary class]]) continue;
+            if ([img[@"video"] isKindOfClass:[NSDictionary class]]) {
+                hasLivePhoto = YES;
+                break;
+            }
+        }
+        if (hasLivePhoto) {
+            [DYYYUtils showToast:@"接口5暂不支持实况，请用接口2或接口4保存"];
+            return;
+        }
+        for (NSDictionary *img in imagesData) {
+            if (![img isKindOfClass:[NSDictionary class]]) continue;
+            NSString *picked = @"";
+            NSArray *pool1 = [img[@"url_list"] isKindOfClass:[NSArray class]] ? img[@"url_list"] : @[];
+            NSArray *pool2 = [img[@"download_url_list"] isKindOfClass:[NSArray class]] ? img[@"download_url_list"] : @[];
+            for (NSArray *pool in @[pool1, pool2]) {
+                if (picked.length > 0) break;
+                NSString *jpeg = @"";
+                NSString *other = @"";
+                for (NSString *u in pool) {
+                    if (![u isKindOfClass:[NSString class]] || u.length == 0) continue;
+                    NSString *lower = [u lowercaseString];
+                    if ([lower containsString:@".jpeg"] || [lower containsString:@".jpg"]) {
+                        jpeg = u;
+                        break;
+                    }
+                    if (other.length == 0) other = u;
+                }
+                picked = jpeg.length > 0 ? jpeg : other;
+            }
+            if (picked.length > 0) [imageArr addObject:picked];
+        }
+    }
+
+    dispatch_group_t group = dispatch_group_create();
+    __block NSDictionary *webVideoInfo = nil;
+    __block NSDictionary *originData = nil;
+
+    if (awemeId.length > 0) {
+        // 请求2：web 全档 bit_rate（4K来源）
+        NSString *webUrlStr = [NSString stringWithFormat:@"https://api.tikhub.dev/api/v1/douyin/web/fetch_one_video?aweme_id=%@&region=CN", awemeId];
+        NSURL *webURL = [NSURL URLWithString:webUrlStr];
+        if (webURL) {
+            NSMutableURLRequest *webReq = [NSMutableURLRequest requestWithURL:webURL];
+            webReq.timeoutInterval = 25;
+            [webReq setValue:[NSString stringWithFormat:@"Bearer %@", [self dyyyTikHubKey]] forHTTPHeaderField:@"Authorization"];
+            [webReq setValue:@"application/json" forHTTPHeaderField:@"Accept"];
+            dispatch_group_enter(group);
+            [[NSURLSession sharedSession] dataTaskWithRequest:webReq completionHandler:^(NSData *d, NSURLResponse *r, NSError *e) {
+                if (!e && d.length > 0) {
+                    NSDictionary *j = [NSJSONSerialization JSONObjectWithData:d options:0 error:nil];
+                    if ([j isKindOfClass:[NSDictionary class]] && [j[@"code"] integerValue] == 200) {
+                        NSDictionary *dd = j[@"data"];
+                        if ([dd isKindOfClass:[NSDictionary class]]) {
+                            NSDictionary *ad = dd[@"aweme_detail"];
+                            if ([ad isKindOfClass:[NSDictionary class]]) dd = ad;
+                            NSDictionary *vi = dd[@"video"];
+                            if ([vi isKindOfClass:[NSDictionary class]]) webVideoInfo = vi;
+                        }
+                    }
+                }
+                dispatch_group_leave(group);
+            }] resume;
+        }
+        // 请求3：原画
+        NSString *originUrlStr = [NSString stringWithFormat:@"https://api.tikhub.dev/api/v1/douyin/app/v3/fetch_video_high_quality_play_url?aweme_id=%@&region=CN", awemeId];
+        NSURL *originURL = [NSURL URLWithString:originUrlStr];
+        if (originURL) {
+            NSMutableURLRequest *originReq = [NSMutableURLRequest requestWithURL:originURL];
+            originReq.timeoutInterval = 25;
+            [originReq setValue:[NSString stringWithFormat:@"Bearer %@", [self dyyyTikHubKey]] forHTTPHeaderField:@"Authorization"];
+            [originReq setValue:@"application/json" forHTTPHeaderField:@"Accept"];
+            dispatch_group_enter(group);
+            [[NSURLSession sharedSession] dataTaskWithRequest:originReq completionHandler:^(NSData *d, NSURLResponse *r, NSError *e) {
+                if (!e && d.length > 0) {
+                    NSDictionary *j = [NSJSONSerialization JSONObjectWithData:d options:0 error:nil];
+                    if ([j isKindOfClass:[NSDictionary class]] && [j[@"code"] integerValue] == 200) {
+                        NSDictionary *dd = j[@"data"];
+                        if ([dd isKindOfClass:[NSDictionary class]]) originData = dd;
+                    }
+                }
+                dispatch_group_leave(group);
+            }] resume;
+        }
+    }
+
+    dispatch_group_notify(group, dispatch_get_main_queue(), ^{
+        @try {
+            // 原画置顶
+            if ([originData isKindOfClass:[NSDictionary class]]) {
+                NSString *oUrl = originData[@"original_video_url"];
+                if ([oUrl isKindOfClass:[NSString class]] && oUrl.length > 0) {
+                    long long oSize = [originData[@"file_size"] longLongValue];
+                    double omb = (double)oSize / 1048576.0;
+                    NSString *oSizeStr = omb >= 1024.0 ? [NSString stringWithFormat:@"%.2fGB", omb / 1024.0]
+                                                       : (omb >= 1.0 ? [NSString stringWithFormat:@"%.2fMB", omb]
+                                                                     : [NSString stringWithFormat:@"%.0fKB", omb * 1024.0]);
+                    [videoList addObject:@{@"url": oUrl,
+                                           @"level": [NSString stringWithFormat:@"[原画【最高画质】]-[60FPS]-[%@]", oSizeStr],
+                                           @"size": @(oSize)}];
+                }
+            }
+            // bit_rate 档：web 全档优先，hybrid 兜底
+            NSDictionary *videoInfo = nil;
+            NSArray *webBitRates = [webVideoInfo isKindOfClass:[NSDictionary class]] ? webVideoInfo[@"bit_rate"] : nil;
+            if ([webBitRates isKindOfClass:[NSArray class]] && webBitRates.count > 0) {
+                videoInfo = webVideoInfo;
+            } else if ([hybridVideo isKindOfClass:[NSDictionary class]]) {
+                videoInfo = hybridVideo;
+            }
+            NSArray *bitRates = [videoInfo isKindOfClass:[NSDictionary class]] ? videoInfo[@"bit_rate"] : nil;
+            if ([bitRates isKindOfClass:[NSArray class]] && bitRates.count > 0) {
+                NSArray *sorted = [bitRates sortedArrayUsingComparator:^NSComparisonResult(id a, id b) {
+                    NSInteger ra = [a isKindOfClass:[NSDictionary class]] ? [(NSDictionary *)a[@"bit_rate"] integerValue] : 0;
+                    NSInteger rb = [b isKindOfClass:[NSDictionary class]] ? [(NSDictionary *)b[@"bit_rate"] integerValue] : 0;
+                    if (ra < rb) return (NSComparisonResult)NSOrderedDescending;
+                    if (ra > rb) return (NSComparisonResult)NSOrderedAscending;
+                    return (NSComparisonResult)NSOrderedSame;
+                }];
+                for (NSDictionary *br in sorted) {
+                    if (![br isKindOfClass:[NSDictionary class]]) continue;
+                    NSDictionary *pa = br[@"play_addr"];
+                    if (![pa isKindOfClass:[NSDictionary class]]) continue;
+                    NSArray *urls = pa[@"url_list"];
+                    if (![urls isKindOfClass:[NSArray class]] || urls.count == 0 || ![urls[0] isKindOfClass:[NSString class]]) continue;
+                    long long vsize = [(pa[@"data_size"] ?: br[@"video_size"] ?: (id) @0) longLongValue];
+                    NSInteger width = [(pa[@"width"] ?: @0) integerValue];
+                    NSInteger height = [(pa[@"height"] ?: @0) integerValue];
+                    NSInteger shortSide = width < height ? width : height;
+                    NSInteger fps = [(br[@"FPS"] ?: br[@"frame_rate"] ?: videoInfo[@"frame_rate"] ?: (id) @0) integerValue];
+                    [videoList addObject:@{@"url": urls[0],
+                                           @"level": [self dyyyQualityLabelForWidth:shortSide gearName:(br[@"gear_name"] ?: @"") fps:fps size:vsize],
+                                           @"size": @(vsize)}];
+                }
+            }
+            // 全无 bit_rate：play_addr 默认档兜底
+            if (videoList.count == 0 && [videoInfo isKindOfClass:[NSDictionary class]]) {
+                NSDictionary *pa = videoInfo[@"play_addr"];
+                if ([pa isKindOfClass:[NSDictionary class]]) {
+                    NSArray *urls = pa[@"url_list"];
+                    if ([urls isKindOfClass:[NSArray class]] && urls.count > 0 && [urls[0] isKindOfClass:[NSString class]]) {
+                        long long vsize = [(pa[@"data_size"] ?: @0) longLongValue];
+                        [videoList addObject:@{@"url": urls[0], @"level": @"[默认]-[30FPS]-[未知大小]", @"size": @(vsize)}];
+                    }
+                }
+            }
+
+            NSMutableDictionary *result = [NSMutableDictionary dictionary];
+            if (videoList.count > 0) result[@"video_list"] = videoList;
+            if (imageArr.count > 0) result[@"images"] = imageArr;
+            if (musicUrl.length > 0) {
+                result[@"music"] = musicUrl;
+                result[@"music_detail"] = @{@"url": musicUrl, @"title": musicTitle, @"author": musicAuthor};
+            }
+            if (coverUrl.length > 0) result[@"cover"] = coverUrl;
+
+            if (result.count == 0) {
+                [DYYYUtils showToast:@"接口5未解析到可保存内容"];
+                return;
+            }
+            [self handleVideoData:result];
+        } @catch (NSException *e) {
+            NSLog(@"[DYYY] tikhub5 merge exception: %@", e);
+            [DYYYUtils showToast:@"接口5数据处理异常"];
+        }
+    });
+}
+
 + (void)handleVideoData:(NSDictionary *)dataDict {
     if (!dataDict || ![dataDict isKindOfClass:[NSDictionary class]]) {
         [DYYYUtils showToast:@"接口返回数据格式异常"];

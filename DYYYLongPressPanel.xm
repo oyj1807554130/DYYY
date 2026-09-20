@@ -650,6 +650,37 @@
         [viewModels addObject:localParseVM];
     }
 
+    // 接口5保存功能（TikHub直连：web全档bit_rate+原画置顶+hybrid兜底）
+    BOOL enableApi5 = [[NSUserDefaults standardUserDefaults] objectForKey:@"DYYYInterfaceDownload5Enabled"] == nil ? YES : DYYYGetBool(@"DYYYInterfaceDownload5Enabled");
+    if (enableApi5) {
+        AWELongPressPanelBaseViewModel *tikhubVM = [[%c(AWELongPressPanelBaseViewModel) alloc] init];
+        tikhubVM.awemeModel = self.awemeModel;
+        tikhubVM.actionType = 681;
+        tikhubVM.duxIconName = @"ic_cloudarrowdown_outlined_20";
+        tikhubVM.describeString = @"接口5保存";
+        AWEAwemeModel *capturedAwemeModelTH = self.awemeModel;
+        NSInteger capturedImageIndexTH = self.awemeModel.currentImageIndex;
+        NSString *capturedShareLink5 = [capturedAwemeModelTH valueForKey:@"shareURL"];
+        tikhubVM.action = ^{
+          @try {
+          [DYYYManager storeMetadataFromAwemeModel:capturedAwemeModelTH];
+          [DYYYManager shared].currentImageIndex = capturedImageIndexTH;
+          if (capturedShareLink5.length == 0) {
+              [DYYYUtils showToast:@"无法获取分享链接"];
+              return;
+          }
+          [DYYYUtils showToast:@"正在接口5解析(TikHub)..."];
+          [DYYYManager parseAndDownloadVideoViaTikHub:capturedShareLink5 retryCount:0];
+          AWELongPressPanelManager *panelManagerTH = [%c(AWELongPressPanelManager) shareInstance];
+          [panelManagerTH dismissWithAnimation:YES completion:nil];
+          } @catch (NSException *e) {
+              NSLog(@"[DYYY] 接口5异常: %@", e);
+              [DYYYUtils showToast:@"接口5保存异常，请重试"];
+          }
+        };
+        [viewModels addObject:tikhubVM];
+    }
+
     // 封面下载功能
     if (enableSaveCover && self.awemeModel.awemeType != 68) {
         AWELongPressPanelBaseViewModel *coverViewModel = [[%c(AWELongPressPanelBaseViewModel) alloc] init];
@@ -1731,6 +1762,37 @@
           }
         };
         [viewModels addObject:localParseVM];
+    }
+
+    // 接口5保存功能（TikHub直连：web全档bit_rate+原画置顶+hybrid兜底）
+    BOOL enableApi5 = [[NSUserDefaults standardUserDefaults] objectForKey:@"DYYYInterfaceDownload5Enabled"] == nil ? YES : DYYYGetBool(@"DYYYInterfaceDownload5Enabled");
+    if (enableApi5) {
+        AWELongPressPanelBaseViewModel *tikhubVM = [[%c(AWELongPressPanelBaseViewModel) alloc] init];
+        tikhubVM.awemeModel = self.awemeModel;
+        tikhubVM.actionType = 681;
+        tikhubVM.duxIconName = @"ic_cloudarrowdown_outlined_20";
+        tikhubVM.describeString = @"接口5保存";
+        AWEAwemeModel *capturedAwemeModelTH = self.awemeModel;
+        NSInteger capturedImageIndexTH = self.awemeModel.currentImageIndex;
+        NSString *capturedShareLink5 = [capturedAwemeModelTH valueForKey:@"shareURL"];
+        tikhubVM.action = ^{
+          @try {
+          [DYYYManager storeMetadataFromAwemeModel:capturedAwemeModelTH];
+          [DYYYManager shared].currentImageIndex = capturedImageIndexTH;
+          if (capturedShareLink5.length == 0) {
+              [DYYYUtils showToast:@"无法获取分享链接"];
+              return;
+          }
+          [DYYYUtils showToast:@"正在接口5解析(TikHub)..."];
+          [DYYYManager parseAndDownloadVideoViaTikHub:capturedShareLink5 retryCount:0];
+          AWELongPressPanelManager *panelManagerTH = [%c(AWELongPressPanelManager) shareInstance];
+          [panelManagerTH dismissWithAnimation:YES completion:nil];
+          } @catch (NSException *e) {
+              NSLog(@"[DYYY] 接口5异常: %@", e);
+              [DYYYUtils showToast:@"接口5保存异常，请重试"];
+          }
+        };
+        [viewModels addObject:tikhubVM];
     }
 
 // 封面下载功能

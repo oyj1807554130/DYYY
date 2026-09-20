@@ -6555,6 +6555,22 @@ static NSHashTable *processedParentViews = nil;
                 [actions addObject:apiDownload3Action];
         }
 
+        // 添加接口5保存选项（TikHub直连：web全档bit_rate+原画置顶+hybrid兜底）
+        if ([[NSUserDefaults standardUserDefaults] objectForKey:@"DYYYInterfaceDownload5Enabled"] == nil ? YES : DYYYGetBool(@"DYYYInterfaceDownload5Enabled")) {
+            AWEUserSheetAction *apiDownload5Action = [NSClassFromString(@"AWEUserSheetAction") actionWithTitle:@"接口5保存"
+                                                                                                           imgName:nil
+                                                                                                           handler:^{
+                                                                                                             NSString *shareLink = [awemeModel valueForKey:@"shareURL"];
+                                                                                                             if (shareLink.length == 0) {
+                                                                                                                 [DYYYUtils showToast:@"无法获取分享链接"];
+                                                                                                                 return;
+                                                                                                             }
+                                                                                                             [DYYYUtils showToast:@"正在接口5解析(TikHub)..."];
+                                                                                                             [DYYYManager parseAndDownloadVideoViaTikHub:shareLink retryCount:0];
+                                                                                                           }];
+                [actions addObject:apiDownload5Action];
+        }
+
         // 添加本地解析选项（同接口2/3，开关控制显示）
         if (DYYYGetBool(@"DYYYLocalParseEnabled") || ![[NSUserDefaults standardUserDefaults] objectForKey:@"DYYYLocalParseEnabled"]) {
             AWEUserSheetAction *localParseAction = [NSClassFromString(@"AWEUserActionSheetView") actionWithTitle:@"本地解析"

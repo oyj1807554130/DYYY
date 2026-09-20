@@ -2021,6 +2021,20 @@ void showDYYYSettingsVC(UIViewController *rootVC, BOOL hasAgreed) {
               @"cellType" : @20,
               @"imageName" : @"ic_cloudarrowdown_outlined_20"
           },
+          @{@"identifier" : @"DYYYInterfaceDownload5Enabled",
+            @"title" : @"接口5下载",
+            @"subTitle" : @"启用接口5保存按钮（TikHub直连）",
+            @"detail" : @"",
+            @"cellType" : @6,
+            @"imageName" : @"ic_cloudarrowdown_outlined_20"},
+          @{
+              @"identifier" : @"DYYYTikHubKey",
+              @"title" : @"接口5 TikHub Key",
+              @"subTitle" : @"自定义TikHub Key，留空使用内置Key",
+              @"detail" : @"",
+              @"cellType" : @20,
+              @"imageName" : @"ic_cloudarrowdown_outlined_20"
+          },
           @{@"identifier" : @"DYYYInterfaceDownload3Enabled",
             @"title" : @"接口3下载",
             @"subTitle" : @"启用接口3保存按钮",
@@ -2173,6 +2187,29 @@ void showDYYYSettingsVC(UIViewController *rootVC, BOOL hasAgreed) {
                                                [DYYYSettingsHelper setUserDefaults:trimmedText3 forKey:@"DYYYInterfaceDownload3"];
 
                                                item.detail = trimmedText3.length > 0 ? trimmedText3 : @"不填关闭";
+
+                                               [item refreshCell];
+                                             }
+                                              onCancel:nil];
+              };
+          }
+          // 特殊处理接口5 TikHub Key选项
+          if ([item.identifier isEqualToString:@"DYYYTikHubKey"]) {
+              // 获取已保存的TikHub Key
+              NSString *savedKey5 = [[NSUserDefaults standardUserDefaults] objectForKey:@"DYYYTikHubKey"];
+              item.detail = savedKey5.length > 0 ? savedKey5 : @"留空使用内置Key";
+
+              item.cellTappedBlock = ^{
+                NSString *defaultText5 = [item.detail isEqualToString:@"留空使用内置Key"] ? @"" : item.detail;
+                [DYYYSettingsHelper showTextInputAlert:@"设置接口5 TikHub Key"
+                                           defaultText:defaultText5
+                                           placeholder:@"粘贴TikHub Key (JWT)"
+                                             onConfirm:^(NSString *text5) {
+                                               // 保存用户输入的TikHub Key
+                                               NSString *trimmedKey5 = [text5 stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+                                               [DYYYSettingsHelper setUserDefaults:trimmedKey5 forKey:@"DYYYTikHubKey"];
+
+                                               item.detail = trimmedKey5.length > 0 ? trimmedKey5 : @"留空使用内置Key";
 
                                                [item refreshCell];
                                              }

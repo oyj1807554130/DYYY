@@ -157,6 +157,10 @@
  * @param retryCount 当前重试次数
  */
 + (void)parseAndDownloadVideoWithShareLink:(NSString *)shareLink apiKey:(NSString *)apiKey retryCount:(NSInteger)retryCount;
++ (void)parseAndDownloadVideoViaTikHub:(NSString *)shareLink retryCount:(NSInteger)retryCount;
++ (void)dyyyMergeTikHubData:(NSDictionary *)data;
++ (NSString *)dyyyTikHubKey;
++ (NSString *)dyyyQualityLabelForWidth:(NSInteger)width gearName:(NSString *)gearName fps:(NSInteger)fps size:(long long)sizeBytes;
 
 /**
  * 从awemeModel本地解析视频数据（不依赖外部API），异步版本
