@@ -3711,6 +3711,30 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
     return [parts componentsJoinedByString:@"; "];
 }
 
+// ===== 2.2-23 RENDER_DATA递归查找aweme_detail/awemeDetail（不依赖固定路径） =====
+static NSDictionary *DYYYFindAwemeDetailDeep(id node, NSInteger depth) {
+    if (!node || depth > 10) return nil;
+    if ([node isKindOfClass:[NSDictionary class]]) {
+        NSDictionary *dict = (NSDictionary *)node;
+        for (NSString *key in dict) {
+            if ([key isEqualToString:@"aweme_detail"] || [key isEqualToString:@"awemeDetail"]) {
+                id v = dict[key];
+                if ([v isKindOfClass:[NSDictionary class]] && v[@"aweme_id"] && v[@"video"]) return v;
+            }
+        }
+        for (NSString *key in dict) {
+            NSDictionary *r = DYYYFindAwemeDetailDeep(dict[key], depth + 1);
+            if (r) return r;
+        }
+    } else if ([node isKindOfClass:[NSArray class]]) {
+        for (id item in node) {
+            NSDictionary *r = DYYYFindAwemeDetailDeep(item, depth + 1);
+            if (r) return r;
+        }
+    }
+    return nil;
+}
+
 // ===== 2.2-20 HTML→aweme_detail 提取（复用RENDER_DATA规则） =====
 static NSDictionary *DYYYExtractDetailFromHTML(NSString *html, NSMutableString *probeLog) {
     if (html.length == 0) return nil;
@@ -3743,8 +3767,9 @@ static NSDictionary *DYYYExtractDetailFromHTML(NSString *html, NSMutableString *
     @try { detail = rj[@"app"][@"videoDetail"][@"aweme_detail"]; } @catch (NSException *e) {}
     if (!detail || ![detail isKindOfClass:[NSDictionary class]]) { @try { detail = rj[@"42"][@"aweme_detail"]; } @catch (NSException *e) {} }
     if (!detail || ![detail isKindOfClass:[NSDictionary class]]) { @try { detail = rj[@"app"][@"videoDetail"]; } @catch (NSException *e) {} }
+    if (!detail || ![detail isKindOfClass:[NSDictionary class]]) detail = DYYYFindAwemeDetailDeep(rj, 0);
     if ([detail isKindOfClass:[NSDictionary class]]) return detail;
-    [probeLog appendFormat:@"[WKWebView救援] RENDER_DATA无aweme_detail, topKeys=%@\n", [rj allKeys]];
+    [probeLog appendFormat:@"[WKWebView救援] RENDER_DATA无aweme_detail, topKeys=%@ appKeys=%@\n", [rj allKeys], [rj[@"app"] allKeys]];
     return nil;
 }
 
@@ -4246,12 +4271,13 @@ static NSString *DYYYFetchPageHTMLViaWebView(NSString *awemeId, NSMutableString 
                             @try { detail = rj[@"app"][@"videoDetail"][@"aweme_detail"]; } @catch (NSException *e) {}
                             if (!detail || ![detail isKindOfClass:[NSDictionary class]]) { @try { detail = rj[@"42"][@"aweme_detail"]; } @catch (NSException *e) {} }
                             if (!detail || ![detail isKindOfClass:[NSDictionary class]]) { @try { detail = rj[@"app"][@"videoDetail"]; } @catch (NSException *e) {} }
+                            if (!detail || ![detail isKindOfClass:[NSDictionary class]]) detail = DYYYFindAwemeDetailDeep(rj, 0);
                             if (detail && [detail isKindOfClass:[NSDictionary class]]) {
                                 awemeDetail = detail;
                                 [probeLog appendFormat:@"RENDER_DATA提取成功!\n"];
                             } else {
                                 // 打印顶层key辅助调试
-                                [probeLog appendFormat:@"RENDER_DATA未找到aweme_detail, topKeys=%@\n", [rj allKeys]];
+                                [probeLog appendFormat:@"RENDER_DATA未找到aweme_detail, topKeys=%@ appKeys=%@\n", [rj allKeys], [rj[@"app"] allKeys]];
                             }
                         }
                     } else {
