@@ -560,7 +560,7 @@ static NSString *DY4KRegisterTtwid(void) {
         req.timeoutInterval = 10;
         dispatch_semaphore_t sem = dispatch_semaphore_create(0);
         __block NSString *tt = nil;
-        [[NSURLSession sharedSession] dataTaskWithRequest:req completionHandler:^(NSData *d, NSURLResponse *r, __unused NSError *e) {
+        NSURLSessionDataTask *tsk = [[NSURLSession sharedSession] dataTaskWithRequest:req completionHandler:^(NSData *d, NSURLResponse *r, __unused NSError *e) {
             @try {
                 NSString *sc = ((NSHTTPURLResponse *)r).allHeaderFields[@"Set-Cookie"];
                 if (sc.length > 0) {
@@ -577,8 +577,9 @@ static NSString *DY4KRegisterTtwid(void) {
                 }
             } @catch (NSException *ex) {}
             dispatch_semaphore_signal(sem);
-        } resume];
-        dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, 10LL * NSEC_PER_SEC));
+        }];
+        [tsk resume];
+        dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, (int64_t)10 * NSEC_PER_SEC));
         if (tt.length > 0) [[NSUserDefaults standardUserDefaults] setObject:tt forKey:@"dy4k_ttwid"];
         return tt;
     } @catch (NSException *e) { return nil; }
@@ -595,10 +596,11 @@ static void DY4KFetchDetailWeb(NSString *aid, void (^done)(BOOL ok)) {
                 [warm setValue:@"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36" forHTTPHeaderField:@"User-Agent"];
                 warm.timeoutInterval = 10;
                 dispatch_semaphore_t wsem = dispatch_semaphore_create(0);
-                [[NSURLSession sharedSession] dataTaskWithRequest:warm completionHandler:^(__unused NSData *d, __unused NSURLResponse *r, __unused NSError *e) {
+                NSURLSessionDataTask *wsk = [[NSURLSession sharedSession] dataTaskWithRequest:warm completionHandler:^(__unused NSData *d, __unused NSURLResponse *r, __unused NSError *e) {
                     dispatch_semaphore_signal(wsem);
-                } resume];
-                dispatch_semaphore_wait(wsem, dispatch_time(DISPATCH_TIME_NOW, 10LL * NSEC_PER_SEC));
+                }];
+                [wsk resume];
+                dispatch_semaphore_wait(wsem, dispatch_time(DISPATCH_TIME_NOW, (int64_t)10 * NSEC_PER_SEC));
                 [ck setString:DY4KCollectCookies()];
             }
             if (![ck containsString:@"ttwid="]) {
@@ -622,7 +624,7 @@ static void DY4KFetchDetailWeb(NSString *aid, void (^done)(BOOL ok)) {
                 [req setValue:ck forHTTPHeaderField:@"Cookie"];
                 req.timeoutInterval = 15;
                 dispatch_semaphore_t sem = dispatch_semaphore_create(0);
-                [[NSURLSession sharedSession] dataTaskWithRequest:req completionHandler:^(NSData *d, __unused NSURLResponse *r, NSError *e) {
+                NSURLSessionDataTask *ask = [[NSURLSession sharedSession] dataTaskWithRequest:req completionHandler:^(NSData *d, __unused NSURLResponse *r, NSError *e) {
                     @try {
                         if (d.length > 0) {
                             NSDictionary *j = [NSJSONSerialization JSONObjectWithData:d options:0 error:nil];
@@ -648,8 +650,9 @@ static void DY4KFetchDetailWeb(NSString *aid, void (^done)(BOOL ok)) {
                         }
                     } @catch (NSException *ex) {}
                     dispatch_semaphore_signal(sem);
-                } resume];
-                dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, 15LL * NSEC_PER_SEC));
+                }];
+                [ask resume];
+                dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, (int64_t)15 * NSEC_PER_SEC));
             }
         } @catch (NSException *ex2) {
             @synchronized (dy4kMonNames) { dy4kLastErr = ex2.reason ?: @"异常"; }
@@ -669,10 +672,8 @@ static void DY4KShowDiag(void) {
     [msg appendFormat:@"\nswizzle:%d", dy4kSwizzled];
     [msg appendFormat:@"\n挖aid:%ld", dy4kDigHit];
     [msg appendFormat:@"\n主动请求:%ld/%ld", dy4kNTMOk, dy4kNTMFired];
-    NSString *ntmSel = nil;
     NSString *lastErr = nil;
-    @synchronized (dy4kMonNames) { ntmSel = dy4kNTMSel; lastErr = dy4kLastErr; }
-    if (ntmSel.length > 0) [msg appendFormat:@"\nGET方法:%@", ntmSel];
+    @synchronized (dy4kMonNames) { lastErr = dy4kLastErr; }
     [msg appendFormat:@"\n主动路错误:%@", lastErr ?: @"无"];
     [msg appendFormat:@"\nURL拦截入库:%ld", dy4kURLHit];
     NSString *pthLst = nil;
