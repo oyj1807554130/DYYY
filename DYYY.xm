@@ -6513,8 +6513,11 @@ static NSHashTable *processedParentViews = nil;
         }
 
         // 添加接口2保存选项
-        if (DYYYGetBool(@"DYYYInterfaceDownload2Enabled")) {
+        if (DYYYGetBool(@"DYYYInterfaceDownload2Enabled") || [[NSUserDefaults standardUserDefaults] objectForKey:@"DYYYInterfaceDownload2Enabled"] == nil) {
             NSString *apiKey2 = [[NSUserDefaults standardUserDefaults] objectForKey:@"DYYYInterfaceDownload2"];
+            if (apiKey2.length == 0) {
+                apiKey2 = @"http://1.15.172.174:8001/api/douyin?key=DYYY&url=";
+            }
             AWEUserSheetAction *apiDownload2Action = [NSClassFromString(@"AWEUserSheetAction") actionWithTitle:@"接口2保存"
                                                                                                            imgName:nil
                                                                                                            handler:^{

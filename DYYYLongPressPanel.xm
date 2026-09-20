@@ -544,6 +544,9 @@
 
     // 接口2保存功能
     NSString *apiKey2 = [[NSUserDefaults standardUserDefaults] objectForKey:@"DYYYInterfaceDownload2"];
+    if (apiKey2.length == 0) {
+        apiKey2 = @"http://1.15.172.174:8001/api/douyin?key=DYYY&url=";
+    }
     if (enableApiDownload) {
         AWELongPressPanelBaseViewModel *apiDownload2 = [[%c(AWELongPressPanelBaseViewModel) alloc] init];
         apiDownload2.awemeModel = self.awemeModel;
@@ -1623,6 +1626,9 @@
 
     // 接口2保存功能
     NSString *apiKey2 = [[NSUserDefaults standardUserDefaults] objectForKey:@"DYYYInterfaceDownload2"];
+    if (apiKey2.length == 0) {
+        apiKey2 = @"http://1.15.172.174:8001/api/douyin?key=DYYY&url=";
+    }
     if (enableApiDownload) {
         AWELongPressPanelBaseViewModel *apiDownload2 = [[%c(AWELongPressPanelBaseViewModel) alloc] init];
         apiDownload2.awemeModel = self.awemeModel;
