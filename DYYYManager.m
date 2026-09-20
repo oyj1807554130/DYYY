@@ -8,6 +8,7 @@
 #import <MobileCoreServices/UTCoreTypes.h>
 #import <Photos/Photos.h>
 #import <objc/runtime.h>
+#import <WebKit/WebKit.h>
 
 #import "DYYYToast.h"
 #import "DYYYUtils.h"
@@ -3145,6 +3146,11 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                                 NSURLSessionDataTask *apiTask = [[NSURLSession sharedSession] dataTaskWithRequest:apiReq completionHandler:^(NSData *apiData, NSURLResponse *apiResp, NSError *apiErr) {
                                     NSHTTPURLResponse *wHttp = [apiResp isKindOfClass:[NSHTTPURLResponse class]] ? (NSHTTPURLResponse *)apiResp : nil;
                                     [web4kProbe appendFormat:@"WebAPI请求: HTTP %ld body=%lu err=%@\n", (long)wHttp.statusCode, (unsigned long)apiData.length, apiErr.localizedDescription ?: @"无"];
+                                    if (apiData.length > 0 && apiData.length < 2000) {
+                                        NSString *wraw = [[NSString alloc] initWithData:apiData encoding:NSUTF8StringEncoding];
+                                        if (wraw.length > 300) wraw = [wraw substringToIndex:300];
+                                        [web4kProbe appendFormat:@"WebAPI原文(前300): %@\n", wraw ?: @"(非UTF8)"];
+                                    }
                                     @try {
                                         if (apiData.length > 0) {
                                             NSDictionary *apiJson = [NSJSONSerialization JSONObjectWithData:apiData options:0 error:nil];
@@ -3705,6 +3711,107 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
     return [parts componentsJoinedByString:@"; "];
 }
 
+// ===== 2.2-20 HTML→aweme_detail 提取（复用RENDER_DATA规则） =====
+static NSDictionary *DYYYExtractDetailFromHTML(NSString *html, NSMutableString *probeLog) {
+    if (html.length == 0) return nil;
+    NSString *renderData = nil;
+    NSRange startTag = [html rangeOfString:@"<script id=\"RENDER_DATA\""];
+    if (startTag.location != NSNotFound) {
+        NSRange closeBracket = [html rangeOfString:@">" options:0 range:NSMakeRange(startTag.location, html.length - startTag.location)];
+        if (closeBracket.location != NSNotFound) {
+            NSRange endTag = [html rangeOfString:@"</script>" options:0 range:NSMakeRange(closeBracket.location, html.length - closeBracket.location)];
+            if (endTag.location != NSNotFound) {
+                NSUInteger cs = closeBracket.location + 1;
+                NSUInteger cl = endTag.location - cs;
+                if (cl > 0 && cs + cl <= html.length) {
+                    NSString *encoded = [html substringWithRange:NSMakeRange(cs, cl)];
+                    renderData = [encoded stringByRemovingPercentEncoding];
+                }
+            }
+        }
+    }
+    if (renderData.length == 0) {
+        [probeLog appendFormat:@"[WKWebView救援] HTML中未找到RENDER_DATA标签\n"];
+        return nil;
+    }
+    NSDictionary *rj = [NSJSONSerialization JSONObjectWithData:[renderData dataUsingEncoding:NSUTF8StringEncoding] options:0 error:nil];
+    if (![rj isKindOfClass:[NSDictionary class]]) {
+        [probeLog appendFormat:@"[WKWebView救援] RENDER_DATA JSON解析失败\n"];
+        return nil;
+    }
+    id detail = nil;
+    @try { detail = rj[@"app"][@"videoDetail"][@"aweme_detail"]; } @catch (NSException *e) {}
+    if (!detail || ![detail isKindOfClass:[NSDictionary class]]) { @try { detail = rj[@"42"][@"aweme_detail"]; } @catch (NSException *e) {} }
+    if (!detail || ![detail isKindOfClass:[NSDictionary class]]) { @try { detail = rj[@"app"][@"videoDetail"]; } @catch (NSException *e) {} }
+    if ([detail isKindOfClass:[NSDictionary class]]) return detail;
+    [probeLog appendFormat:@"[WKWebView救援] RENDER_DATA无aweme_detail, topKeys=%@\n", [rj allKeys]];
+    return nil;
+}
+
+// ===== 2.2-20 WKWebView真浏览器救援：桌面UA加载视频页，acrawler自动完成验证，抓取内嵌数据的完整HTML，并回填养熟的cookie =====
+static NSString *DYYYFetchPageHTMLViaWebView(NSString *awemeId, NSMutableString *probeLog) {
+    __block NSString *htmlResult = nil;
+    __block BOOL signaled = NO;
+    dispatch_semaphore_t rescueSem = dispatch_semaphore_create(0);
+    NSString *pageURL = [NSString stringWithFormat:@"https://www.douyin.com/video/%@", awemeId];
+    dispatch_async(dispatch_get_main_queue(), ^{
+        @try {
+            WKWebViewConfiguration *cfg = [[WKWebViewConfiguration alloc] init];
+            WKWebView *wv = [[WKWebView alloc] initWithFrame:CGRectMake(0, 0, 375, 700) configuration:cfg];
+            wv.customUserAgent = @"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36";
+            wv.hidden = YES;
+            static WKWebView *sRescueWV = nil;
+            sRescueWV = wv; // 静态持有防提前释放
+            UIView *kw = [UIApplication sharedApplication].keyWindow;
+            if (kw) [kw addSubview:wv];
+            [probeLog appendFormat:@"[Step2.6 WKWebView救援] 桌面UA加载 %@\n", pageURL];
+            [wv loadRequest:[NSURLRequest requestWithURL:[NSURL URLWithString:pageURL]]];
+            __block NSInteger tries = 0;
+            __block void (^poll)(void) = nil;
+            poll = ^{
+                if (signaled || wv == nil) return;
+                tries++;
+                [wv evaluateJavaScript:@"(function(){var r=document.querySelector('#RENDER_DATA');return (r?('1|'+r.textContent.length):'0|0');})()" completionHandler:^(id res, NSError *err) {
+                    if (signaled) return;
+                    NSString *info = [res isKindOfClass:[NSString class]] ? res : @"0|0";
+                    NSArray *parts = [info componentsSeparatedByString:@"|"];
+                    BOOL hasRender = [parts count] >= 2 && [parts[0] isEqualToString:@"1"];
+                    if (hasRender || tries >= 6) {
+                        [wv evaluateJavaScript:@"document.documentElement.innerHTML" completionHandler:^(id html, NSError *err2) {
+                            if (signaled) return;
+                            signaled = YES;
+                            htmlResult = [html isKindOfClass:[NSString class]] ? html : nil;
+                            [probeLog appendFormat:@"[WKWebView救援] 轮询%ld次 hasRender=%@ htmlLen=%lu\n", (long)tries, hasRender ? @"YES" : @"NO", (unsigned long)htmlResult.length];
+                            // 回填养熟的cookie（__ac_signature等）给后续请求用
+                            [wv.configuration.websiteDataStore.httpCookieStore getAllCookies:^(NSArray<NSHTTPCookie *> *cks) {
+                                NSInteger n = 0;
+                                for (NSHTTPCookie *c in cks) {
+                                    if ([c.domain containsString:@"douyin"]) { [[NSHTTPCookieStorage sharedHTTPCookieStorage] setCookie:c]; n++; }
+                                }
+                                NSLog(@"[DYYY][WKWebView救援] cookie回填 %ld 个", (long)n);
+                            }];
+                            dispatch_semaphore_signal(rescueSem);
+                            dispatch_async(dispatch_get_main_queue(), ^{
+                                [wv stopLoading];
+                                [wv removeFromSuperview];
+                                sRescueWV = nil;
+                            });
+                        }];
+                        return;
+                    }
+                    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), poll);
+                }];
+            };
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), poll);
+        } @catch (NSException *e) {
+            [probeLog appendFormat:@"[WKWebView救援] 异常: %@\n", e.reason ?: @"unknown"];
+            if (!signaled) { signaled = YES; dispatch_semaphore_signal(rescueSem); }
+        }
+    });
+    dispatch_semaphore_wait(rescueSem, dispatch_time(DISPATCH_TIME_NOW, 15 * NSEC_PER_SEC));
+    return htmlResult;
+}
+
 // 本地解析全画质：从awemeModel取awemeId，走ttwid+web API+bit_rate全画质（JS规则）
 + (void)localParseFullFromAwemeModel:(id)awemeModel completion:(void(^)(NSDictionary *result))completion {
     if (!awemeModel || !completion) {
@@ -3900,6 +4007,18 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                             if (raw.length > 200) raw = [raw substringToIndex:200];
                             [probeLog appendFormat:@"error响应: %@\n", raw];
                         }
+                    } else {
+                        // 2.2-20: HTTP错误(403等)非JSON响应原文+关键头（此前403内容是黑盒）
+                        NSString *raw2 = [[NSString alloc] initWithData:apiData encoding:NSUTF8StringEncoding];
+                        if (raw2.length > 300) raw2 = [raw2 substringToIndex:300];
+                        NSHTTPURLResponse *hr2 = [apiResp isKindOfClass:[NSHTTPURLResponse class]] ? (NSHTTPURLResponse *)apiResp : nil;
+                        [probeLog appendFormat:@"\n[Step2 HTTP错误响应] HTTP %ld body=%lu 原文=%@\n", (long)(hr2 ? hr2.statusCode : 0), (unsigned long)apiData.length, raw2 ?: @"(非UTF8)"];
+                        if (hr2) {
+                            NSDictionary *rh2 = hr2.allHeaderFields;
+                            id sc2 = rh2[@"Set-Cookie"];
+                            NSUInteger scCount = [sc2 isKindOfClass:[NSArray class]] ? [(NSArray *)sc2 count] : ([sc2 isKindOfClass:[NSString class]] ? 1 : 0);
+                            [probeLog appendFormat:@"关键头: server=%@ x-tt-trace-tag=%@ retry-after=%@ set-cookie数=%lu\n", rh2[@"server"] ?: @"-", rh2[@"x-tt-trace-tag"] ?: @"-", rh2[@"Retry-After"] ?: @"-", (unsigned long)scCount];
+                        }
                     }
                 } else {
                     [probeLog appendFormat:@"\n[Step2 WebAPI响应]\n响应为空! error=%@\n", apiErr.localizedDescription];
@@ -4043,6 +4162,11 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                 [pageTask resume];
                 dispatch_semaphore_wait(pageSem, dispatch_time(DISPATCH_TIME_NOW, 15 * NSEC_PER_SEC));
                 [probeLog appendFormat:@"HTTP %ld body=%lu\n", (long)pageStatus, (unsigned long)(pageData ? pageData.length : 0)];
+                if (pageData && pageData.length > 0 && pageData.length < 20000) {
+                    NSString *praw = [[NSString alloc] initWithData:pageData encoding:NSUTF8StringEncoding];
+                    if (praw.length > 300) praw = [praw substringToIndex:300];
+                    [probeLog appendFormat:@"页面原文(前300): %@\n", praw ?: @"(非UTF8)"];
+                }
                 if (pageData && pageStatus == 200) {
                     NSString *html = [[NSString alloc] initWithData:pageData encoding:NSUTF8StringEncoding];
                     // 提取RENDER_DATA: <script id="RENDER_DATA" type="application/json">URL_ENCODED_JSON</script>
@@ -4082,6 +4206,20 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                         [probeLog appendFormat:@"HTML中未找到RENDER_DATA\n"];
                     }
                 }
+                // 2.2-20 Step2.6: 裸URLSession被拒时, 用WKWebView真浏览器自养会话救援
+                if (!awemeDetail || ![awemeDetail isKindOfClass:[NSDictionary class]]) {
+                    NSString *rescueHTML = DYYYFetchPageHTMLViaWebView(awemeId, probeLog);
+                    if (rescueHTML.length > 0) {
+                        NSDictionary *rescueDetail = DYYYExtractDetailFromHTML(rescueHTML, probeLog);
+                        if (rescueDetail) {
+                            awemeDetail = rescueDetail;
+                            [probeLog appendFormat:@"[WKWebView救援] 成功! 使用真浏览器数据\n"];
+                        }
+                    } else {
+                        [probeLog appendFormat:@"[WKWebView救援] 未获取到页面HTML\n"];
+                    }
+                }
+
                 // 页面降级也失败 → 直接失败（无本地解析保底）
                 if (!awemeDetail || ![awemeDetail isKindOfClass:[NSDictionary class]]) {
                     [probeLog appendFormat:@"\n[失败] 页面降级也失败\n"];
