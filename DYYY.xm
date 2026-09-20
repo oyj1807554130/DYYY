@@ -9473,7 +9473,13 @@ static void findTargetViewInView(UIView *view) {
                                                   usingBlock:^(NSNotification *note) {
                                                       NSString *probeText = note.userInfo[@"text"];
                                                       if (probeText.length > 0) {
-                                                          [UIPasteboard generalPasteboard].string = probeText;
+                                                          // 追加模式：剪贴板已有探针日志时拼接，避免后到的简略日志覆盖先前的详细日志
+                                                          NSString *existing = [UIPasteboard generalPasteboard].string;
+                                                          if (existing.length > 0 && [existing containsString:@"[接口4探针]"]) {
+                                                              [UIPasteboard generalPasteboard].string = [NSString stringWithFormat:@"%@\n\n----------\n\n%@", existing, probeText];
+                                                          } else {
+                                                              [UIPasteboard generalPasteboard].string = probeText;
+                                                          }
                                                           [DYYYUtils showToast:@"[接口4探针] 日志已复制到剪贴板"];
                                                       }
                                                   }];

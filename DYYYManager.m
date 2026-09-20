@@ -3099,6 +3099,7 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                     __block NSString *ttwidStr = nil;
                     __block NSDictionary *webBitrate4K = nil;
                     __block NSDictionary *webBitrate1440 = nil;
+                    __block NSMutableString *web4kProbe = [NSMutableString stringWithFormat:@"[本地解析][4K补充探针] awemeId=%@\n", awemeId];
                     dispatch_group_t webApiGroup = dispatch_group_create();
                     dispatch_group_enter(webApiGroup);
                     // Step 1: 获取ttwid
@@ -3130,6 +3131,7 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                                     if ([[c1 name] isEqualToString:@"ttwid"]) { ttwidStr = [c1 value]; break; }
                                 }
                             }
+                            [web4kProbe appendFormat:@"ttwid注册: HTTP %ld 结果=%@\n", (long)([response isKindOfClass:[NSHTTPURLResponse class]] ? [(NSHTTPURLResponse *)response statusCode] : 0), ttwidStr.length > 0 ? @"成功" : @"失败"];
                             // Step 2: 用ttwid调web API
                             if (ttwidStr.length > 0) {
                                 // 存储ttwid供后续CDN下载使用
@@ -3141,6 +3143,8 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                                 [apiReq setValue:@"application/json" forHTTPHeaderField:@"Accept"];
                                 [apiReq setValue:[NSString stringWithFormat:@"ttwid=%@", ttwidStr] forHTTPHeaderField:@"Cookie"];
                                 NSURLSessionDataTask *apiTask = [[NSURLSession sharedSession] dataTaskWithRequest:apiReq completionHandler:^(NSData *apiData, NSURLResponse *apiResp, NSError *apiErr) {
+                                    NSHTTPURLResponse *wHttp = [apiResp isKindOfClass:[NSHTTPURLResponse class]] ? (NSHTTPURLResponse *)apiResp : nil;
+                                    [web4kProbe appendFormat:@"WebAPI请求: HTTP %ld body=%lu err=%@\n", (long)wHttp.statusCode, (unsigned long)apiData.length, apiErr.localizedDescription ?: @"无"];
                                     @try {
                                         if (apiData.length > 0) {
                                             NSDictionary *apiJson = [NSJSONSerialization JSONObjectWithData:apiData options:0 error:nil];
@@ -3163,6 +3167,7 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                                                     }
                                                 }
                                             }
+                                            [web4kProbe appendFormat:@"WebAPI结果: bit_rate=%lu条 4K档=%@ 2K档=%@\n", (unsigned long)([bitRateList isKindOfClass:[NSArray class]] ? [bitRateList count] : 0), webBitrate4K ? @"有" : @"无", webBitrate1440 ? @"有" : @"无"];
                                         }
                                     } @catch (NSException *e2) {}
                                     dispatch_group_leave(webApiGroup);
@@ -3245,6 +3250,8 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                             [videoList insertObject:@{@"level": finalLabel, @"url": finalUrl} atIndex:0];
                         }
                     }
+                    [web4kProbe appendFormat:@"最终: 4K条目=%@ 2K条目=%@ 待插入=%lu\n", webBitrate4K ? @"有" : @"无", webBitrate1440 ? @"有" : @"无", (unsigned long)web4KItems.count];
+                    [[NSNotificationCenter defaultCenter] postNotificationName:@"DYYYProbeNotification" object:nil userInfo:@{@"text": [web4kProbe copy]}];
                 }
             }
 

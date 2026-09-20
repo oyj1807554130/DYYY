@@ -521,11 +521,15 @@
                        if (localData) {
                            [DYYYManager handleVideoData:localData];
                        } else {
+                           // 失败探针：Full版失败→降级本地解析
+                           [[NSNotificationCenter defaultCenter] postNotificationName:@"DYYYProbeNotification" object:nil userInfo:@{@"text": @"[接口4探针][主保存] Full版失败 → 已降级本地解析(1080p)"}];
                            [DYYYManager localParseFromAwemeModel:capturedAwemeModel completion:^(NSDictionary *fallbackData) {
                                dispatch_async(dispatch_get_main_queue(), ^{
                                    if (fallbackData) {
                                        [DYYYManager handleVideoData:fallbackData];
                                    } else {
+                                       // 失败探针：降级也失败
+                                       [[NSNotificationCenter defaultCenter] postNotificationName:@"DYYYProbeNotification" object:nil userInfo:@{@"text": @"[接口4探针][主保存] 本地解析降级也失败"}];
                                        [DYYYUtils showToast:@"本地解析失败"];
                                    }
                                });
@@ -1600,11 +1604,15 @@
                        if (localData) {
                            [DYYYManager handleVideoData:localData];
                        } else {
+                           // 失败探针：Full版失败→降级本地解析
+                           [[NSNotificationCenter defaultCenter] postNotificationName:@"DYYYProbeNotification" object:nil userInfo:@{@"text": @"[接口4探针][主保存] Full版失败 → 已降级本地解析(1080p)"}];
                            [DYYYManager localParseFromAwemeModel:capturedAwemeModel completion:^(NSDictionary *fallbackData) {
                                dispatch_async(dispatch_get_main_queue(), ^{
                                    if (fallbackData) {
                                        [DYYYManager handleVideoData:fallbackData];
                                    } else {
+                                       // 失败探针：降级也失败
+                                       [[NSNotificationCenter defaultCenter] postNotificationName:@"DYYYProbeNotification" object:nil userInfo:@{@"text": @"[接口4探针][主保存] 本地解析降级也失败"}];
                                        [DYYYUtils showToast:@"本地解析失败"];
                                    }
                                });
