@@ -1,4 +1,5 @@
 #import "DYYYManager.h"
+#import "DYYYABogus.h"
 #import <CoreAudioTypes/CoreAudioTypes.h>
 #import <CoreMedia/CMMetadata.h>
 #import <ImageIO/ImageIO.h>
@@ -4090,6 +4091,19 @@ static NSString *DYYYFetchAwemeDetailViaWebView(NSString *awemeId, NSMutableStri
             NSHTTPCookieStorage *healStore = [NSHTTPCookieStorage sharedHTTPCookieStorage];
             NSURL *healURL = [NSURL URLWithString:@"https://www.douyin.com/"];
             NSUInteger healPurged = 0;
+            NSString *healUifid = nil, *healMsToken = nil, *healSvwebid = nil;
+            for (NSHTTPCookie *hs in [healStore cookiesForURL:healURL]) {
+                if ([[hs name] isEqualToString:@"UIFID_TEMP"]) healUifid = [hs value];
+                else if ([[hs name] isEqualToString:@"msToken"]) healMsToken = [hs value];
+                else if ([[hs name] isEqualToString:@"s_v_web_id"]) healSvwebid = [hs value];
+            }
+            [probeLog appendFormat:@"指纹快照: uifid=%@ msToken=%@ svwebid=%@\n", healUifid ? @"有" : @"无", healMsToken ? @"有" : @"无", healSvwebid ? @"有" : @"无"];
+            if (healMsToken.length == 0) {
+                NSMutableString *hm = [NSMutableString stringWithCapacity:116];
+                NSString *halpha = @"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+                for (int hqi = 0; hqi < 116; hqi++) [hm appendFormat:@"%C", [halpha characterAtIndex:arc4random_uniform((uint32_t)halpha.length)]];
+                healMsToken = hm;
+            }
             for (NSHTTPCookie *hc in [[healStore cookiesForURL:healURL] copy]) {
                 [healStore deleteCookie:hc];
                 healPurged++;
@@ -4159,8 +4173,26 @@ static NSString *DYYYFetchAwemeDetailViaWebView(NSString *awemeId, NSMutableStri
             }
             [probeLog appendFormat:@"自愈Cookie头 len=%lu\n", (unsigned long)healCookie.length];
             if (healCookie.length > 0) {
-                NSMutableURLRequest *healApiReq = [apiReq mutableCopy];
+                // 2.2-28 全家桶重打: query追加msToken/fp → a_bogus本地签名(V6回归) → uifid头
+                NSString *healUa = @"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36";
+                NSMutableString *healQ = [NSMutableString stringWithString:[apiURL substringFromIndex:[apiURL rangeOfString:@"?"].location + 1]];
+                [healQ appendFormat:@"&msToken=%@", healMsToken];
+                if (healSvwebid.length > 0) [healQ appendFormat:@"&fp=%@", healSvwebid];
+                NSString *healSigned = [DYYYABogus signedQueryForParams:healQ body:nil ua:healUa];
+                [probeLog appendFormat:@"a_bogus签名=%@ q_len=%lu\n", healSigned.length > 0 ? @"OK" : @"失败", (unsigned long)healQ.length];
+                NSMutableURLRequest *healApiReq = nil;
+                if (healSigned.length > 0) {
+                    healApiReq = [[NSMutableURLRequest alloc] initWithURL:[NSURL URLWithString:[NSString stringWithFormat:@"https://www.douyin.com/aweme/v1/web/aweme/detail/?%@", healSigned]]];
+                } else {
+                    healApiReq = [apiReq mutableCopy];
+                }
+                [healApiReq setValue:healUa forHTTPHeaderField:@"User-Agent"];
+                [healApiReq setValue:@"https://www.douyin.com/" forHTTPHeaderField:@"Referer"];
                 [healApiReq setValue:healCookie forHTTPHeaderField:@"Cookie"];
+                if (healUifid.length > 0) {
+                    [healApiReq setValue:healUifid forHTTPHeaderField:@"uifid"];
+                    [probeLog appendFormat:@"uifid头 len=%lu\n", (unsigned long)healUifid.length];
+                }
                 __block NSInteger healHttpStatus = 0;
                 __block NSInteger healStatusCode = -1;
                 dispatch_semaphore_t healApiSem = dispatch_semaphore_create(0);
