@@ -3916,6 +3916,7 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                 awemeDetail = nil;
                 NSURLSessionDataTask *apiTask2 = [[NSURLSession sharedSession] dataTaskWithRequest:apiReq completionHandler:^(NSData *aD2, NSURLResponse *aR2, NSError *aE2) {
                     @try {
+                        [probeLog appendFormat:@"[Step2.2 重读Cookie重试] HTTP %ld\n", (long)((NSHTTPURLResponse *)aR2).statusCode];
                         if (aD2.length > 0) {
                             NSDictionary *aJ2 = [NSJSONSerialization JSONObjectWithData:aD2 options:0 error:nil];
                             if ([aJ2 isKindOfClass:[NSDictionary class]]) {
@@ -3928,6 +3929,88 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
                 }];
                 [apiTask2 resume];
                 dispatch_semaphore_wait(apiSem2, dispatch_time(DISPATCH_TIME_NOW, 15 * NSEC_PER_SEC));
+            }
+
+            // ===== Step2.4 会话重建重试：删旧ttwid→注册接口拿全新ttwid→新会话重试（复现"断网重启"效果） =====
+            if (!awemeDetail || ![awemeDetail isKindOfClass:[NSDictionary class]]) {
+                [probeLog appendFormat:@"\n[Step2.4 会话重建] 前两次尝试均失败，开始重建会话\n"];
+                NSHTTPCookieStorage *rebuildStore = [NSHTTPCookieStorage sharedHTTPCookieStorage];
+                NSURL *rebuildURL = [NSURL URLWithString:@"https://www.douyin.com/"];
+                NSUInteger deletedTtwid = 0;
+                for (NSHTTPCookie *oc in [rebuildStore cookiesForURL:rebuildURL]) {
+                    if ([[oc name] isEqualToString:@"ttwid"]) { [rebuildStore deleteCookie:oc]; deletedTtwid++; }
+                }
+                [probeLog appendFormat:@"已删除旧ttwid cookie: %lu个\n", (unsigned long)deletedTtwid];
+                __block NSString *newTtwid = nil;
+                __block NSInteger newTtwidStatus = 0;
+                NSString *rebuildTtwidURL = @"https://ttwid.bytedance.com/ttwid/union/register/";
+                NSString *rebuildTtwidBody = @"{\"region\":\"cn\",\"aid\":6383,\"needFid\":false,\"service\":\"www.douyin.com\",\"migrate_info\":{\"ticket\":\"\",\"source\":\"node\"},\"cbUrlProtocol\":\"https\",\"union\":true}";
+                NSMutableURLRequest *rebuildTtwidReq = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:rebuildTtwidURL]];
+                rebuildTtwidReq.HTTPMethod = @"POST";
+                rebuildTtwidReq.HTTPBody = [rebuildTtwidBody dataUsingEncoding:NSUTF8StringEncoding];
+                [rebuildTtwidReq setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
+                [rebuildTtwidReq setValue:@"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36" forHTTPHeaderField:@"User-Agent"];
+                dispatch_semaphore_t rebuildTtwidSem = dispatch_semaphore_create(0);
+                NSURLSessionDataTask *rebuildTtwidTask = [[NSURLSession sharedSession] dataTaskWithRequest:rebuildTtwidReq completionHandler:^(NSData *ntData, NSURLResponse *ntResp, NSError *ntErr) {
+                    @try {
+                        NSHTTPURLResponse *ntHttp = (NSHTTPURLResponse *)ntResp;
+                        newTtwidStatus = [ntHttp statusCode];
+                        NSString *ntSetCookie = [ntHttp allHeaderFields][@"Set-Cookie"];
+                        if (ntSetCookie.length > 0) {
+                            NSRange nr = [ntSetCookie rangeOfString:@"ttwid="];
+                            if (nr.location != NSNotFound) {
+                                NSString *nsub = [ntSetCookie substringFromIndex:nr.location + 6];
+                                NSRange nsemi = [nsub rangeOfString:@";"];
+                                newTtwid = nsemi.location != NSNotFound ? [nsub substringToIndex:nsemi.location] : nsub;
+                            }
+                        }
+                        if (!newTtwid || newTtwid.length == 0) {
+                            if (ntData.length > 0) {
+                                NSDictionary *ntJson = [NSJSONSerialization JSONObjectWithData:ntData options:0 error:nil];
+                                if ([ntJson isKindOfClass:[NSDictionary class]]) newTtwid = ntJson[@"ttwid"];
+                            }
+                        }
+                    } @catch (NSException *ne) {}
+                    dispatch_semaphore_signal(rebuildTtwidSem);
+                }];
+                [rebuildTtwidTask resume];
+                dispatch_semaphore_wait(rebuildTtwidSem, dispatch_time(DISPATCH_TIME_NOW, 10 * NSEC_PER_SEC));
+                if (newTtwid.length > 0) {
+                    [probeLog appendFormat:@"新ttwid获取成功 HTTP %ld 前20: %@...\n", (long)newTtwidStatus, [newTtwid substringToIndex:MIN(20, newTtwid.length)]];
+                    NSMutableString *rebuildCookieStr = [NSMutableString string];
+                    for (NSHTTPCookie *rc2 in [rebuildStore cookiesForURL:rebuildURL]) {
+                        if ([[rc2 name] isEqualToString:@"ttwid"]) continue;
+                        if (rebuildCookieStr.length > 0) [rebuildCookieStr appendString:@"; "];
+                        [rebuildCookieStr appendFormat:@"%@=%@", [rc2 name], [rc2 value]];
+                    }
+                    if (rebuildCookieStr.length > 0) [rebuildCookieStr appendString:@"; "];
+                    [rebuildCookieStr appendFormat:@"ttwid=%@", newTtwid];
+                    [probeLog appendFormat:@"重建Cookie头 len=%lu\n", (unsigned long)rebuildCookieStr.length];
+                    NSMutableURLRequest *rebuildApiReq = [apiReq mutableCopy];
+                    [rebuildApiReq setValue:rebuildCookieStr forHTTPHeaderField:@"Cookie"];
+                    __block NSInteger rebuildHttpStatus = 0;
+                    __block NSInteger rebuildStatusCode = -999;
+                    dispatch_semaphore_t rebuildApiSem = dispatch_semaphore_create(0);
+                    NSURLSessionDataTask *rebuildApiTask = [[NSURLSession sharedSession] dataTaskWithRequest:rebuildApiReq completionHandler:^(NSData *raData, NSURLResponse *raResp, NSError *raErr) {
+                        @try {
+                            NSHTTPURLResponse *raHttp = (NSHTTPURLResponse *)raResp;
+                            rebuildHttpStatus = [raHttp statusCode];
+                            if (raData.length > 0) {
+                                NSDictionary *raJson = [NSJSONSerialization JSONObjectWithData:raData options:0 error:nil];
+                                if ([raJson isKindOfClass:[NSDictionary class]]) {
+                                    rebuildStatusCode = [raJson[@"status_code"] integerValue];
+                                    if (rebuildStatusCode == 0) awemeDetail = raJson[@"aweme_detail"];
+                                }
+                            }
+                        } @catch (NSException *reEx) {}
+                        dispatch_semaphore_signal(rebuildApiSem);
+                    }];
+                    [rebuildApiTask resume];
+                    dispatch_semaphore_wait(rebuildApiSem, dispatch_time(DISPATCH_TIME_NOW, 15 * NSEC_PER_SEC));
+                    [probeLog appendFormat:@"会话重建重试结果: HTTP %ld status_code=%ld 成功=%@\n", (long)rebuildHttpStatus, (long)rebuildStatusCode, awemeDetail ? @"YES" : @"NO"];
+                } else {
+                    [probeLog appendFormat:@"新ttwid注册失败 HTTP %ld\n", (long)newTtwidStatus];
+                }
             }
 
             if (!awemeDetail || ![awemeDetail isKindOfClass:[NSDictionary class]]) {

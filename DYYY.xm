@@ -9465,6 +9465,18 @@ static void findTargetViewInView(UIView *view) {
                                                       }
                                                     }];
     }
+
+    // 接口4探针通知监听：收到探针日志→复制到剪贴板+Toast提示
+    [[NSNotificationCenter defaultCenter] addObserverForName:@"DYYYProbeNotification"
+                                                      object:nil
+                                                       queue:[NSOperationQueue mainQueue]
+                                                  usingBlock:^(NSNotification *note) {
+                                                      NSString *probeText = note.userInfo[@"text"];
+                                                      if (probeText.length > 0) {
+                                                          [UIPasteboard generalPasteboard].string = probeText;
+                                                          [DYYYUtils showToast:@"[接口4探针] 日志已复制到剪贴板"];
+                                                      }
+                                                  }];
 }
 
 // ===== 接口4探针通知监听（在%ctor中注册） =====
