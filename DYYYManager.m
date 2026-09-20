@@ -3711,77 +3711,15 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
     return [parts componentsJoinedByString:@"; "];
 }
 
-// ===== 2.2-23 RENDER_DATA递归查找aweme_detail/awemeDetail（不依赖固定路径） =====
-static NSDictionary *DYYYFindAwemeDetailDeep(id node, NSInteger depth) {
-    if (!node || depth > 10) return nil;
-    if ([node isKindOfClass:[NSDictionary class]]) {
-        NSDictionary *dict = (NSDictionary *)node;
-        for (NSString *key in dict) {
-            if ([key isEqualToString:@"aweme_detail"] || [key isEqualToString:@"awemeDetail"]) {
-                id v = dict[key];
-                if ([v isKindOfClass:[NSDictionary class]] && v[@"aweme_id"] && v[@"video"]) return v;
-            }
-        }
-        for (NSString *key in dict) {
-            NSDictionary *r = DYYYFindAwemeDetailDeep(dict[key], depth + 1);
-            if (r) return r;
-        }
-    } else if ([node isKindOfClass:[NSArray class]]) {
-        for (id item in node) {
-            NSDictionary *r = DYYYFindAwemeDetailDeep(item, depth + 1);
-            if (r) return r;
-        }
-    }
-    return nil;
-}
-
-// ===== 2.2-20 HTML→aweme_detail 提取（复用RENDER_DATA规则） =====
-static NSDictionary *DYYYExtractDetailFromHTML(NSString *html, NSMutableString *probeLog) {
-    if (html.length == 0) return nil;
-    NSString *renderData = nil;
-    NSRange startTag = [html rangeOfString:@"<script id=\"RENDER_DATA\""];
-    if (startTag.location != NSNotFound) {
-        NSRange closeBracket = [html rangeOfString:@">" options:0 range:NSMakeRange(startTag.location, html.length - startTag.location)];
-        if (closeBracket.location != NSNotFound) {
-            NSRange endTag = [html rangeOfString:@"</script>" options:0 range:NSMakeRange(closeBracket.location, html.length - closeBracket.location)];
-            if (endTag.location != NSNotFound) {
-                NSUInteger cs = closeBracket.location + 1;
-                NSUInteger cl = endTag.location - cs;
-                if (cl > 0 && cs + cl <= html.length) {
-                    NSString *encoded = [html substringWithRange:NSMakeRange(cs, cl)];
-                    renderData = [encoded stringByRemovingPercentEncoding];
-                }
-            }
-        }
-    }
-    if (renderData.length == 0) {
-        [probeLog appendFormat:@"[WKWebView救援] HTML中未找到RENDER_DATA标签\n"];
-        return nil;
-    }
-    NSDictionary *rj = [NSJSONSerialization JSONObjectWithData:[renderData dataUsingEncoding:NSUTF8StringEncoding] options:0 error:nil];
-    if (![rj isKindOfClass:[NSDictionary class]]) {
-        [probeLog appendFormat:@"[WKWebView救援] RENDER_DATA JSON解析失败\n"];
-        return nil;
-    }
-    id detail = nil;
-    @try { detail = rj[@"app"][@"videoDetail"][@"aweme_detail"]; } @catch (NSException *e) {}
-    if (!detail || ![detail isKindOfClass:[NSDictionary class]]) { @try { detail = rj[@"42"][@"aweme_detail"]; } @catch (NSException *e) {} }
-    if (!detail || ![detail isKindOfClass:[NSDictionary class]]) { @try { detail = rj[@"app"][@"videoDetail"]; } @catch (NSException *e) {} }
-    if (!detail || ![detail isKindOfClass:[NSDictionary class]]) detail = DYYYFindAwemeDetailDeep(rj, 0);
-    if ([detail isKindOfClass:[NSDictionary class]]) return detail;
-    [probeLog appendFormat:@"[WKWebView救援] RENDER_DATA无aweme_detail, topKeys=%@ appKeys=%@\n", [rj allKeys], [rj[@"app"] allKeys]];
-    return nil;
-}
-
 // ===== 2.2-20 WKWebView真浏览器救援：桌面UA加载视频页，acrawler自动完成验证，抓取内嵌数据的完整HTML，并回填养熟的cookie =====
-static NSString *DYYYFetchPageHTMLViaWebView(NSString *awemeId, NSMutableString *probeLog) {
-    __block NSString *htmlResult = nil;
+static NSString *DYYYFetchAwemeDetailViaWebView(NSString *awemeId, NSMutableString *probeLog) {
+    __block NSString *jsonResult = nil;
     __block BOOL signaled = NO;
     dispatch_semaphore_t rescueSem = dispatch_semaphore_create(0);
     NSString *pageURL = [NSString stringWithFormat:@"https://www.douyin.com/video/%@", awemeId];
     dispatch_async(dispatch_get_main_queue(), ^{
         @try {
-            [probeLog appendFormat:@"[Step2.6 WKWebView救援] 开始加载 %@\n", pageURL];
+            [probeLog appendFormat:@"[Step2.6 WKWebView API拦截] 开始加载 %@\n", pageURL];
             WKWebViewConfiguration *cfg = [[WKWebViewConfiguration alloc] init];
             // 真机指纹对齐: 模拟iPadOS桌面模式Safari(UA=Macintosh+platform=MacIntel+iPad真实分辨率1024x1366, iPad本就是MacUA+触摸的真实组合)
             NSString *fpJS = @"(function(){try{Object.defineProperty(navigator,'platform',{get:function(){return 'MacIntel';}});}catch(e){}"
@@ -3792,6 +3730,29 @@ static NSString *DYYYFetchPageHTMLViaWebView(NSString *awemeId, NSMutableString 
                               @"try{Object.defineProperty(navigator,'webdriver',{get:function(){return false;}});}catch(e){}})();";
             WKUserScript *fpScript = [[WKUserScript alloc] initWithSource:fpJS injectionTime:WKUserScriptInjectionTimeAtDocumentStart forMainFrameOnly:YES];
             [cfg.userContentController addUserScript:fpScript];
+            // 2.2-24 API拦截: hook fetch/XHR, 页面自身调detail接口时截获响应体存入__dyDetailJSON; 同时记录所有请求URL到__dyReqLog(哨兵)
+            NSString *hookJS = @"(function(){"
+                                 @"try{if(window.__dyHookInstalled)return;}catch(e){}"
+                                 @"window.__dyHookInstalled=true;window.__dyDetailJSON='';window.__dyReqLog=[];"
+                                 @"function isDetail(u){return u&&(u.indexOf('aweme/detail')>-1||u.indexOf('aweme_detail')>-1);}"
+                                 @"function save(t){try{if(t&&t.length>100&&t.indexOf('aweme_id')>-1&&!window.__dyDetailJSON)window.__dyDetailJSON=t;}catch(e){}}"
+                                 @"function logReq(u){try{if(u&&window.__dyReqLog.length<50)window.__dyReqLog.push(''+u);}catch(e){}}"
+                                 @"var of=window.fetch;"
+                                 @"if(of){window.fetch=function(){"
+                                 @"var u=(arguments[0]&&arguments[0].url)?(''+arguments[0].url):(''+(arguments[0]||''));"
+                                 @"try{logReq(u);}catch(e){}"
+                                 @"var p=of.apply(this,arguments);"
+                                 @"if(isDetail(u)){try{p.then(function(r){try{r.clone().text().then(function(t){save(t);});}catch(e){}}).catch(function(){});}catch(e){}}"
+                                 @"return p;};}"
+                                 @"var oo=XMLHttpRequest.prototype.open;"
+                                 @"XMLHttpRequest.prototype.open=function(m,u){try{this.__dyUrl=''+u;}catch(e){}return oo.apply(this,arguments);};"
+                                 @"var os=XMLHttpRequest.prototype.send;"
+                                 @"XMLHttpRequest.prototype.send=function(){var x=this;try{logReq(x.__dyUrl);}catch(e){}"
+                                 @"x.addEventListener('load',function(){try{if(isDetail(x.__dyUrl))save(x.responseText);}catch(e){}});"
+                                 @"return os.apply(this,arguments);};"
+                                 @"})();";
+            WKUserScript *hookScript = [[WKUserScript alloc] initWithSource:hookJS injectionTime:WKUserScriptInjectionTimeAtDocumentStart forMainFrameOnly:NO];
+            [cfg.userContentController addUserScript:hookScript];
             // 加载阶段用桌面视口大frame, 模拟真实桌面窗口宽度
             WKWebView *wv = [[WKWebView alloc] initWithFrame:CGRectMake(0, 0, 1024, 1366) configuration:cfg];
             wv.customUserAgent = @"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15";
@@ -3816,11 +3777,11 @@ static NSString *DYYYFetchPageHTMLViaWebView(NSString *awemeId, NSMutableString 
                     sRescueWV = nil;
                 });
             };
-            // 可视化: 自动验证未过时把页面弹到屏幕上, 由用户人工滑动验证码
+            // 可视化: 自动阶段未拦截到时把页面弹到屏幕上, 由用户人工滑动验证码
             showVisual = ^{
                 if (visualShown) return;
                 visualShown = YES;
-                [probeLog appendFormat:@"[WKWebView救援] 自动验证未过, 弹出页面请人工滑动验证码(最长120s)\n"];
+                [probeLog appendFormat:@"[WKWebView救援] 自动阶段未拦截到detail接口, 弹出页面请人工滑动验证码(最长120s)\n"];
                 UIView *key = [UIApplication sharedApplication].keyWindow;
                 if (!key) return;
                 maskView = [[UIView alloc] initWithFrame:key.bounds];
@@ -3839,20 +3800,21 @@ static NSString *DYYYFetchPageHTMLViaWebView(NSString *awemeId, NSMutableString 
             poll = ^{
                 if (signaled || wv == nil) return;
                 tries++;
-                [wv evaluateJavaScript:@"(function(){var r=document.querySelector('#RENDER_DATA');return (r?('1|'+r.textContent.length):('0|'+(document.title||'')));})()" completionHandler:^(id res, NSError *err) {
+                [wv evaluateJavaScript:@"(function(){try{return ((window.__dyDetailJSON?window.__dyDetailJSON.length:0)+'|'+((window.__dyReqLog||[]).length)+'|'+(document.title||''));}catch(e){return '0|0|';}})()" completionHandler:^(id res, NSError *err) {
                     if (signaled) return;
-                    NSString *info = [res isKindOfClass:[NSString class]] ? res : @"0|0";
+                    NSString *info = [res isKindOfClass:[NSString class]] ? res : @"0|0|";
                     NSArray *parts = [info componentsSeparatedByString:@"|"];
-                    BOOL hasRender = [parts count] >= 2 && [parts[0] isEqualToString:@"1"];
-                    NSString *pageTitle = ([parts count] >= 2 && ![parts[0] isEqualToString:@"1"]) ? parts[1] : @"";
-                    if (hasRender || tries >= maxTries) {
-                        [wv evaluateJavaScript:@"document.documentElement.innerHTML" completionHandler:^(id html, NSError *err2) {
+                    NSInteger jsonLen = [parts count] > 0 ? [parts[0] integerValue] : 0;
+                    NSInteger reqCount = [parts count] > 1 ? [parts[1] integerValue] : 0;
+                    NSString *pageTitle = [parts count] > 2 ? parts[2] : @"";
+                    if (jsonLen > 0) {
+                        [wv evaluateJavaScript:@"(window.__dyDetailJSON||'')" completionHandler:^(id json, NSError *err2) {
                             if (signaled) return;
-                            NSString *got = [html isKindOfClass:[NSString class]] ? html : nil;
-                            if (hasRender && got.length > 0) {
+                            NSString *got = [json isKindOfClass:[NSString class]] ? json : nil;
+                            if (got.length > 0) {
                                 signaled = YES;
-                                htmlResult = got;
-                                [probeLog appendFormat:@"[WKWebView救援] 成功! 轮询%ld次 htmlLen=%lu 回填cookie继续保存\n", (long)tries, (unsigned long)htmlResult.length];
+                                jsonResult = got;
+                                [probeLog appendFormat:@"[WKWebView救援] 成功! 轮询%ld次 拦截detail JSON len=%lu 页面已发请求%ld个 回填cookie\n", (long)tries, (unsigned long)got.length, (long)reqCount];
                                 [wv.configuration.websiteDataStore.httpCookieStore getAllCookies:^(NSArray<NSHTTPCookie *> *cks) {
                                     NSInteger n = 0;
                                     for (NSHTTPCookie *c in cks) {
@@ -3862,18 +3824,29 @@ static NSString *DYYYFetchPageHTMLViaWebView(NSString *awemeId, NSMutableString 
                                 }];
                                 cleanup();
                                 dispatch_semaphore_signal(rescueSem);
-                            } else if (visualShown) {
-                                [probeLog appendFormat:@"[WKWebView救援] 人工阶段超时 轮询%ld次 page=%@ htmlLen=%lu 放弃\n", (long)tries, pageTitle.length ? pageTitle : @"-", (unsigned long)got.length];
-                                signaled = YES;
-                                cleanup();
-                                dispatch_semaphore_signal(rescueSem);
                             } else {
-                                [probeLog appendFormat:@"[WKWebView救援] 自动阶段结束(%ld次) page=%@ htmlLen=%lu\n", (long)tries, pageTitle.length ? pageTitle : @"-", (unsigned long)got.length];
-                                maxTries = tries + 60; // 人工阶段再等120s
-                                showVisual();
+                                [probeLog appendFormat:@"[WKWebView救援] 轮询%ld次 JSON标记存在但读取为空, 继续\n", (long)tries];
                                 dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), poll);
                             }
                         }];
+                        return;
+                    }
+                    if (tries >= maxTries) {
+                        if (visualShown) {
+                            // 人工阶段超时: 读请求日志辅助定位
+                            [wv evaluateJavaScript:@"(function(){try{return (window.__dyReqLog||[]).slice(0,10).join(' ; ');}catch(e){return '';}})()" completionHandler:^(id reqs, NSError *err3) {
+                                if (signaled) return;
+                                [probeLog appendFormat:@"[WKWebView救援] 人工阶段超时 轮询%ld次 page=%@ 已捕获请求%ld个 放弃\n页面请求(前10): %@\n", (long)tries, pageTitle.length ? pageTitle : @"-", (long)reqCount, [reqs isKindOfClass:[NSString class]] ? reqs : @"(读取失败)"];
+                                signaled = YES;
+                                cleanup();
+                                dispatch_semaphore_signal(rescueSem);
+                            }];
+                        } else {
+                            [probeLog appendFormat:@"[WKWebView救援] 自动阶段结束(%ld次) page=%@ 已捕获请求%ld个\n", (long)tries, pageTitle.length ? pageTitle : @"-", (long)reqCount];
+                            maxTries = tries + 60; // 人工阶段再等120s
+                            showVisual();
+                            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), poll);
+                        }
                         return;
                     }
                     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), poll);
@@ -3886,7 +3859,7 @@ static NSString *DYYYFetchPageHTMLViaWebView(NSString *awemeId, NSMutableString 
         }
     });
     dispatch_semaphore_wait(rescueSem, dispatch_time(DISPATCH_TIME_NOW, 170 * NSEC_PER_SEC));
-    return htmlResult;
+    return jsonResult;
 }
 
 // 本地解析全画质：从awemeModel取awemeId，走ttwid+web API+bit_rate全画质（JS规则）
@@ -4219,93 +4192,34 @@ static NSString *DYYYFetchPageHTMLViaWebView(NSString *awemeId, NSMutableString 
             }
 
             if (!awemeDetail || ![awemeDetail isKindOfClass:[NSDictionary class]]) {
-                // 降级: 从视频页面HTML提取RENDER_DATA（不需要a_bogus）
-                [probeLog appendFormat:@"\n[Step2.5 页面降级] GET /video/%@\n", awemeId];
-                NSString *pageURL = [NSString stringWithFormat:@"https://www.douyin.com/video/%@", awemeId];
-                NSMutableURLRequest *pageReq = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:pageURL]];
-                [pageReq setValue:@"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36" forHTTPHeaderField:@"User-Agent"];
-                [pageReq setValue:@"https://www.douyin.com/" forHTTPHeaderField:@"Referer"];
-                [pageReq setValue:fullCookieStr forHTTPHeaderField:@"Cookie"];
-                [pageReq setValue:@"text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8" forHTTPHeaderField:@"Accept"];
-                [pageReq setValue:@"zh-CN,zh;q=0.9" forHTTPHeaderField:@"Accept-Language"];
-                __block NSData *pageData = nil;
-                __block NSInteger pageStatus = 0;
-                dispatch_semaphore_t pageSem = dispatch_semaphore_create(0);
-                NSURLSessionDataTask *pageTask = [[NSURLSession sharedSession] dataTaskWithRequest:pageReq completionHandler:^(NSData *pData, NSURLResponse *pResp, NSError *pErr) {
-                    pageData = pData;
-                    if (pResp && [pResp isKindOfClass:[NSHTTPURLResponse class]]) pageStatus = [(NSHTTPURLResponse *)pResp statusCode];
-                    dispatch_semaphore_signal(pageSem);
-                }];
-                [pageTask resume];
-                dispatch_semaphore_wait(pageSem, dispatch_time(DISPATCH_TIME_NOW, 15 * NSEC_PER_SEC));
-                [probeLog appendFormat:@"HTTP %ld body=%lu\n", (long)pageStatus, (unsigned long)(pageData ? pageData.length : 0)];
-                if (pageData && pageData.length > 0 && pageData.length < 20000) {
-                    NSString *praw = [[NSString alloc] initWithData:pageData encoding:NSUTF8StringEncoding];
-                    if (praw.length > 300) praw = [praw substringToIndex:300];
-                    [probeLog appendFormat:@"页面原文(前300): %@\n", praw ?: @"(非UTF8)"];
-                }
-                if (pageData && pageStatus == 200) {
-                    NSString *html = [[NSString alloc] initWithData:pageData encoding:NSUTF8StringEncoding];
-                    // 提取RENDER_DATA: <script id="RENDER_DATA" type="application/json">URL_ENCODED_JSON</script>
-                    NSString *renderData = nil;
-                    NSRange startTag = [html rangeOfString:@"<script id=\"RENDER_DATA\""];
-                    if (startTag.location != NSNotFound) {
-                        NSRange closeBracket = [html rangeOfString:@">" options:0 range:NSMakeRange(startTag.location, html.length - startTag.location)];
-                        if (closeBracket.location != NSNotFound) {
-                            NSRange endTag = [html rangeOfString:@"</script>" options:0 range:NSMakeRange(closeBracket.location, html.length - closeBracket.location)];
-                            if (endTag.location != NSNotFound) {
-                                NSUInteger cs = closeBracket.location + 1;
-                                NSUInteger cl = endTag.location - cs;
-                                if (cl > 0 && cs + cl <= html.length) {
-                                    NSString *encoded = [html substringWithRange:NSMakeRange(cs, cl)];
-                                    renderData = [encoded stringByRemovingPercentEncoding];
-                                }
-                            }
-                        }
-                    }
-                    if (renderData && renderData.length > 0) {
-                        [probeLog appendFormat:@"RENDER_DATA len=%lu\n", (unsigned long)renderData.length];
-                        NSDictionary *rj = [NSJSONSerialization JSONObjectWithData:[renderData dataUsingEncoding:NSUTF8StringEncoding] options:0 error:nil];
-                        if ([rj isKindOfClass:[NSDictionary class]]) {
-                            id detail = nil;
-                            @try { detail = rj[@"app"][@"videoDetail"][@"aweme_detail"]; } @catch (NSException *e) {}
-                            if (!detail || ![detail isKindOfClass:[NSDictionary class]]) { @try { detail = rj[@"42"][@"aweme_detail"]; } @catch (NSException *e) {} }
-                            if (!detail || ![detail isKindOfClass:[NSDictionary class]]) { @try { detail = rj[@"app"][@"videoDetail"]; } @catch (NSException *e) {} }
-                            if (!detail || ![detail isKindOfClass:[NSDictionary class]]) detail = DYYYFindAwemeDetailDeep(rj, 0);
-                            if (detail && [detail isKindOfClass:[NSDictionary class]]) {
-                                awemeDetail = detail;
-                                [probeLog appendFormat:@"RENDER_DATA提取成功!\n"];
-                            } else {
-                                // 打印顶层key辅助调试
-                                [probeLog appendFormat:@"RENDER_DATA未找到aweme_detail, topKeys=%@ appKeys=%@\n", [rj allKeys], [rj[@"app"] allKeys]];
-                            }
-                        }
-                    } else {
-                        [probeLog appendFormat:@"HTML中未找到RENDER_DATA\n"];
-                    }
-                }
-                // 2.2-20 Step2.6: 裸URLSession被拒时, 用WKWebView真浏览器自养会话救援
+                // 2.2-24: RENDER_DATA已判死(SSR只含环境配置无视频详情,appKeys实锤), 改为WKWebView拦截页面自身detail API
                 if (!awemeDetail || ![awemeDetail isKindOfClass:[NSDictionary class]]) {
-                    NSString *rescueHTML = DYYYFetchPageHTMLViaWebView(awemeId, probeLog);
-                    if (rescueHTML.length > 0) {
-                        NSDictionary *rescueDetail = DYYYExtractDetailFromHTML(rescueHTML, probeLog);
-                        if (rescueDetail) {
-                            awemeDetail = rescueDetail;
-                            [probeLog appendFormat:@"[WKWebView救援] 成功! 使用真浏览器数据\n"];
+                    NSString *rescueJSON = DYYYFetchAwemeDetailViaWebView(awemeId, probeLog);
+                    if (rescueJSON.length > 0) {
+                        NSDictionary *rj = [NSJSONSerialization JSONObjectWithData:[rescueJSON dataUsingEncoding:NSUTF8StringEncoding] options:0 error:nil];
+                        NSDictionary *rd = nil;
+                        if ([rj isKindOfClass:[NSDictionary class]]) {
+                            rd = rj[@"aweme_detail"];
+                            if (![rd isKindOfClass:[NSDictionary class]]) rd = rj[@"data"][@"aweme_detail"];
+                            if (![rd isKindOfClass:[NSDictionary class]] && [rj[@"item_list"] isKindOfClass:[NSArray class]] && [rj[@"item_list"] count] > 0) rd = rj[@"item_list"][0];
                         }
-                    } else {
-                        [probeLog appendFormat:@"[WKWebView救援] 未获取到页面HTML\n"];
+                        if ([rd isKindOfClass:[NSDictionary class]] && rd[@"aweme_id"] && rd[@"video"]) {
+                            awemeDetail = rd;
+                            [probeLog appendFormat:@"[WKWebView救援] detail解析成功! aweme_id=%@ bit_rate档数=%lu\n", rd[@"aweme_id"], (unsigned long)([(rd[@"video"][@"bit_rate"] ?: @[]) count])];
+                        } else {
+                            [probeLog appendFormat:@"[WKWebView救援] JSON中无aweme_detail, topKeys=%@\n", ([rj isKindOfClass:[NSDictionary class]] ? [rj allKeys] : @"(非字典)")];
+                        }
                     }
                 }
 
-                // 页面降级也失败 → 直接失败（无本地解析保底）
+                // WebView API拦截也失败 → 直接失败（无本地解析保底）
                 if (!awemeDetail || ![awemeDetail isKindOfClass:[NSDictionary class]]) {
-                    [probeLog appendFormat:@"\n[失败] 页面降级也失败\n"];
+                    [probeLog appendFormat:@"\n[失败] WebView API拦截也失败\n"];
                     [[NSNotificationCenter defaultCenter] postNotificationName:@"DYYYProbeNotification" object:nil userInfo:@{@"text": [probeLog copy]}];
                     if (completion) completion(nil);
                     return;
                 }
-                [probeLog appendFormat:@"[Step2.5成功] 页面降级获取4K数据成功\n"];
+                [probeLog appendFormat:@"[Step2.6成功] WebView API拦截获取4K数据成功\n"];
             }
         }
 
