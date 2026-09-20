@@ -494,9 +494,35 @@ static void DY4KAlert(NSString *msg, NSArray<UIAlertAction *> *actions) {
     [top presentViewController:ac animated:YES completion:nil];
 }
 
+// v1.7: 安全KVC — 先探测getter是否真实存在, 避免全树KVC异常风暴卡死主线程
+static id DY4KTryKVC(id obj, NSString *key) {
+    if (!obj || ![obj respondsToSelector:@selector(valueForKey:)]) return nil;
+    if (!class_getInstanceMethod(object_getClass(obj), NSSelectorFromString(key))) return nil;
+    return [obj valueForKey:key];
+}
+
+// v1.7: 抖音APP自己的topVC(跳过悬浮球window) — 之前挖aid从悬浮球自身VC树出发, 永远挖不到
+static UIViewController *DY4KAppTopVC(void) {
+    UIViewController *top = nil;
+    NSArray<UIScene *> *scenes = [[UIApplication sharedApplication] connectedScenes].allObjects;
+    for (UIScene *sc in scenes) {
+        if (![sc isKindOfClass:[UIWindowScene class]]) continue;
+        UIWindowScene *ws = (UIWindowScene *)sc;
+        for (NSInteger i = (NSInteger)ws.windows.count - 1; i >= 0; i--) {
+            UIWindow *w = ws.windows[(NSUInteger)i];
+            if (w.isHidden) continue;
+            if ([w isKindOfClass:NSClassFromString(@"DY4KBallWindow")]) continue;
+            if (w.rootViewController) { top = w.rootViewController; break; }
+        }
+        if (top) break;
+    }
+    while (top.presentedViewController) top = top.presentedViewController;
+    return top;
+}
+
 // v1.4: 从当前播放页VC树挖当前视频 aweme_id (AWEPlayInteractionViewController.model.itemID)
 static NSString *DY4KDigCurrentAid(NSString **outDesc, NSString **outAuthor) {
-    UIViewController *top = DY4KTopVC();
+    UIViewController *top = DY4KAppTopVC();
     if (!top) {
         @synchronized (dy4kMonNames) { dy4kLastErr = @"无TopVC"; }
         return nil;
@@ -511,18 +537,19 @@ static NSString *DY4KDigCurrentAid(NSString **outDesc, NSString **outAuthor) {
         // v1.5: 不筛类名(新版抖音类名可能变), 对每个VC无差别尝试KVC挖model
         for (NSString *mk in @[@"model", @"awemeModel", @"currentAwemeModel", @"awemeDetailModel"]) {
             @try {
-                id m = [vc valueForKey:mk];
+                id m = DY4KTryKVC(vc, mk);
                 if (!m || [m isKindOfClass:[NSNull class]] || [m isKindOfClass:[UIViewController class]] || [m isKindOfClass:[UIView class]]) continue;
-                id aid = [m valueForKey:@"itemID"];
+                id aid = DY4KTryKVC(m, @"itemID");
                 if (![aid isKindOfClass:[NSString class]] || [(NSString *)aid length] < 10) continue;
                 dy4kDigHit++;
                 if (outDesc) {
-                    id d = [m valueForKey:@"descriptionString"];
-                    if (![d isKindOfClass:[NSString class]] || [(NSString *)d length] == 0) d = [m valueForKey:@"itemTitle"];
+                    id d = DY4KTryKVC(m, @"descriptionString");
+                    if (![d isKindOfClass:[NSString class]] || [(NSString *)d length] == 0) d = DY4KTryKVC(m, @"itemTitle");
                     *outDesc = [d isKindOfClass:[NSString class]] ? d : nil;
                 }
                 if (outAuthor) {
-                    id au = [m valueForKeyPath:@"author.nickname"];
+                    id au0 = DY4KTryKVC(m, @"author");
+                    id au = (au0 && ![au0 isKindOfClass:[NSString class]]) ? DY4KTryKVC(au0, @"nickname") : au0;
                     *outAuthor = [au isKindOfClass:[NSString class]] ? au : nil;
                 }
                 return aid;
@@ -737,12 +764,14 @@ static void DY4KDownloadGear(DY4KGear *g) {
         });
     } onDone:^(BOOL ok, NSString *savedPath, NSString *errMsg) {
         dispatch_async(dispatch_get_main_queue(), ^{
-            [busy dismissViewControllerAnimated:NO completion:nil];
-            if (ok) {
-                DY4KSaveAndReport(savedPath);
-            } else {
-                DY4KAlert([NSString stringWithFormat:@"下载失败: %@\n档位: %@ %ldx%ld", errMsg, g.gearName, g.width, g.height], nil);
-            }
+            // v1.7: dismiss完成后才弹后续提示, 避免presentation冲突
+            [busy dismissViewControllerAnimated:NO completion:^{
+                if (ok) {
+                    DY4KSaveAndReport(savedPath);
+                } else {
+                    DY4KAlert([NSString stringWithFormat:@"下载失败: %@\n档位: %@ %ldx%ld", errMsg, g.gearName, g.width, g.height], nil);
+                }
+            }];
         });
     }];
 }
@@ -832,22 +861,24 @@ static void DY4KShowMenu(void) {
         DY4KFetchDetailWeb(aid, ^(BOOL ok) {
             dispatch_async(dispatch_get_main_queue(), ^{
                 if (cancelled) return;
-                [busy dismissViewControllerAnimated:NO completion:nil];
-                DY4KVideo *v = nil;
-                @synchronized (dy4kCache) { v = dy4kCache[aid]; }
-                if (v && v.gears.count > 0) {
-                    DY4KShowQuality(v);
-                    return;
-                }
-                NSString *err = nil;
-                @synchronized (dy4kMonNames) { err = dy4kLastErr; }
-                UIAlertController *info = [UIAlertController alertControllerWithTitle:nil message:[NSString stringWithFormat:@"主动请求未拿到档位(%@)\n\n可看已截获的缓存数据", err ?: @"超时"] preferredStyle:UIAlertControllerStyleAlert];
-                [info addAction:[UIAlertAction actionWithTitle:@"看缓存" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a) {
-                    DY4KShowMenuLegacy();
-                }]];
-                [info addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
-                UIViewController *t2 = DY4KTopVC();
-                if (t2) [t2 presentViewController:info animated:YES completion:nil];
+                // v1.7: dismiss完成后才present, 避免presentation冲突导致弹窗失效
+                [busy dismissViewControllerAnimated:NO completion:^{
+                    DY4KVideo *v = nil;
+                    @synchronized (dy4kCache) { v = dy4kCache[aid]; }
+                    if (v && v.gears.count > 0) {
+                        DY4KShowQuality(v);
+                        return;
+                    }
+                    NSString *err = nil;
+                    @synchronized (dy4kMonNames) { err = dy4kLastErr; }
+                    UIAlertController *info = [UIAlertController alertControllerWithTitle:nil message:[NSString stringWithFormat:@"主动请求未拿到档位(%@)\n\n可看已截获的缓存数据", err ?: @"超时"] preferredStyle:UIAlertControllerStyleAlert];
+                    [info addAction:[UIAlertAction actionWithTitle:@"看缓存" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a) {
+                        DY4KShowMenuLegacy();
+                    }]];
+                    [info addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+                    UIViewController *t2 = DY4KTopVC();
+                    if (t2) [t2 presentViewController:info animated:YES completion:nil];
+                }];
             });
         });
         return;
@@ -918,6 +949,11 @@ static void DY4KShowMenu(void) {
         x = scr0.width - 60;
         y = 220;
     }
+    // v1.7: 历史存档位置钳制回屏内, 防按钮跑出屏幕点不到
+    if (x > scr0.width - 48) x = scr0.width - 48;
+    if (y > scr0.height - 140) y = scr0.height - 140;
+    if (x < 0) x = 0;
+    if (y < 80) y = 80;
     _win = [[DY4KBallWindow alloc] initWithWindowScene:scene];
     _win.frame = scene.screen.bounds;
     _win.windowLevel = 1000000;
@@ -955,7 +991,7 @@ static void DY4KShowMenu(void) {
         if (f.origin.y < 80) f.origin.y = 80;
         if (f.origin.x > scr.width - 44) f.origin.x = scr.width - 44;
         if (f.origin.y > scr.height - 120) f.origin.y = scr.height - 120;
-        _win.frame = f;
+        _btn.frame = f;
         [p setTranslation:CGPointZero inView:_win];
     } else if (p.state == UIGestureRecognizerStateEnded) {
         [[NSUserDefaults standardUserDefaults] setFloat:_btn.frame.origin.x forKey:@"dy4k_ball_x"];
@@ -1087,6 +1123,12 @@ static void DY4KProbeNTM(void) {
     @synchronized (dy4kNTMMethods) { [dy4kNTMMethods addObjectsFromArray:names]; }
 }
 
+// v1.7: 抖音API域过滤(feed流量在snssdk/amemv/zijieapi等域, 只match douyin会全漏)
+static BOOL DY4KIsAPIURL(NSString *u) {
+    if (u.length == 0) return NO;
+    return [u containsString:@"douyin"] || [u containsString:@"snssdk"] || [u containsString:@"amemv"] || [u containsString:@"zijieapi"] || [u containsString:@"bytedance"] || [u containsString:@"bdxigua"] || [u containsString:@"zjcdn"];
+}
+
 // v1.6: hook NSURLSession 响应(Alamofire/系统会话都走这里, 不依赖抖音类名)
 @interface NSURLSession (DY4KH)
 - (NSURLSessionDataTask *)dy4k_dataTaskWithRequest:(NSURLRequest *)request completionHandler:(void (^)(NSData *data, NSURLResponse *resp, NSError *err))handler;
@@ -1098,7 +1140,7 @@ static void DY4KProbeNTM(void) {
 - (NSURLSessionDataTask *)dy4k_dataTaskWithRequest:(NSURLRequest *)request completionHandler:(void (^)(NSData *, NSURLResponse *, NSError *))handler {
     void (^wrapped)(NSData *, NSURLResponse *, NSError *) = handler;
     NSString *u = request.URL.absoluteString;
-    if (handler && u.length > 0 && [u containsString:@"douyin"]) {
+    if (handler && u.length > 0 && DY4KIsAPIURL(u)) {
         NSString *ourl = [u copy];
         wrapped = ^(NSData *d, NSURLResponse *r, NSError *e) {
             @try {
@@ -1113,7 +1155,7 @@ static void DY4KProbeNTM(void) {
 - (NSURLSessionDataTask *)dy4k_dataTaskWithURL:(NSURL *)url completionHandler:(void (^)(NSData *, NSURLResponse *, NSError *))handler {
     void (^wrapped)(NSData *, NSURLResponse *, NSError *) = handler;
     NSString *u = url.absoluteString;
-    if (handler && u.length > 0 && [u containsString:@"douyin"]) {
+    if (handler && u.length > 0 && DY4KIsAPIURL(u)) {
         NSString *ourl = [u copy];
         wrapped = ^(NSData *d, NSURLResponse *r, NSError *e) {
             @try {
