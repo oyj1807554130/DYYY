@@ -289,7 +289,8 @@ static id XGHookR3(id self, SEL _cmd, id a1, id a2, id a3) {
 // ===== 枚举某类方法名（前 80 个，排序输出） =====
 static NSString *XGMethodsOfClass(Class cls, BOOL classMethods) {
     unsigned int count = 0;
-    Method *list = classMethods ? class_copyClassMethod(cls, &count) : class_copyMethodList(cls, &count);
+    // 类方法在元类上：class_copyMethodList(object_getClass(cls)) 枚举（runtime 无 class_copyClassMethod）
+    Method *list = classMethods ? class_copyMethodList(object_getClass(cls), &count) : class_copyMethodList(cls, &count);
     if (!list) return @"(无)";
     if (count == 0) { free(list); return @"(无)"; }
     NSMutableArray *names = [NSMutableArray array];
