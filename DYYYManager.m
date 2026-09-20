@@ -3909,9 +3909,13 @@ static NSString *DYYYFetchAwemeDetailViaWebView(NSString *awemeId, NSMutableStri
         NSArray *appCookies = [cookieStore cookiesForURL:[NSURL URLWithString:@"https://www.douyin.com/"]];
         NSMutableString *fullCookieStr = [NSMutableString string];
         __block NSString *ttwidStr = nil;
+        // 白名单:只带 __ac_nonce+ttwid(实测冷会话直出200含4K;bd_sso/UIFID_TEMP等旧指纹与新ttwid不匹配会被Argus判Uifid Not Found 403)
+        NSArray *cookieWhitelist = @[@"__ac_nonce", @"ttwid"];
         for (NSHTTPCookie *c in appCookies) {
-            if (fullCookieStr.length > 0) [fullCookieStr appendString:@"; "];
-            [fullCookieStr appendFormat:@"%@=%@", [c name], [c value]];
+            if ([cookieWhitelist containsObject:[c name]]) {
+                if (fullCookieStr.length > 0) [fullCookieStr appendString:@"; "];
+                [fullCookieStr appendFormat:@"%@=%@", [c name], [c value]];
+            }
             if ([[c name] isEqualToString:@"ttwid"]) ttwidStr = [c value];
         }
         // 探针：Cookie信息
