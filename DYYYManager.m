@@ -4098,6 +4098,81 @@ static NSString *DYYYFetchAwemeDetailViaWebView(NSString *awemeId, NSMutableStri
                 else if ([[hs name] isEqualToString:@"s_v_web_id"]) healSvwebid = [hs value];
             }
             [probeLog appendFormat:@"指纹快照: uifid=%@ msToken=%@ svwebid=%@\n", healUifid ? @"有" : @"无", healMsToken ? @"有" : @"无", healSvwebid ? @"有" : @"无"];
+            // ===== 2.2-31 指纹雷达: 快照缺指纹时, 运行时扫描宿主App内建指纹体系(真uifid/msToken与App会话天然配套) =====
+            if (healUifid.length == 0 || healMsToken.length == 0) {
+                void (^radar)(void) = ^{
+                    [probeLog appendFormat:@"\n[Step2.3 指纹雷达] 扫描宿主App内建指纹体系\n"];
+                    @try {
+                        unsigned int rc = 0;
+                        Class *rclasses = objc_copyClassList(&rc);
+                        if (!rclasses) return;
+                        NSArray *rkw = @[@"Uifid", @"uifid", @"TokenManager", @"DeviceManager", @"DeviceInfo", @"Fingerprint", @"MSKernel"];
+                        int rdump = 0;
+                        for (unsigned int ri = 0; ri < rc && rdump < 20; ri++) {
+                            NSString *rcn = NSStringFromClass(rclasses[ri]);
+                            BOOL rhit = NO;
+                            for (NSString *rk in rkw) if ([rcn containsString:rk]) { rhit = YES; break; }
+                            if (!rhit) continue;
+                            rdump++;
+                            Class rcls = rclasses[ri];
+                            id rinst = nil;
+                            for (NSString *rsel in @[@"sharedInstance", @"sharedManager", @"defaultManager", @"currentManager", @"shared", @"getInstance"]) {
+                                SEL rs = NSSelectorFromString(rsel);
+                                if (class_getClassMethod(rcls, rs)) {
+                                    @try { rinst = ((id (*)(id, SEL))objc_msgSend)(rcls, rs); } @catch (NSException *re1) {}
+                                    if (rinst) break;
+                                }
+                            }
+                            unsigned int rmc = 0;
+                            __block NSMutableString *rgetters = [NSMutableString string];
+                            // 类方法
+                            Method *rmeths = class_copyMethodList(object_getClass(rcls), &rmc);
+                            for (unsigned int rj = 0; rj < rmc; rj++) {
+                                NSString *rmn = NSStringFromSelector(method_getName(rmeths[rj]));
+                                if (method_getNumberOfArguments(rmeths[rj]) != 2 || *method_getReturnType(rmeths[rj]) != '@') continue;
+                                [rgetters appendFormat:@"%@+ ", rmn];
+                                NSString *rl = rmn.lowercaseString;
+                                BOOL rtarget = [rl containsString:@"uifid"] || [rl containsString:@"mstoken"];
+                                if (!rtarget) continue;
+                                @try {
+                                    id rv = ((id (*)(id, SEL))objc_msgSend)(rcls, NSSelectorFromString(rmn));
+                                    if ([rv isKindOfClass:[NSString class]] && [rv length] > 10 && [rv length] < 500 && ![rv isEqualToString:rcn]) {
+                                        [probeLog appendFormat:@"[雷达收获] %@ +%@ => %@... (len=%lu)\n", rcn, rmn, [rv substringToIndex:MIN(50, [rv length])], (unsigned long)[rv length]];
+                                        if ([rl containsString:@"uifid"] && healUifid.length == 0) healUifid = rv;
+                                        if ([rl containsString:@"mstoken"] && healMsToken.length == 0) healMsToken = rv;
+                                    }
+                                } @catch (NSException *re2) { [probeLog appendFormat:@"[雷达异常] %@ +%@: %@\n", rcn, rmn, re2.name]; }
+                            }
+                            free(rmeths);
+                            // 实例方法
+                            if (rinst) {
+                                Method *rims = class_copyMethodList(rcls, &rmc);
+                                for (unsigned int rj = 0; rj < rmc; rj++) {
+                                    NSString *rmn = NSStringFromSelector(method_getName(rims[rj]));
+                                    if (method_getNumberOfArguments(rims[rj]) != 2 || *method_getReturnType(rims[rj]) != '@') continue;
+                                    [rgetters appendFormat:@"%@- ", rmn];
+                                    NSString *rl = rmn.lowercaseString;
+                                    BOOL rtarget = [rl containsString:@"uifid"] || [rl containsString:@"mstoken"];
+                                    if (!rtarget) continue;
+                                    @try {
+                                        id rv = ((id (*)(id, SEL))objc_msgSend)(rinst, NSSelectorFromString(rmn));
+                                        if ([rv isKindOfClass:[NSString class]] && [rv length] > 10 && [rv length] < 500 && ![rv isEqualToString:rcn]) {
+                                            [probeLog appendFormat:@"[雷达收获] %@ -%@ => %@... (len=%lu)\n", rcn, rmn, [rv substringToIndex:MIN(50, [rv length])], (unsigned long)[rv length]];
+                                            if ([rl containsString:@"uifid"] && healUifid.length == 0) healUifid = rv;
+                                            if ([rl containsString:@"mstoken"] && healMsToken.length == 0) healMsToken = rv;
+                                        }
+                                    } @catch (NSException *re3) { [probeLog appendFormat:@"[雷达异常] %@ -%@: %@\n", rcn, rmn, re3.name]; }
+                                }
+                                free(rims);
+                            }
+                            [probeLog appendFormat:@"[雷达类] %@ 实例=%@ 无参getter: %@\n", rcn, rinst ? @"有" : @"无", rgetters];
+                        }
+                        free(rclasses);
+                        [probeLog appendFormat:@"[雷达完成] 命中%d类 uifid=%@ msToken=%@\n", rdump, healUifid.length > 0 ? @"真指纹到手" : @"无", healMsToken.length > 0 ? @"真msToken到手" : @"无"];
+                    } @catch (NSException *rE) { [probeLog appendFormat:@"[雷达异常] 全局: %@\n", rE]; }
+                };
+                if ([NSThread isMainThread]) radar(); else dispatch_sync(dispatch_get_main_queue(), radar);
+            }
             if (healMsToken.length == 0) {
                 NSMutableString *hm = [NSMutableString stringWithCapacity:116];
                 NSString *halpha = @"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
