@@ -171,6 +171,11 @@ static NSString *dy4kPlayingAid = nil;
 static NSString *dy4kPlayingDesc = nil;
 static NSString *dy4kPlayingAuthor = nil;
 static double dy4kPlayingTime = 0;
+// v2.3: 拉流反查(video_id->aid映射 + 最近拉流aid=真正在播的硬信号)
+static NSMutableDictionary<NSString *, NSString *> *dy4kUriMap = nil;
+static NSString *dy4kLastStreamAid = nil;
+static double dy4kLastStreamTime = 0;
+static void DY4KMarkStreamURL(NSString *u);
 static void DY4KOnBitrateModels(id self, id models) {
     @try {
         if (!models) return;
@@ -288,6 +293,19 @@ static void DY4KWalk(id node, NSString *pAid, NSString *pDesc, NSString *pAuthor
                 if ([nk isKindOfClass:[NSString class]]) author = nk;
             }
             id br = d[@"bit_rate"];
+            // v2.3: 记录 video_id(uri)->aid, 供拉流请求反查当前播放
+            id vid = d[@"video"][@"play_addr"][@"uri"];
+            if (![vid isKindOfClass:[NSString class]] || [(NSString *)vid length] < 10) {
+                id br0 = ([br isKindOfClass:[NSArray class]] && [(NSArray *)br count] > 0) ? [(NSArray *)br objectAtIndex:0] : nil;
+                vid = [br0 isKindOfClass:[NSDictionary class]] ? br0[@"play_addr"][@"uri"] : nil;
+            }
+            if ([vid isKindOfClass:[NSString class]] && [(NSString *)vid length] >= 10 && aid.length >= 10) {
+                if (!dy4kUriMap) dy4kUriMap = [NSMutableDictionary dictionary];
+                @synchronized (dy4kMonNames) {
+                    if (dy4kUriMap.count > 200) [dy4kUriMap removeAllObjects];
+                    dy4kUriMap[vid] = aid;
+                }
+            }
             if ([br isKindOfClass:[NSArray class]] && aid.length > 0) {
                 DY4KVideo *v = acc[aid];
                 if (!v) {
@@ -371,6 +389,17 @@ static void DY4KInspectResponse(NSDictionary *userInfo) {
                 [dy4kMonHex addObject:[NSString stringWithFormat:@"%02x%02x%02x%02x%02x%02x%02x%02x", b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]]];
             }
         }
+        // v2.3: TTNet路也标记拉流(用请求URL反查)
+        @try {
+            NSURL *surl = nil;
+            id r0 = [req valueForKey:@"request"];
+            if ([r0 isKindOfClass:[NSURLRequest class]]) surl = ((NSURLRequest *)r0).URL;
+            else {
+                id u = [req valueForKey:@"URL"];
+                if ([u isKindOfClass:[NSURL class]]) surl = (NSURL *)u;
+            }
+            if (surl.absoluteString.length > 0) DY4KMarkStreamURL(surl.absoluteString);
+        } @catch (NSException *e5) {}
         if (data.length < 20000) return;
         if (((const uint8_t *)data.bytes)[0] != 0x7b) return; // 只解析JSON '{'
         NSDictionary *json = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
@@ -388,8 +417,28 @@ static void DY4KInspectResponse(NSDictionary *userInfo) {
 
 #pragma mark - URLSession响应拦截 (v1.6)
 
+// v2.3: 媒体拉流URL带video_id=token, 反查uri map得当前播放aid(拉流=播放硬事实)
+static void DY4KMarkStreamURL(NSString *u) {
+    if (u.length == 0) return;
+    NSRange k = [u rangeOfString:@"video_id="];
+    if (k.location == NSNotFound || k.location + k.length >= u.length) return;
+    NSString *tail = [u substringFromIndex:k.location + k.length];
+    NSRange amp = [tail rangeOfString:@"&"];
+    NSString *vid = amp.location == NSNotFound ? tail : [tail substringToIndex:amp.location];
+    if (vid.length < 10) return;
+    NSString *aid = nil;
+    @synchronized (dy4kMonNames) {
+        aid = dy4kUriMap[vid];
+        if (aid.length >= 10) {
+            dy4kLastStreamAid = aid;
+            dy4kLastStreamTime = [[NSDate date] timeIntervalSince1970];
+        }
+    }
+}
+
 // v1.6: 拦截APP所有NSURLSession响应(Alamofire等最终都走这里), 抓douyin大JSON入库
 static void DY4KTapResponse(NSString *url, NSData *data) {
+    if (url.length > 0) DY4KMarkStreamURL(url);
     if (!url.length || data.length < 20000) return;
     if (((const uint8_t *)data.bytes)[0] != 0x7b) return; // 只解析JSON '{'
     NSDictionary *json = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
@@ -925,7 +974,18 @@ static void DY4KShowMenuLegacy(void) {
 static void DY4KShowMenu(void) {
     NSString *dgDesc = nil, *dgAuthor = nil;
     NSString *aid = nil;
-    // v2.2: 优先用码率回调记录的"正在播放"aid(60秒内), BFS挖VC model可能命中预加载页
+    // v2.3: 拉流事实最优先(真正在播的视频才会拉流, 10分钟内有效)
+    NSString *sa = nil;
+    double st = 0;
+    @synchronized (dy4kMonNames) { sa = dy4kLastStreamAid; st = dy4kLastStreamTime; }
+    if (sa.length >= 10 && [[NSDate date] timeIntervalSince1970] - st < 600) {
+        aid = sa;
+        @synchronized (dy4kCache) {
+            DY4KVideo *sv = dy4kCache[sa];
+            if (sv) { dgDesc = sv.desc; dgAuthor = sv.author; }
+        }
+    }
+    // v2.2: 次选用码率回调记录的"正在播放"aid(60秒内), BFS挖VC model可能命中预加载页
     NSString *pa = nil, *pd = nil, *pau = nil;
     double pt = 0;
     @synchronized (dy4kMonNames) { pa = dy4kPlayingAid; pd = dy4kPlayingDesc; pau = dy4kPlayingAuthor; pt = dy4kPlayingTime; }
