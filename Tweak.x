@@ -93,6 +93,11 @@ static long dy4kNTMFired = 0;      // TTNetworkManager 请求发出次数
 static long dy4kNTMOk = 0;         // 请求成功且解析入库次数
 static NSString *dy4kNTMSel = nil; // 命中的 GET selector
 static NSString *dy4kLastErr = nil; // 最近一次主动路失败原因
+// v1.5 自适应诊断
+static NSMutableArray *dy4kFoundCls = nil;   // 运行时发现的相关类名
+static NSMutableArray *dy4kNTMMethods = nil; // TTNetworkManager 的 GET/POST/request 方法名
+static long dy4kWideHooked = 0;              // 广撒网 hook 到的方法数
+static NSMutableDictionary *dy4kOldImps = nil; // 广撒网原IMP表(类名+方法名 -> IMP)
 
 static NSArray<DY4KVideo *> *DY4KRecentVideos(void) {
     NSMutableArray<DY4KVideo *> *arr = [NSMutableArray array];
@@ -459,27 +464,25 @@ static NSString *DY4KDigCurrentAid(NSString **outDesc, NSString **outAuthor) {
         UIViewController *vc = queue.firstObject;
         [queue removeObjectAtIndex:0];
         if (!vc) continue;
-        NSString *cls = NSStringFromClass([vc class]);
-        if ([cls containsString:@"PlayInteraction"] || [cls containsString:@"AwemeDetail"]) {
-            for (NSString *mk in @[@"model", @"awemeModel", @"currentAwemeModel"]) {
-                @try {
-                    id m = [vc valueForKey:mk];
-                    if (!m || [m isKindOfClass:[NSNull class]]) continue;
-                    id aid = [m valueForKey:@"itemID"];
-                    if (![aid isKindOfClass:[NSString class]] || [(NSString *)aid length] < 10) continue;
-                    dy4kDigHit++;
-                    if (outDesc) {
-                        id d = [m valueForKey:@"descriptionString"];
-                        if (![d isKindOfClass:[NSString class]] || [(NSString *)d length] == 0) d = [m valueForKey:@"itemTitle"];
-                        *outDesc = [d isKindOfClass:[NSString class]] ? d : nil;
-                    }
-                    if (outAuthor) {
-                        id au = [m valueForKeyPath:@"author.nickname"];
-                        *outAuthor = [au isKindOfClass:[NSString class]] ? au : nil;
-                    }
-                    return aid;
-                } @catch (NSException *e) {}
-            }
+        // v1.5: 不筛类名(新版抖音类名可能变), 对每个VC无差别尝试KVC挖model
+        for (NSString *mk in @[@"model", @"awemeModel", @"currentAwemeModel", @"awemeDetailModel"]) {
+            @try {
+                id m = [vc valueForKey:mk];
+                if (!m || [m isKindOfClass:[NSNull class]] || [m isKindOfClass:[UIViewController class]] || [m isKindOfClass:[UIView class]]) continue;
+                id aid = [m valueForKey:@"itemID"];
+                if (![aid isKindOfClass:[NSString class]] || [(NSString *)aid length] < 10) continue;
+                dy4kDigHit++;
+                if (outDesc) {
+                    id d = [m valueForKey:@"descriptionString"];
+                    if (![d isKindOfClass:[NSString class]] || [(NSString *)d length] == 0) d = [m valueForKey:@"itemTitle"];
+                    *outDesc = [d isKindOfClass:[NSString class]] ? d : nil;
+                }
+                if (outAuthor) {
+                    id au = [m valueForKeyPath:@"author.nickname"];
+                    *outAuthor = [au isKindOfClass:[NSString class]] ? au : nil;
+                }
+                return aid;
+            } @catch (NSException *e) {}
         }
         [queue addObjectsFromArray:vc.childViewControllers];
         if (vc.presentedViewController) [queue addObject:vc.presentedViewController];
@@ -569,6 +572,23 @@ static void DY4KShowDiag(void) {
     NSString *names = nil;
     @synchronized (dy4kMonNames) { names = [dy4kMonNames componentsJoinedByString:@", "]; }
     [msg appendFormat:@"\n相关通知:%@", names.length ? names : @"无"];
+    NSString *clsLst = nil;
+    NSString *ntmLst = nil;
+    @synchronized (dy4kFoundCls) {
+        if (dy4kFoundCls.count > 0) {
+            NSArray *part = [dy4kFoundCls subarrayWithRange:NSMakeRange(0, MIN((unsigned long)10, dy4kFoundCls.count))];
+            clsLst = [part componentsJoinedByString:@", "];
+        }
+    }
+    @synchronized (dy4kNTMMethods) {
+        if (dy4kNTMMethods.count > 0) {
+            NSArray *part = [dy4kNTMMethods subarrayWithRange:NSMakeRange(0, MIN((unsigned long)10, dy4kNTMMethods.count))];
+            ntmLst = [part componentsJoinedByString:@", "];
+        }
+    }
+    [msg appendFormat:@"\n发现类(%lu):%@", (unsigned long)dy4kFoundCls.count, clsLst ?: @"无"];
+    [msg appendFormat:@"\nNTM方法:%@", ntmLst ?: @"未枚举"];
+    [msg appendFormat:@"\n广撒网hook:%ld", dy4kWideHooked];
     DY4KAlert(msg, nil);
 }
 
@@ -637,7 +657,21 @@ static void DY4KShowQuality(DY4KVideo *v) {
 static void DY4KShowMenuLegacy(void) {
     NSArray<DY4KVideo *> *recent = DY4KRecentVideos();
     if (recent.count == 0) {
-        DY4KAlert(@"暂无截获数据\n先在抖音刷一两个视频(滑动切换), 再点悬浮球", nil);
+        NSMutableString *dg = [NSMutableString string];
+        [dg appendString:@"DY4K v1.5 已运行\n"];
+        [dg appendFormat:@"通知:%ld Monitor:%ld 大响应:%ld\n", dy4kNotifCount, dy4kMonitorHit, dy4kBigHit];
+        [dg appendFormat:@"挖aid:%ld 主动:%ld/%ld swizzle:%d\n", dy4kDigHit, dy4kNTMOk, dy4kNTMFired, dy4kSwizzled];
+        NSString *err = nil;
+        @synchronized (dy4kMonNames) { err = dy4kLastErr; }
+        if (err.length > 0) [dg appendFormat:@"错误:%@\n", err];
+        [dg appendString:@"先播放一个视频再点悬浮球"];
+        UIAlertController *ac = [UIAlertController alertControllerWithTitle:nil message:dg preferredStyle:UIAlertControllerStyleAlert];
+        [ac addAction:[UIAlertAction actionWithTitle:@"详细诊断" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a) {
+            DY4KShowDiag();
+        }]];
+        [ac addAction:[UIAlertAction actionWithTitle:@"关闭" style:UIAlertActionStyleCancel handler:nil]];
+        UIViewController *t0 = DY4KTopVC();
+        if (t0) [t0 presentViewController:ac animated:YES completion:nil];
         return;
     }
     if (recent.count == 1) {
@@ -829,6 +863,106 @@ static id dy4kAllObs = nil;
 static id dy4kActiveObs = nil;
 static IMP dy4kOrigSetBR = NULL;
 
+// v1.5 广撒网统一IMP: 先截获, 再沿继承链找原实现调用
+static void dy4kWideHookIMP(id self, SEL _cmd, id models) {
+    DY4KOnBitrateModels(models);
+    IMP old = NULL;
+    @synchronized (dy4kOldImps) {
+        Class c = object_getClass(self);
+        while (c) {
+            NSString *k = [NSStringFromClass(c) stringByAppendingString:NSStringFromSelector(_cmd)];
+            NSValue *v = dy4kOldImps[k];
+            if (v) { old = (IMP)[v pointerValue]; break; }
+            c = [c superclass];
+        }
+    }
+    if (old) ((void (*)(id, SEL, id))old)(self, _cmd, models);
+}
+
+// v1.5: 运行时全量扫描真实类名(新版抖音类名可能全变, 不再赌精确名)
+static void DY4KScanClasses(void) {
+    @synchronized (dy4kFoundCls) { [dy4kFoundCls removeAllObjects]; }
+    unsigned int count = 0;
+    Class *classes = objc_copyClassList(&count);
+    if (!classes) return;
+    NSArray *keys = @[@"PlayInteraction", @"AwemeDetail", @"BitrateModel", @"BitRateModel", @"DPlayer", @"NetworkManager"];
+    NSMutableArray *found = [NSMutableArray array];
+    for (unsigned int i = 0; i < count; i++) {
+        NSString *name = NSStringFromClass(classes[i]);
+        for (NSString *k in keys) {
+            if ([name containsString:k]) {
+                if (found.count < 40) [found addObject:name];
+                break;
+            }
+        }
+    }
+    free(classes);
+    @synchronized (dy4kFoundCls) { [dy4kFoundCls addObjectsFromArray:found]; }
+}
+
+// v1.5: 对发现的 *BitrateModel* 类, hook 其全部 set*Bitrate* 方法
+static void DY4KSwizzleWide(void) {
+    unsigned int count = 0;
+    Class *classes = objc_copyClassList(&count);
+    if (!classes) return;
+    long hooked = 0;
+    NSMutableArray *hitNames = [NSMutableArray array];
+    for (unsigned int i = 0; i < count; i++) {
+        NSString *name = NSStringFromClass(classes[i]);
+        if (![name containsString:@"BitrateModel"] && ![name containsString:@"BitRateModel"] && ![name containsString:@"bitrateModel"]) continue;
+        unsigned int mc = 0;
+        Method *methods = class_copyMethodList(classes[i], &mc);
+        for (unsigned int j = 0; j < mc; j++) {
+            NSString *sn = NSStringFromSelector(method_getName(methods[j]));
+            if (![sn hasPrefix:@"set"] || sn.length < 8) continue;
+            if (![sn containsString:@"Bitrate"] && ![sn containsString:@"Bit_rate"] && ![sn containsString:@"BitRate"]) continue;
+            NSString *k = [name stringByAppendingString:sn];
+            @synchronized (dy4kOldImps) {
+                if (dy4kOldImps[k]) continue;
+                IMP old = method_getImplementation(methods[j]);
+                method_setImplementation(methods[j], (IMP)dy4kWideHookIMP);
+                dy4kOldImps[k] = [NSValue valueWithPointer:old];
+            }
+            if (hitNames.count < 8) [hitNames addObject:[NSString stringWithFormat:@"%@ %@", name, sn]];
+            hooked++;
+        }
+        if (methods) free(methods);
+    }
+    free(classes);
+    dy4kWideHooked = hooked;
+    if (hitNames.count > 0) {
+        @synchronized (dy4kMonNames) {
+            for (NSString *hn in hitNames) {
+                if (dy4kMonNames.count < 12) [dy4kMonNames addObject:[@"SW:" stringByAppendingString:hn]];
+            }
+        }
+    }
+}
+
+// v1.5: 枚举 TTNetworkManager 真实方法名(诊断 GET selector 不匹配问题)
+static void DY4KProbeNTM(void) {
+    Class ntm = NSClassFromString(@"TTNetworkManager");
+    if (!ntm) {
+        @synchronized (dy4kMonNames) { dy4kLastErr = @"TTNetworkManager类不存在"; }
+        return;
+    }
+    NSMutableArray *names = [NSMutableArray array];
+    unsigned int mc = 0;
+    Method *methods = class_copyMethodList(object_getClass(ntm), &mc); // 类方法
+    for (unsigned int j = 0; j < mc; j++) {
+        NSString *sn = NSStringFromSelector(method_getName(methods[j]));
+        if ([sn hasPrefix:@"shared"] && names.count < 4) [names addObject:[@"+ " stringByAppendingString:sn]];
+    }
+    if (methods) free(methods);
+    methods = class_copyMethodList(ntm, &mc); // 实例方法
+    for (unsigned int j = 0; j < mc; j++) {
+        NSString *sn = NSStringFromSelector(method_getName(methods[j]));
+        if (([sn hasPrefix:@"GET"] || [sn hasPrefix:@"get"] || [sn hasPrefix:@"request"] || [sn hasPrefix:@"POST"]) && names.count < 14) [names addObject:sn];
+    }
+    if (methods) free(methods);
+    @synchronized (dy4kNTMMethods) { [dy4kNTMMethods addObjectsFromArray:names]; }
+}
+
 static void dy4kHookSetBitrateModels(id self, SEL _cmd, id models) {
     DY4KOnBitrateModels(models);
     if (dy4kOrigSetBR) ((void (*)(id, SEL, id))dy4kOrigSetBR)(self, _cmd, models);
@@ -839,6 +973,9 @@ static void dy4kHookSetBitrateModels(id self, SEL _cmd, id models) {
         dy4kCache = [NSMutableDictionary dictionary];
         dy4kParseQueue = dispatch_queue_create("com.omega.dy4k.parse", DISPATCH_QUEUE_SERIAL);
         dy4kMonNames = [NSMutableArray array];
+        dy4kFoundCls = [NSMutableArray array];
+        dy4kNTMMethods = [NSMutableArray array];
+        dy4kOldImps = [NSMutableDictionary dictionary];
         dy4kAllObs = [[NSNotificationCenter defaultCenter] addObserverForName:nil object:nil queue:nil usingBlock:^(NSNotification *note) {
             @try {
                 dy4kNotifCount++;
@@ -870,6 +1007,11 @@ static void dy4kHookSetBitrateModels(id self, SEL _cmd, id models) {
         }];
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             [[DY4KBall shared] mount];
+        });
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(4 * NSEC_PER_SEC)), dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+            DY4KScanClasses();
+            DY4KSwizzleWide();
+            DY4KProbeNTM();
         });
     }
 }
