@@ -3756,18 +3756,61 @@ static NSString *DYYYFetchPageHTMLViaWebView(NSString *awemeId, NSMutableString 
     NSString *pageURL = [NSString stringWithFormat:@"https://www.douyin.com/video/%@", awemeId];
     dispatch_async(dispatch_get_main_queue(), ^{
         @try {
+            [probeLog appendFormat:@"[Step2.6 WKWebView救援] 开始加载 %@\n", pageURL];
             WKWebViewConfiguration *cfg = [[WKWebViewConfiguration alloc] init];
-            WKWebView *wv = [[WKWebView alloc] initWithFrame:CGRectMake(0, 0, 375, 700) configuration:cfg];
+            // 真机指纹对齐: 模拟iPadOS桌面模式Safari(UA=Macintosh+platform=MacIntel+iPad真实分辨率1024x1366, iPad本就是MacUA+触摸的真实组合)
+            NSString *fpJS = @"(function(){try{Object.defineProperty(navigator,'platform',{get:function(){return 'MacIntel';}});}catch(e){}"
+                              @"try{Object.defineProperty(screen,'width',{get:function(){return 1024;}});}catch(e){}"
+                              @"try{Object.defineProperty(screen,'height',{get:function(){return 1366;}});}catch(e){}"
+                              @"try{Object.defineProperty(screen,'availWidth',{get:function(){return 1024;}});}catch(e){}"
+                              @"try{Object.defineProperty(screen,'availHeight',{get:function(){return 1366;}});}catch(e){}"
+                              @"try{Object.defineProperty(navigator,'webdriver',{get:function(){return false;}});}catch(e){}})();";
+            WKUserScript *fpScript = [[WKUserScript alloc] initWithSource:fpJS injectionTime:WKUserScriptInjectionTimeAtDocumentStart forMainFrameOnly:YES];
+            [cfg.userContentController addUserScript:fpScript];
+            // 加载阶段用桌面视口大frame, 模拟真实桌面窗口宽度
+            WKWebView *wv = [[WKWebView alloc] initWithFrame:CGRectMake(0, 0, 1024, 1366) configuration:cfg];
             wv.customUserAgent = @"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15";
             wv.hidden = YES;
             static WKWebView *sRescueWV = nil;
             sRescueWV = wv; // 静态持有防提前释放
             UIView *kw = [UIApplication sharedApplication].keyWindow;
             if (kw) [kw addSubview:wv];
-            [probeLog appendFormat:@"[Step2.6 WKWebView救援] 桌面UA加载 %@\n", pageURL];
             [wv loadRequest:[NSURLRequest requestWithURL:[NSURL URLWithString:pageURL]]];
             __block NSInteger tries = 0;
+            __block NSInteger maxTries = 15; // 自动阶段: 4s首查+15次x2s约30s
+            __block BOOL visualShown = NO;
+            __block UIView *maskView = nil;
+            __block void (^cleanup)(void) = nil;
+            __block void (^showVisual)(void) = nil;
             __block void (^poll)(void) = nil;
+            cleanup = ^{
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    [maskView removeFromSuperview];
+                    [wv stopLoading];
+                    [wv removeFromSuperview];
+                    sRescueWV = nil;
+                });
+            };
+            // 可视化: 自动验证未过时把页面弹到屏幕上, 由用户人工滑动验证码
+            showVisual = ^{
+                if (visualShown) return;
+                visualShown = YES;
+                [probeLog appendFormat:@"[WKWebView救援] 自动验证未过, 弹出页面请人工滑动验证码(最长120s)\n"];
+                UIView *key = [UIApplication sharedApplication].keyWindow;
+                if (!key) return;
+                maskView = [[UIView alloc] initWithFrame:key.bounds];
+                maskView.backgroundColor = [UIColor colorWithWhite:0 alpha:0.75];
+                UILabel *tip = [[UILabel alloc] initWithFrame:CGRectMake(20, 48, key.bounds.size.width - 40, 24)];
+                tip.text = @"请滑动验证码，通过后自动继续保存";
+                tip.textColor = [UIColor whiteColor];
+                tip.font = [UIFont systemFontOfSize:14];
+                tip.textAlignment = NSTextAlignmentCenter;
+                wv.frame = CGRectMake(16, 84, key.bounds.size.width - 32, key.bounds.size.height - 110);
+                wv.hidden = NO;
+                [maskView addSubview:tip];
+                [maskView addSubview:wv];
+                [key addSubview:maskView];
+            };
             poll = ^{
                 if (signaled || wv == nil) return;
                 tries++;
@@ -3776,27 +3819,35 @@ static NSString *DYYYFetchPageHTMLViaWebView(NSString *awemeId, NSMutableString 
                     NSString *info = [res isKindOfClass:[NSString class]] ? res : @"0|0";
                     NSArray *parts = [info componentsSeparatedByString:@"|"];
                     BOOL hasRender = [parts count] >= 2 && [parts[0] isEqualToString:@"1"];
-                    if (hasRender || tries >= 20) {
-                        NSString *pageTitle = ([parts count] >= 2 && ![parts[0] isEqualToString:@"1"]) ? parts[1] : @"";
+                    NSString *pageTitle = ([parts count] >= 2 && ![parts[0] isEqualToString:@"1"]) ? parts[1] : @"";
+                    if (hasRender || tries >= maxTries) {
                         [wv evaluateJavaScript:@"document.documentElement.innerHTML" completionHandler:^(id html, NSError *err2) {
                             if (signaled) return;
-                            signaled = YES;
-                            htmlResult = [html isKindOfClass:[NSString class]] ? html : nil;
-                            [probeLog appendFormat:@"[WKWebView救援] 轮询%ld次 hasRender=%@ page=%@ htmlLen=%lu\n", (long)tries, hasRender ? @"YES" : @"NO", pageTitle.length ? pageTitle : @"-", (unsigned long)htmlResult.length];
-                            // 回填养熟的cookie（__ac_signature等）给后续请求用
-                            [wv.configuration.websiteDataStore.httpCookieStore getAllCookies:^(NSArray<NSHTTPCookie *> *cks) {
-                                NSInteger n = 0;
-                                for (NSHTTPCookie *c in cks) {
-                                    if ([c.domain containsString:@"douyin"]) { [[NSHTTPCookieStorage sharedHTTPCookieStorage] setCookie:c]; n++; }
-                                }
-                                NSLog(@"[DYYY][WKWebView救援] cookie回填 %ld 个", (long)n);
-                            }];
-                            dispatch_semaphore_signal(rescueSem);
-                            dispatch_async(dispatch_get_main_queue(), ^{
-                                [wv stopLoading];
-                                [wv removeFromSuperview];
-                                sRescueWV = nil;
-                            });
+                            NSString *got = [html isKindOfClass:[NSString class]] ? html : nil;
+                            if (hasRender && got.length > 0) {
+                                signaled = YES;
+                                htmlResult = got;
+                                [probeLog appendFormat:@"[WKWebView救援] 成功! 轮询%ld次 htmlLen=%lu 回填cookie继续保存\n", (long)tries, (unsigned long)htmlResult.length];
+                                [wv.configuration.websiteDataStore.httpCookieStore getAllCookies:^(NSArray<NSHTTPCookie *> *cks) {
+                                    NSInteger n = 0;
+                                    for (NSHTTPCookie *c in cks) {
+                                        if ([c.domain containsString:@"douyin"]) { [[NSHTTPCookieStorage sharedHTTPCookieStorage] setCookie:c]; n++; }
+                                    }
+                                    NSLog(@"[DYYY][WKWebView救援] cookie回填 %ld 个", (long)n);
+                                }];
+                                cleanup();
+                                dispatch_semaphore_signal(rescueSem);
+                            } else if (visualShown) {
+                                [probeLog appendFormat:@"[WKWebView救援] 人工阶段超时 轮询%ld次 page=%@ htmlLen=%lu 放弃\n", (long)tries, pageTitle.length ? pageTitle : @"-", (unsigned long)got.length];
+                                signaled = YES;
+                                cleanup();
+                                dispatch_semaphore_signal(rescueSem);
+                            } else {
+                                [probeLog appendFormat:@"[WKWebView救援] 自动阶段结束(%ld次) page=%@ htmlLen=%lu\n", (long)tries, pageTitle.length ? pageTitle : @"-", (unsigned long)got.length];
+                                maxTries = tries + 60; // 人工阶段再等120s
+                                showVisual();
+                                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), poll);
+                            }
                         }];
                         return;
                     }
@@ -3809,7 +3860,7 @@ static NSString *DYYYFetchPageHTMLViaWebView(NSString *awemeId, NSMutableString 
             if (!signaled) { signaled = YES; dispatch_semaphore_signal(rescueSem); }
         }
     });
-    dispatch_semaphore_wait(rescueSem, dispatch_time(DISPATCH_TIME_NOW, 50 * NSEC_PER_SEC));
+    dispatch_semaphore_wait(rescueSem, dispatch_time(DISPATCH_TIME_NOW, 170 * NSEC_PER_SEC));
     return htmlResult;
 }
 
