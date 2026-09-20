@@ -92,6 +92,7 @@ static long dy4kDigHit = 0;        // 播放页挖到 aweme_id 次数
 static long dy4kNTMFired = 0;      // Web主动请求发出次数
 static long dy4kNTMOk = 0;         // Web主动请求成功入库次数
 static NSString *dy4kLastErr = nil; // 最近一次主动路失败原因
+static NSString *dy4kDlErr = nil; // v1.9: 最近一次下载失败详情(HTTP状态/错误码)
 static long dy4kURLHit = 0;        // v1.6 URLSession拦截命中入库次数
 static NSMutableArray *dy4kMonPaths = nil; // Monitor响应URL path样本
 static NSMutableArray *dy4kURLPaths = nil; // v1.8: NSURLSession(系统会话)请求path样本
@@ -440,7 +441,20 @@ static BOOL DY4KValidMP4(NSString *path) {
         return;
     }
     if (!DY4KValidMP4(tmp)) {
+        long sc = 0;
+        NSString *head = @"";
+        NSData *hd = [NSData dataWithContentsOfFile:tmp options:NSDataReadingMappedIfSafe error:nil];
+        if (hd.length > 0) {
+            NSData *pre = [hd subdataWithRange:NSMakeRange(0, MIN((NSUInteger)24, hd.length))];
+            head = [[NSString alloc] initWithData:pre encoding:NSUTF8StringEncoding];
+            if (!head) head = [pre description];
+        }
+        id resp = task.response;
+        if ([resp isKindOfClass:[NSHTTPURLResponse class]]) sc = ((NSHTTPURLResponse *)resp).statusCode;
         [[NSFileManager defaultManager] removeItemAtPath:tmp error:nil];
+        @synchronized (dy4kMonNames) {
+            dy4kDlErr = [NSString stringWithFormat:@"HTTP%ld body=%@", sc, head];
+        }
         [[NSOperationQueue mainQueue] addOperationWithBlock:^{ [self tryNext]; }];
         return;
     }
@@ -449,6 +463,11 @@ static BOOL DY4KValidMP4(NSString *path) {
 
 - (void)URLSession:(NSURLSession *)session task:(NSURLSessionTask *)task didCompleteWithError:(NSError *)error {
     if (error) {
+        NSString *u = task.currentRequest.URL.absoluteString ?: @"";
+        NSString *tail = [u length] > 40 ? [u substringFromIndex:[u length] - 40] : u;
+        @synchronized (dy4kMonNames) {
+            dy4kDlErr = [NSString stringWithFormat:@"NET-ERR(%ld):%@ |…%@", (long)error.code, error.localizedDescription ?: @"?", tail];
+        }
         [[NSOperationQueue mainQueue] addOperationWithBlock:^{ [self tryNext]; }];
     }
 }
@@ -773,16 +792,25 @@ static void DY4KShowDiag(void) {
 }
 
 static void DY4KSaveAndReport(NSString *path) {
-    [[PHPhotoLibrary sharedPhotoLibrary] performChanges:^{
-        [PHAssetChangeRequest creationRequestForAssetFromVideoAtFileURL:[NSURL fileURLWithPath:path]];
-    } completionHandler:^(BOOL success, NSError *err) {
-        dispatch_async(dispatch_get_main_queue(), ^{
-            if (success) {
-                DY4KAlert(@"已保存到相册", nil);
-            } else {
-                DY4KAlert([NSString stringWithFormat:@"保存失败: %@", err.localizedDescription ?: @"未知错误"], nil);
-            }
-        });
+    // v1.9: 先显式申请"添加照片"权限, 被拒时给出明确指引
+    [PHPhotoLibrary requestAuthorizationForAccessLevel:PHAccessLevelAddOnly handler:^(PHAuthorizationStatus st) {
+        if (st != PHAuthorizationStatusAuthorized && st != PHAuthorizationStatusLimited) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                DY4KAlert(@"保存失败: 相册权限被拒\n请在 iOS 设置-抖音-照片-添加照片 打开", nil);
+            });
+            return;
+        }
+        [[PHPhotoLibrary sharedPhotoLibrary] performChanges:^{
+            [PHAssetChangeRequest creationRequestForAssetFromVideoAtFileURL:[NSURL fileURLWithPath:path]];
+        } completionHandler:^(BOOL success, NSError *err) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                if (success) {
+                    DY4KAlert(@"已保存到相册", nil);
+                } else {
+                    DY4KAlert([NSString stringWithFormat:@"保存失败: %@", err.localizedDescription ?: @"未知错误"], nil);
+                }
+            });
+        }];
     }];
 }
 
@@ -791,7 +819,11 @@ static void DY4KDownloadGear(DY4KGear *g) {
     if (!top) return;
     UIAlertController *busy = [UIAlertController alertControllerWithTitle:@"DY4K 下载中" message:@"0%" preferredStyle:UIAlertControllerStyleAlert];
     [busy addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
-    [top presentViewController:busy animated:YES completion:nil];
+    // v1.9: 从画质sheet的handler同步present会被sheet的dismiss动画阻塞而静默失败, 延迟等sheet关完
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.45 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        UIViewController *t2 = DY4KTopVC();
+        if (t2) [t2 presentViewController:busy animated:YES completion:nil];
+    });
     DY4KDownloader *dl = [DY4KDownloader new];
     [dl start:g.urls onProgress:^(double frac) {
         dispatch_async(dispatch_get_main_queue(), ^{
@@ -799,14 +831,21 @@ static void DY4KDownloadGear(DY4KGear *g) {
         });
     } onDone:^(BOOL ok, NSString *savedPath, NSString *errMsg) {
         dispatch_async(dispatch_get_main_queue(), ^{
-            // v1.7: dismiss完成后才弹后续提示, 避免presentation冲突
-            [busy dismissViewControllerAnimated:NO completion:^{
+            // v1.9: busy可能未成功present(历史版本竞态), 按实际状态分支, 保证结果提示必达
+            void (^finish)(void) = ^{
                 if (ok) {
                     DY4KSaveAndReport(savedPath);
                 } else {
-                    DY4KAlert([NSString stringWithFormat:@"下载失败: %@\n档位: %@ %ldx%ld", errMsg, g.gearName, g.width, g.height], nil);
+                    NSString *dlErr = nil;
+                    @synchronized (dy4kMonNames) { dlErr = dy4kDlErr; }
+                    DY4KAlert([NSString stringWithFormat:@"下载失败: %@\n%@\n档位: %@ %ldx%ld", errMsg, dlErr ?: @"", g.gearName, g.width, g.height], nil);
                 }
-            }];
+            };
+            if (busy.presentingViewController) {
+                [busy dismissViewControllerAnimated:NO completion:finish];
+            } else {
+                finish();
+            }
         });
     }];
 }
@@ -821,12 +860,19 @@ static void DY4KShowQuality(DY4KVideo *v) {
     if (!top) return;
     UIAlertController *sheet = [UIAlertController alertControllerWithTitle:@"选择画质" message:v.displayTitle preferredStyle:UIAlertControllerStyleActionSheet];
     for (DY4KGear *g in gears) {
-        long maxEdge = g.width > g.height ? g.width : g.height;
         NSString *tag = @"[标清] ";
-        if (maxEdge >= 2100) tag = @"[4K] ";
-        else if (maxEdge >= 1400) tag = @"[2K] ";
-        else if (maxEdge >= 1060) tag = @"[1080p] ";
-        else if (maxEdge >= 700) tag = @"[720p] ";
+        NSString *gnL = [g.gearName lowercaseString];
+        if ([gnL containsString:@"4k"] || [gnL containsString:@"2160"]) tag = @"[4K] ";
+        else if ([gnL containsString:@"1080"]) tag = @"[1080p] ";
+        else if ([gnL containsString:@"720"]) tag = @"[720p] ";
+        else if ([gnL containsString:@"540"]) tag = @"[540p] ";
+        else {
+            long maxEdge = g.width > g.height ? g.width : g.height;
+            if (maxEdge >= 2100) tag = @"[4K] ";
+            else if (maxEdge >= 1400) tag = @"[2K] ";
+            else if (maxEdge >= 1060) tag = @"[1080p] ";
+            else if (maxEdge >= 700) tag = @"[720p] ";
+        }
         NSString *t = [NSString stringWithFormat:@"%@%@ %ldx%ld · %.1fMbps", tag, g.gearName, g.width, g.height, (double)g.bitrate / 1000000.0];
         [sheet addAction:[UIAlertAction actionWithTitle:t style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a) {
             DY4KDownloadGear(g);
