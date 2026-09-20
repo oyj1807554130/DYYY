@@ -3758,7 +3758,7 @@ static NSString *DYYYFetchPageHTMLViaWebView(NSString *awemeId, NSMutableString 
         @try {
             WKWebViewConfiguration *cfg = [[WKWebViewConfiguration alloc] init];
             WKWebView *wv = [[WKWebView alloc] initWithFrame:CGRectMake(0, 0, 375, 700) configuration:cfg];
-            wv.customUserAgent = @"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36";
+            wv.customUserAgent = @"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15";
             wv.hidden = YES;
             static WKWebView *sRescueWV = nil;
             sRescueWV = wv; // 静态持有防提前释放
@@ -3771,17 +3771,18 @@ static NSString *DYYYFetchPageHTMLViaWebView(NSString *awemeId, NSMutableString 
             poll = ^{
                 if (signaled || wv == nil) return;
                 tries++;
-                [wv evaluateJavaScript:@"(function(){var r=document.querySelector('#RENDER_DATA');return (r?('1|'+r.textContent.length):'0|0');})()" completionHandler:^(id res, NSError *err) {
+                [wv evaluateJavaScript:@"(function(){var r=document.querySelector('#RENDER_DATA');return (r?('1|'+r.textContent.length):('0|'+(document.title||'')));})()" completionHandler:^(id res, NSError *err) {
                     if (signaled) return;
                     NSString *info = [res isKindOfClass:[NSString class]] ? res : @"0|0";
                     NSArray *parts = [info componentsSeparatedByString:@"|"];
                     BOOL hasRender = [parts count] >= 2 && [parts[0] isEqualToString:@"1"];
-                    if (hasRender || tries >= 6) {
+                    if (hasRender || tries >= 20) {
+                        NSString *pageTitle = ([parts count] >= 2 && ![parts[0] isEqualToString:@"1"]) ? parts[1] : @"";
                         [wv evaluateJavaScript:@"document.documentElement.innerHTML" completionHandler:^(id html, NSError *err2) {
                             if (signaled) return;
                             signaled = YES;
                             htmlResult = [html isKindOfClass:[NSString class]] ? html : nil;
-                            [probeLog appendFormat:@"[WKWebView救援] 轮询%ld次 hasRender=%@ htmlLen=%lu\n", (long)tries, hasRender ? @"YES" : @"NO", (unsigned long)htmlResult.length];
+                            [probeLog appendFormat:@"[WKWebView救援] 轮询%ld次 hasRender=%@ page=%@ htmlLen=%lu\n", (long)tries, hasRender ? @"YES" : @"NO", pageTitle.length ? pageTitle : @"-", (unsigned long)htmlResult.length];
                             // 回填养熟的cookie（__ac_signature等）给后续请求用
                             [wv.configuration.websiteDataStore.httpCookieStore getAllCookies:^(NSArray<NSHTTPCookie *> *cks) {
                                 NSInteger n = 0;
@@ -3802,13 +3803,13 @@ static NSString *DYYYFetchPageHTMLViaWebView(NSString *awemeId, NSMutableString 
                     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), poll);
                 }];
             };
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), poll);
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(4.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), poll);
         } @catch (NSException *e) {
             [probeLog appendFormat:@"[WKWebView救援] 异常: %@\n", e.reason ?: @"unknown"];
             if (!signaled) { signaled = YES; dispatch_semaphore_signal(rescueSem); }
         }
     });
-    dispatch_semaphore_wait(rescueSem, dispatch_time(DISPATCH_TIME_NOW, 15 * NSEC_PER_SEC));
+    dispatch_semaphore_wait(rescueSem, dispatch_time(DISPATCH_TIME_NOW, 50 * NSEC_PER_SEC));
     return htmlResult;
 }
 
