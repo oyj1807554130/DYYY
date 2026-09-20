@@ -609,127 +609,70 @@ static void DY4KRecordURLPath(NSString *u) {
     }
 }
 
-// v1.6 Web主动路(探针已验证: APP内带Cookie直发 www.douyin.com Web detail, 无需签名, 全档含4K)
-static NSString *DY4KCollectCookies(void) {
-    NSMutableString *s = [NSMutableString string];
-    NSArray *cks = [NSHTTPCookieStorage sharedHTTPCookieStorage].cookies;
-    for (NSHTTPCookie *c in cks) {
-        if ([c.domain containsString:@"douyin"]) {
-            if (s.length > 0) [s appendString:@"; "];
-            [s appendFormat:@"%@=%@", c.name, c.value];
-        }
-    }
-    return s;
-}
-
-static NSString *DY4KRegisterTtwid(void) {
-    NSString *cached = [[NSUserDefaults standardUserDefaults] stringForKey:@"dy4k_ttwid"];
-    if (cached.length > 0) return cached;
-    @try {
-        NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:@"https://ttwid.bytedance.com/ttwid/union/register/"]];
-        req.HTTPMethod = @"POST";
-        req.HTTPBody = [@"{\"region\":\"cn\",\"aid\":6383,\"needFid\":false,\"service\":\"www.douyin.com\",\"migrate_info\":{\"ticket\":\"\",\"source\":\"node\"},\"cbUrlProtocol\":\"https\",\"union\":true}" dataUsingEncoding:NSUTF8StringEncoding];
-        [req setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
-        [req setValue:@"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36" forHTTPHeaderField:@"User-Agent"];
-        req.timeoutInterval = 10;
-        dispatch_semaphore_t sem = dispatch_semaphore_create(0);
-        __block NSString *tt = nil;
-        NSURLSessionDataTask *tsk = [[NSURLSession sharedSession] dataTaskWithRequest:req completionHandler:^(NSData *d, NSURLResponse *r, __unused NSError *e) {
-            @try {
-                NSString *sc = ((NSHTTPURLResponse *)r).allHeaderFields[@"Set-Cookie"];
-                if (sc.length > 0) {
-                    NSRange rr = [sc rangeOfString:@"ttwid="];
-                    if (rr.location != NSNotFound) {
-                        NSString *sub = [sc substringFromIndex:rr.location + 6];
-                        NSRange sm = [sub rangeOfString:@";"];
-                        tt = sm.location != NSNotFound ? [sub substringToIndex:sm.location] : sub;
-                    }
-                }
-                if (tt.length == 0 && d.length > 0) {
-                    NSDictionary *j = [NSJSONSerialization JSONObjectWithData:d options:0 error:nil];
-                    if ([j isKindOfClass:[NSDictionary class]]) tt = j[@"ttwid"];
-                }
-            } @catch (NSException *ex) {}
-            dispatch_semaphore_signal(sem);
-        }];
-        [tsk resume];
-        dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, (int64_t)10 * NSEC_PER_SEC));
-        if (tt.length > 0) [[NSUserDefaults standardUserDefaults] setObject:tt forKey:@"dy4k_ttwid"];
-        return tt;
-    } @catch (NSException *e) { return nil; }
-}
-
-static void DY4KFetchDetailWeb(NSString *aid, void (^done)(BOOL ok)) {
+// v2.0 主动路 = 主人接口4(腾讯云8001, 上游TikHub v33, 全档含原画/4K, 客户端零签名绕开Argus)
+static void DY4KFetchViaApi4(NSString *aid, void (^done)(BOOL ok)) {
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         __block BOOL ok = NO;
         @try {
-            NSMutableString *ck = [NSMutableString stringWithString:DY4KCollectCookies()];
-            if (![ck containsString:@"__ac_nonce"]) {
-                // 预热douyin.com拿__ac_nonce(探针Step0)
-                NSMutableURLRequest *warm = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:@"https://www.douyin.com/"]];
-                [warm setValue:@"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36" forHTTPHeaderField:@"User-Agent"];
-                warm.timeoutInterval = 10;
-                dispatch_semaphore_t wsem = dispatch_semaphore_create(0);
-                NSURLSessionDataTask *wsk = [[NSURLSession sharedSession] dataTaskWithRequest:warm completionHandler:^(__unused NSData *d, __unused NSURLResponse *r, __unused NSError *e) {
-                    dispatch_semaphore_signal(wsem);
-                }];
-                [wsk resume];
-                dispatch_semaphore_wait(wsem, dispatch_time(DISPATCH_TIME_NOW, (int64_t)10 * NSEC_PER_SEC));
-                [ck setString:DY4KCollectCookies()];
-            }
-            if (![ck containsString:@"ttwid="]) {
-                NSString *tt = DY4KRegisterTtwid();
-                if (tt.length > 0) {
-                    if (ck.length > 0) [ck appendString:@"; "];
-                    [ck appendFormat:@"ttwid=%@", tt];
-                }
-            }
-            if (ck.length == 0) {
-                @synchronized (dy4kMonNames) { dy4kLastErr = @"Cookie为空"; }
-            } else {
-                dy4kNTMFired++;
-                NSString *api = [NSString stringWithFormat:@"https://www.douyin.com/aweme/v1/web/aweme/detail/?aweme_id=%@&device_platform=webapp&aid=6383&channel=channel_pc_web&update_version_code=170400&pc_client_type=1&version_code=190500&version_name=19.5.0&cookie_enabled=true&screen_width=2560&screen_height=1440&browser_language=zh-CN&browser_platform=Win32&browser_name=Chrome&browser_version=150.0.0.0&browser_online=true&engine_name=Blink&engine_version=150.0.0.0&os_name=Windows&os_version=10&cpu_core_num=12&device_memory=8&platform=PC&downlink=4.75&effective_type=4g&round_trip_time=150", aid];
-                NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:api]];
-                [req setValue:@"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36" forHTTPHeaderField:@"User-Agent"];
-                [req setValue:@"https://www.douyin.com/" forHTTPHeaderField:@"Referer"];
-                [req setValue:@"text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8" forHTTPHeaderField:@"Accept"];
-                [req setValue:@"zh-CN,zh;q=0.9" forHTTPHeaderField:@"Accept-Language"];
-                [req setValue:@"no-cache" forHTTPHeaderField:@"Cache-Control"];
-                [req setValue:ck forHTTPHeaderField:@"Cookie"];
-                req.timeoutInterval = 15;
-                dispatch_semaphore_t sem = dispatch_semaphore_create(0);
-                NSURLSessionDataTask *ask = [[NSURLSession sharedSession] dataTaskWithRequest:req completionHandler:^(NSData *d, NSURLResponse *r, NSError *e) {
-                    @try {
-                        long scode = 0;
-                        if ([r isKindOfClass:[NSHTTPURLResponse class]]) scode = ((NSHTTPURLResponse *)r).statusCode;
-                        if (d.length > 0) {
-                            NSDictionary *j = [NSJSONSerialization JSONObjectWithData:d options:0 error:nil];
-                            if ([j isKindOfClass:[NSDictionary class]]) {
-                                if ([j[@"status_code"] integerValue] == 0) {
-                                    NSMutableDictionary<NSString *, DY4KVideo *> *acc = [NSMutableDictionary dictionary];
-                                    DY4KWalk(j, nil, nil, nil, acc);
-                                    DY4KAbsorb(acc);
-                                    if (acc.count > 0) {
-                                        dy4kNTMOk++;
-                                        ok = YES;
-                                    } else {
-                                        @synchronized (dy4kMonNames) { dy4kLastErr = @"detail无bit_rate"; }
-                                    }
-                                } else {
-                                    @synchronized (dy4kMonNames) { dy4kLastErr = [NSString stringWithFormat:@"status_code=%@", j[@"status_code"]]; }
-                                }
-                            } else {
-                                @synchronized (dy4kMonNames) { dy4kLastErr = [NSString stringWithFormat:@"响应非JSON HTTP%ld body=%@", scode, DY4KBodyPreview(d)]; }
-                            }
+            dy4kNTMFired++;
+            NSString *share = [NSString stringWithFormat:@"https://www.douyin.com/video/%@", aid];
+            NSString *enc = [share stringByAddingPercentEncodingWithAllowedCharacters:[NSCharacterSet characterSetWithCharactersInString:@"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~"]];
+            NSString *api = [NSString stringWithFormat:@"http://1.15.172.174:8001/api/douyin?url=%@&key=DYYY", enc];
+            NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:api]];
+            req.timeoutInterval = 30;
+            dispatch_semaphore_t sem = dispatch_semaphore_create(0);
+            NSURLSessionDataTask *tsk = [[NSURLSession sharedSession] dataTaskWithRequest:req completionHandler:^(NSData *d, NSURLResponse *r, NSError *e) {
+                @try {
+                    long scode = 0;
+                    if ([r isKindOfClass:[NSHTTPURLResponse class]]) scode = ((NSHTTPURLResponse *)r).statusCode;
+                    if (e) {
+                        @synchronized (dy4kMonNames) { dy4kLastErr = [NSString stringWithFormat:@"接口4网络: %@(%ld)", e.localizedDescription, (long)e.code]; }
+                    } else if (d.length == 0) {
+                        @synchronized (dy4kMonNames) { dy4kLastErr = [NSString stringWithFormat:@"接口4空响应 HTTP%ld", scode]; }
+                    } else {
+                        NSDictionary *j = [NSJSONSerialization JSONObjectWithData:d options:0 error:nil];
+                        if (![j isKindOfClass:[NSDictionary class]] || [j[@"code"] integerValue] != 200) {
+                            NSString *m = [j isKindOfClass:[NSDictionary class]] ? [NSString stringWithFormat:@"%@", j[@"msg"]] : @"";
+                            @synchronized (dy4kMonNames) { dy4kLastErr = [NSString stringWithFormat:@"接口4 HTTP%ld %@", scode, m]; }
                         } else {
-                            @synchronized (dy4kMonNames) { dy4kLastErr = e ? [NSString stringWithFormat:@"HTTP错误:%@", e.localizedDescription] : [NSString stringWithFormat:@"空响应 HTTP%ld", scode]; }
+                            NSDictionary *data = j[@"data"];
+                            if (![data isKindOfClass:[NSDictionary class]]) data = @{};
+                            NSArray *vl = data[@"video_list"];
+                            NSMutableArray<DY4KGear *> *gears = [NSMutableArray array];
+                            for (NSDictionary *it in vl) {
+                                if (![it isKindOfClass:[NSDictionary class]]) continue;
+                                NSString *lv = it[@"level"];
+                                NSString *u = it[@"url"];
+                                if (![u isKindOfClass:[NSString class]] || [u length] < 10) continue;
+                                if ([lv isKindOfClass:[NSString class]] && [lv containsString:@"播放量"]) continue;
+                                DY4KGear *g = [DY4KGear new];
+                                g.gearName = ([lv isKindOfClass:[NSString class]] && lv.length > 0) ? lv : @"接口4档位";
+                                g.urls = @[u];
+                                [gears addObject:g];
+                            }
+                            if (gears.count > 0) {
+                                DY4KVideo *v = [DY4KVideo new];
+                                v.aid = aid;
+                                v.time = [[NSDate date] timeIntervalSince1970];
+                                for (DY4KGear *g in gears) [v mergeGear:g];
+                                @synchronized (dy4kCache) { dy4kCache[aid] = v; }
+                                dy4kNTMOk++;
+                                ok = YES;
+                            } else {
+                                NSArray *imgs = data[@"images"];
+                                if ([imgs isKindOfClass:[NSArray class]] && imgs.count > 0) {
+                                    @synchronized (dy4kMonNames) { dy4kLastErr = [NSString stringWithFormat:@"图集帖(%lu张图), 视频版暂不支持图片保存", (unsigned long)imgs.count]; }
+                                } else {
+                                    @synchronized (dy4kMonNames) { dy4kLastErr = @"接口4未返回档位"; }
+                                }
+                            }
                         }
-                    } @catch (NSException *ex) {}
-                    dispatch_semaphore_signal(sem);
-                }];
-                [ask resume];
-                dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, (int64_t)15 * NSEC_PER_SEC));
-            }
+                    }
+                } @catch (NSException *ex) {}
+                dispatch_semaphore_signal(sem);
+            }];
+            [tsk resume];
+            dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, (int64_t)30 * NSEC_PER_SEC));
         } @catch (NSException *ex2) {
             @synchronized (dy4kMonNames) { dy4kLastErr = ex2.reason ?: @"异常"; }
         }
@@ -865,6 +808,7 @@ static void DY4KShowQuality(DY4KVideo *v) {
         if ([gnL containsString:@"4k"] || [gnL containsString:@"2160"]) tag = @"[4K] ";
         else if ([gnL containsString:@"1080"]) tag = @"[1080p] ";
         else if ([gnL containsString:@"720"]) tag = @"[720p] ";
+        else if ([gnL containsString:@"原画"]) tag = @"[原画] ";
         else if ([gnL containsString:@"540"]) tag = @"[540p] ";
         else {
             long maxEdge = g.width > g.height ? g.width : g.height;
@@ -873,7 +817,7 @@ static void DY4KShowQuality(DY4KVideo *v) {
             else if (maxEdge >= 1060) tag = @"[1080p] ";
             else if (maxEdge >= 700) tag = @"[720p] ";
         }
-        NSString *t = [NSString stringWithFormat:@"%@%@ %ldx%ld · %.1fMbps", tag, g.gearName, g.width, g.height, (double)g.bitrate / 1000000.0];
+        NSString *t = (g.width > 0 && g.bitrate > 0) ? [NSString stringWithFormat:@"%@%@ %ldx%ld · %.1fMbps", tag, g.gearName, g.width, g.height, (double)g.bitrate / 1000000.0] : [NSString stringWithFormat:@"%@%@", tag, g.gearName];
         [sheet addAction:[UIAlertAction actionWithTitle:t style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a) {
             DY4KDownloadGear(g);
         }]];
@@ -939,7 +883,7 @@ static void DY4KShowMenu(void) {
             cancelled = YES;
         }]];
         [top presentViewController:busy animated:YES completion:nil];
-        DY4KFetchDetailWeb(aid, ^(BOOL ok) {
+        DY4KFetchViaApi4(aid, ^(BOOL ok) {
             dispatch_async(dispatch_get_main_queue(), ^{
                 if (cancelled) return;
                 // v1.7: dismiss完成后才present, 避免presentation冲突导致弹窗失效
