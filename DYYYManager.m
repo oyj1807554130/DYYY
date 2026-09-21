@@ -3267,7 +3267,6 @@ static NSString *_dyyySniffedUifid = nil;
                         }
                     }
                     [web4kProbe appendFormat:@"最终: 4K条目=%@ 2K条目=%@ 待插入=%lu\n", webBitrate4K ? @"有" : @"无", webBitrate1440 ? @"有" : @"无", (unsigned long)web4KItems.count];
-                    [[NSNotificationCenter defaultCenter] postNotificationName:@"DYYYProbeNotification" object:nil userInfo:@{@"text": [web4kProbe copy]}];
                 }
             }
 
@@ -3886,8 +3885,6 @@ static NSString *DYYYFetchAwemeDetailViaWebView(NSString *awemeId, NSMutableStri
     }
     if (!awemeId || awemeId.length == 0) {
         dispatch_async(dispatch_get_main_queue(), ^{ [DYYYUtils showToast:@"本地解析失败: 无法获取awemeId"]; });
-        // 失败探针全覆盖：awemeId失败也上报剪贴板
-        [[NSNotificationCenter defaultCenter] postNotificationName:@"DYYYProbeNotification" object:nil userInfo:@{@"text": @"[接口4探针][失败] 无法获取awemeId（awemeModel异常或非视频帖）"}];
         if (completion) completion(nil);
         return;
     }
@@ -4025,7 +4022,6 @@ static NSString *DYYYFetchAwemeDetailViaWebView(NSString *awemeId, NSMutableStri
         }
         if (fullCookieStr.length == 0) {
             [probeLog appendFormat:@"\n[失败] Cookie为空，无法构建请求\n"];
-            [[NSNotificationCenter defaultCenter] postNotificationName:@"DYYYProbeNotification" object:nil userInfo:@{@"text": [probeLog copy]}];
             if (completion) completion(nil);
             return;
         }
@@ -4143,90 +4139,6 @@ static NSString *DYYYFetchAwemeDetailViaWebView(NSString *awemeId, NSMutableStri
                     healUifid = snU;
                     [probeLog appendFormat:@"[截流] App现役uifid len=%lu\n", (unsigned long)snU.length];
                 }
-            }
-            // ===== 2.2-31 指纹雷达: 快照缺指纹时, 运行时扫描宿主App内建指纹体系(真uifid/msToken与App会话天然配套) =====
-            if (healUifid.length == 0 || healMsToken.length == 0) {
-                void (^radar)(void) = ^{
-                    [probeLog appendFormat:@"\n[Step2.3 指纹雷达] 扫描宿主App内建指纹体系\n"];
-                    @try {
-                        unsigned int rc = 0;
-                        Class *rclasses = objc_copyClassList(&rc);
-                        if (!rclasses) return;
-                        NSArray *rkw = @[@"Uifid", @"uifid", @"AppLog", @"Applog", @"applog", @"TokenManager", @"DeviceManager", @"DeviceInfo", @"Fingerprint", @"MSKernel"];
-                        int rdump = 0;
-                        for (unsigned int ri = 0; ri < rc && rdump < 40; ri++) {
-                            NSString *rcn = NSStringFromClass(rclasses[ri]);
-                            BOOL rhit = NO;
-                            for (NSString *rk in rkw) if ([rcn containsString:rk]) { rhit = YES; break; }
-                            if (!rhit) continue;
-                            NSArray *rexcl = @[@"ByteCast", @"TIMX", @"IESEC", @"AWETeen", @"Lynx", @"Salamander", @"CoreODIE", @"VisualIntelligence", @"SavedDelete", @"UltraCreation"];
-                            BOOL rskip = NO;
-                            for (NSString *rx in rexcl) if ([rcn containsString:rx]) { rskip = YES; break; }
-                            if (rskip) continue;
-                            BOOL rdeep = [rcn containsString:@"AppLog"] || [rcn containsString:@"Applog"];
-                            rdump++;
-                            Class rcls = rclasses[ri];
-                            id rinst = nil;
-                            for (NSString *rsel in @[@"sharedInstance", @"sharedManager", @"defaultManager", @"currentManager", @"shared", @"getInstance"]) {
-                                SEL rs = NSSelectorFromString(rsel);
-                                if (class_getClassMethod(rcls, rs)) {
-                                    @try { rinst = ((id (*)(id, SEL))objc_msgSend)(rcls, rs); } @catch (NSException *re1) {}
-                                    if (rinst) break;
-                                }
-                            }
-                            unsigned int rmc = 0;
-                            __block NSMutableString *rgetters = [NSMutableString string];
-                            // 类方法
-                            Method *rmeths = class_copyMethodList(object_getClass(rcls), &rmc);
-                            for (unsigned int rj = 0; rj < rmc; rj++) {
-                                NSString *rmn = NSStringFromSelector(method_getName(rmeths[rj]));
-                                char *rrtc = method_copyReturnType(rmeths[rj]);
-                                if (method_getNumberOfArguments(rmeths[rj]) != 2 || !rrtc || rrtc[0] != '@') { if (rrtc) free(rrtc); continue; }
-                                free(rrtc);
-                                [rgetters appendFormat:@"%@+ ", rmn];
-                                NSString *rl = rmn.lowercaseString;
-                                BOOL rtarget = [rl containsString:@"uifid"] || [rl containsString:@"mstoken"];
-                                if (!rtarget) continue;
-                                @try {
-                                    id rv = ((id (*)(id, SEL))objc_msgSend)(rcls, NSSelectorFromString(rmn));
-                                    if ([rv isKindOfClass:[NSString class]] && [rv length] > 10 && [rv length] < 500 && ![rv isEqualToString:rcn]) {
-                                        [probeLog appendFormat:@"[雷达收获] %@ +%@ => %@... (len=%lu)\n", rcn, rmn, [rv substringToIndex:MIN(50, [rv length])], (unsigned long)[rv length]];
-                                        if ([rl containsString:@"uifid"] && healUifid.length == 0) healUifid = rv;
-                                        if ([rl containsString:@"mstoken"] && healMsToken.length == 0) healMsToken = rv;
-                                    }
-                                } @catch (NSException *re2) { [probeLog appendFormat:@"[雷达异常] %@ +%@: %@\n", rcn, rmn, re2.name]; }
-                            }
-                            free(rmeths);
-                            // 实例方法
-                            if (rinst) {
-                                Method *rims = class_copyMethodList(rcls, &rmc);
-                                for (unsigned int rj = 0; rj < rmc; rj++) {
-                                    NSString *rmn = NSStringFromSelector(method_getName(rims[rj]));
-                                    char *rrtc = method_copyReturnType(rims[rj]);
-                                    if (method_getNumberOfArguments(rims[rj]) != 2 || !rrtc || rrtc[0] != '@') { if (rrtc) free(rrtc); continue; }
-                                    free(rrtc);
-                                    [rgetters appendFormat:@"%@- ", rmn];
-                                    NSString *rl = rmn.lowercaseString;
-                                    BOOL rtarget = [rl containsString:@"uifid"] || [rl containsString:@"mstoken"];
-                                    if (!rtarget) continue;
-                                    @try {
-                                        id rv = ((id (*)(id, SEL))objc_msgSend)(rinst, NSSelectorFromString(rmn));
-                                        if ([rv isKindOfClass:[NSString class]] && [rv length] > 10 && [rv length] < 500 && ![rv isEqualToString:rcn]) {
-                                            [probeLog appendFormat:@"[雷达收获] %@ -%@ => %@... (len=%lu)\n", rcn, rmn, [rv substringToIndex:MIN(50, [rv length])], (unsigned long)[rv length]];
-                                            if ([rl containsString:@"uifid"] && healUifid.length == 0) healUifid = rv;
-                                            if ([rl containsString:@"mstoken"] && healMsToken.length == 0) healMsToken = rv;
-                                        }
-                                    } @catch (NSException *re3) { [probeLog appendFormat:@"[雷达异常] %@ -%@: %@\n", rcn, rmn, re3.name]; }
-                                }
-                                free(rims);
-                            }
-                            [probeLog appendFormat:@"[雷达类] %@ 实例=%@ 无参getter: %@\n", rcn, rinst ? @"有" : @"无", rgetters];
-                        }
-                        free(rclasses);
-                        [probeLog appendFormat:@"[雷达完成] 命中%d类 uifid=%@ msToken=%@\n", rdump, healUifid.length > 0 ? @"真指纹到手" : @"无", healMsToken.length > 0 ? @"真msToken到手" : @"无"];
-                    } @catch (NSException *rE) { [probeLog appendFormat:@"[雷达异常] 全局: %@\n", rE]; }
-                };
-                radar(); // 2.2-36止血: 当前线程直接扫, 不再dispatch_sync主线程
             }
             // ===== 2.2-35 真指纹矿脉: 全量扫NSUserDefaults(uifid真实存放处, cookie只是二手拷贝) =====
             if (healUifid.length == 0 || healMsToken.length == 0) {
@@ -4592,7 +4504,6 @@ static NSString *DYYYFetchAwemeDetailViaWebView(NSString *awemeId, NSMutableStri
             }
             if (!awemeDetail || ![awemeDetail isKindOfClass:[NSDictionary class]]) {
                 [probeLog appendFormat:@"\n[失败] Step2+自愈+feed兜底全失败\n"];
-                [[NSNotificationCenter defaultCenter] postNotificationName:@"DYYYProbeNotification" object:nil userInfo:@{@"text": [probeLog copy], @"clipboard": @YES}];
                 if (completion) completion(nil);
                 return;
             }
@@ -4806,8 +4717,6 @@ static NSString *DYYYFetchAwemeDetailViaWebView(NSString *awemeId, NSMutableStri
         [probeLog appendFormat:@"\nvideoURI=%@\n", videoURI ?: @"无"];
         {
             NSString *probeText = [probeLog copy];
-            // 存储探针结果，通过通知在主线程弹窗
-            [[NSNotificationCenter defaultCenter] postNotificationName:@"DYYYProbeNotification" object:nil userInfo:@{@"text": probeText}];
         }
 
         if (completion) completion(result.count > 0 ? result : nil);

@@ -9378,11 +9378,7 @@ static void findTargetViewInView(UIView *view) {
     @try {
         if ([field isEqualToString:@"uifid"] && [value isKindOfClass:[NSString class]] && [value length] > 10 && [value length] < 300) {
             [DYYYManager DYYYStoreSniffedUifid:value];
-            static NSString *_dpLastUf = nil;
-            if (![value isEqualToString:_dpLastUf]) {
-                _dpLastUf = value;
-                [[NSNotificationCenter defaultCenter] postNotificationName:@"DYYYProbeNotification" object:nil userInfo:@{@"text": [NSString stringWithFormat:@"[截流捕获] uifid len=%d val=%.40@\n", (int)[value length], value]}];
-            }
+            
         }
     } @catch (NSException *e) {}
 }
@@ -9394,11 +9390,7 @@ static void findTargetViewInView(UIView *view) {
         NSString *uf = [request valueForHTTPHeaderField:@"uifid"];
         if ([uf isKindOfClass:[NSString class]] && uf.length > 10) {
             [DYYYManager DYYYStoreSniffedUifid:uf];
-            static NSString *_dpLastUf2 = nil;
-            if (![uf isEqualToString:_dpLastUf2]) {
-                _dpLastUf2 = uf;
-                [[NSNotificationCenter defaultCenter] postNotificationName:@"DYYYProbeNotification" object:nil userInfo:@{@"text": [NSString stringWithFormat:@"[截流捕获-Task] uifid len=%d val=%.40@\n", (int)uf.length, uf]}];
-            }
+            
         }
     } @catch (NSException *e) {}
     return %orig;
@@ -9500,121 +9492,7 @@ static void findTargetViewInView(UIView *view) {
                                                     }];
     }
 
-    // 2.2-34: 探针日志静默落盘(不弹窗不占剪贴板), 失败现场自动存抖音沙盒Documents/[接口4探针].txt
-    [[NSNotificationCenter defaultCenter] addObserverForName:@"DYYYProbeNotification"
-                                                      object:nil
-                                                       queue:[NSOperationQueue mainQueue]
-                                              usingBlock:^(NSNotification *note) {
-                                                  NSString *probeText = note.userInfo[@"text"];
-                                                  if (probeText.length > 0) {
-                                                      @try {
-                                                          NSString *pdoc = [NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES) firstObject];
-                                                          NSString *pfile = [pdoc stringByAppendingPathComponent:@"[接口4探针].txt"];
-                                                          NSString *pold = [NSString stringWithContentsOfFile:pfile encoding:NSUTF8StringEncoding error:nil] ?: @"";
-                                                          NSMutableString *pout = [NSMutableString stringWithString:pold];
-                                                          [pout appendFormat:@"%@\n", probeText];
-                                                          if (pout.length > 200000) pout = [[pout substringFromIndex:pout.length - 150000] mutableCopy];
-                                                          [pout writeToFile:pfile atomically:YES encoding:NSUTF8StringEncoding error:nil];
-                                                          if ([note.userInfo[@"clipboard"] boolValue]) { // 2.2-42 失败日志自动上剪贴板
-                                                              [UIPasteboard generalPasteboard].string = probeText;
-                                                              [DYYYUtils showToast:@"失败日志已复制, 切到聊天直接粘贴发送"];
-                                                          }
-                                                      } @catch (NSException *pe) {}
-                                                  }
-                                              }];
 
-    // 2.2-39: 启动指纹普查 - 不等403, 装上就验证截流/cookie/UserDefaults三条通道有无真指纹
-    void (^_dpzScan)(int) = ^(int roundTag) {
-        dispatch_async(dispatch_get_global_queue(0, 0), ^{
-            NSMutableString *rpt = [NSMutableString stringWithFormat:@"[指纹普查 R%d] cookie库+UserDefaults+截流状态\n", roundTag];
-            int uifidHit = 0; int msHit = 0; int loginHit = 0;
-            @try {
-                NSArray *cks = [NSHTTPCookieStorage sharedHTTPCookieStorage].cookies;
-                [rpt appendFormat:@"  [cookie库] 共%lu条:\n", (unsigned long)cks.count]; // 2.2-43 v2全量报告
-                for (NSHTTPCookie *ck in cks) {
-                    NSString *nm = ck.name.lowercaseString;
-                    [rpt appendFormat:@"   %@ @%@ len=%lu\n", ck.name, ck.domain, (unsigned long)(ck.value ?: @"").length];
-                    if ([nm containsString:@"uifid"]) uifidHit = 1;
-                    if ([nm containsString:@"mstoken"] || [nm containsString:@"ms_token"]) msHit = 1;
-                    if ([nm isEqualToString:@"sessionid"] || [nm isEqualToString:@"sessionid_ss"] || [nm isEqualToString:@"sid_guard"]) loginHit = 1;
-                }
-                NSDictionary *allUD = [[NSUserDefaults standardUserDefaults] dictionaryRepresentation];
-                for (NSString *k in allUD) {
-                    NSString *lk = k.lowercaseString;
-                    if ([lk containsString:@"sessionid"] || [lk containsString:@"sid_guard"] || [lk containsString:@"sid_tt"]) { // 2.2-44 UD登录件
-                        id v2 = allUD[k];
-                        NSString *sv2 = ([v2 isKindOfClass:[NSString class]] ? v2 : nil);
-                        if (sv2.length > 20 && sv2.length < 300) {
-                            [rpt appendFormat:@"   [UD登录] %@ len=%lu\n", k, (unsigned long)sv2.length];
-                            loginHit = 1;
-                        }
-                    }
-                    if ([lk containsString:@"uifid"] || [lk containsString:@"mstoken"] || [lk containsString:@"ms_token"]) {
-                        id v = allUD[k];
-                        NSString *sv = ([v isKindOfClass:[NSString class]] ? v : ([v isKindOfClass:[NSNumber class]] ? [v stringValue] : nil));
-                        if (sv.length > 8 && sv.length < 600) {
-                            [rpt appendFormat:@"  [UD] %@ = %@\n", k, (sv.length > 40 ? [sv substringToIndex:40] : sv)];
-                            if ([lk containsString:@"uifid"]) uifidHit = 1; else msHit = 1;
-                        }
-                    }
-                }
-                { // 2.2-44 Keychain深挖: sessionid最可能的家, 只读无风险
-                    [rpt appendFormat:@"  [Keychain] 扫描中...\n"];
-                    NSDictionary *kcQ = @{(__bridge id)kSecClass: (__bridge id)kSecClassGenericPassword,
-                                          (__bridge id)kSecReturnAttributes: @YES,
-                                          (__bridge id)kSecMatchLimit: (__bridge id)kSecMatchLimitAll};
-                    CFTypeRef kcRes = NULL;
-                    OSStatus kcSt = SecItemCopyMatching((__bridge CFDictionaryRef)kcQ, &kcRes);
-                    if (kcSt == errSecSuccess && kcRes) {
-                        NSArray *kcItems = (__bridge_transfer NSArray *)kcRes;
-                        [rpt appendFormat:@"  [Keychain] 共%lu条:\n", (unsigned long)kcItems.count];
-                        int kcLogin = 0;
-                        for (NSDictionary *it in kcItems) {
-                            NSString *svc = it[(__bridge id)kSecAttrService] ?: @"";
-                            NSString *acc = it[(__bridge id)kSecAttrAccount] ?: @"";
-                            NSString *low = [[NSString stringWithFormat:@"%@ %@", svc, acc] lowercaseString];
-                            BOOL hit = [low containsString:@"session"] || [low containsString:@"sid_"] || [low containsString:@"passport"] || [low containsString:@"uid"];
-                            if (hit || kcItems.count <= 40) [rpt appendFormat:@"   %@ | %@\n", svc, acc];
-                            if (hit) {
-                                NSDictionary *kcQ2 = @{(__bridge id)kSecClass: (__bridge id)kSecClassGenericPassword,
-                                                       (__bridge id)kSecAttrService: svc,
-                                                       (__bridge id)kSecAttrAccount: acc,
-                                                       (__bridge id)kSecReturnData: @YES};
-                                CFTypeRef dRes = NULL;
-                                if (SecItemCopyMatching((__bridge CFDictionaryRef)kcQ2, &dRes) == errSecSuccess && dRes) {
-                                    NSData *dd = (__bridge_transfer NSData *)dRes;
-                                    NSString *sv3 = [[NSString alloc] initWithData:dd encoding:NSUTF8StringEncoding] ?: @"";
-                                    [rpt appendFormat:@"   ★ %@ | %@ len=%lu\n", svc, acc, (unsigned long)sv3.length];
-                                    if (sv3.length > 20) { kcLogin++; loginHit = 1; }
-                                }
-                            }
-                        }
-                        [rpt appendFormat:@"  [Keychain] 命中%d条疑似登录件\n", kcLogin];
-                    } else {
-                        [rpt appendFormat:@"  [Keychain] 读取失败 st=%d\n", (int)kcSt];
-                    }
-                }
-                NSString *sn = [DYYYManager DYYYSniffedUifid];
-                [rpt appendFormat:@"  [截流] 当前截流uifid=%@\n", (sn.length > 0 ? [NSString stringWithFormat:@"len=%d", (int)sn.length] : @"无")];
-                if (sn.length > 10) uifidHit = 1;
-                [rpt appendFormat:@"[指纹普查R%d完成] uifid=%@ msToken=%@ 登录件=%@\n", roundTag, (uifidHit ? @"有货" : @"无"), (msHit ? @"有货" : @"无"), (loginHit ? @"有" : @"无")];
-            } @catch (NSException *e) {
-                [rpt appendFormat:@"[指纹普查异常] %@\n", e];
-            }
-            [[NSNotificationCenter defaultCenter] postNotificationName:@"DYYYProbeNotification" object:nil userInfo:@{@"text": [NSString stringWithString:rpt]}];
-            if (roundTag == 2) {
-                dispatch_async(dispatch_get_main_queue(), ^{
-                    [DYYYUtils showToast:[NSString stringWithFormat:@"指纹普查: uifid=%@ msToken=%@", (uifidHit ? @"有货" : @"无"), (msHit ? @"有货" : @"无")]];
-                });
-            }
-        });
-    };
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        _dpzScan(1);
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(20 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            _dpzScan(2);
-        });
-    });
 }
 
 // ===== 接口4探针通知监听（在%ctor中注册） =====
