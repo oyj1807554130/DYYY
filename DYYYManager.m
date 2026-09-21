@@ -4037,6 +4037,7 @@ static NSString *DYYYFetchAwemeDetailViaWebView(NSString *awemeId, NSMutableStri
         [apiReq setValue:@"1" forHTTPHeaderField:@"upgrade-insecure-requests"];
         [apiReq setValue:fullCookieStr forHTTPHeaderField:@"Cookie"];
         [probeLog appendFormat:@"\n[Step2 发送Cookie] len=%lu preview=%@...\n", (unsigned long)fullCookieStr.length, [fullCookieStr substringToIndex:MIN(120, fullCookieStr.length)]];
+        [probeLog appendFormat:@"[Step2 URL] %@\n", [apiURL substringToIndex:MIN(500, [apiURL length])]]; // 2.2-38
         dispatch_semaphore_t apiSem = dispatch_semaphore_create(0);
         NSURLSessionDataTask *apiTask = [[NSURLSession sharedSession] dataTaskWithRequest:apiReq completionHandler:^(NSData *apiData, NSURLResponse *apiResp, NSError *apiErr) {
             @try {
@@ -4051,6 +4052,7 @@ static NSString *DYYYFetchAwemeDetailViaWebView(NSString *awemeId, NSMutableStri
                         [probeLog appendFormat:@"HTTP status=%ld\n", (long)httpR.statusCode];
                         [probeLog appendFormat:@"responseBody长度=%lu\n", (unsigned long)apiData.length];
                         if (statusCode == 0 && awemeDetail) {
+                            if (ttwidStr.length > 20) [[NSUserDefaults standardUserDefaults] setObject:ttwidStr forKey:@"DYYYLastGoodTtwid"]; // 2.2-38 成功会话存档
                             NSDictionary *vObj = awemeDetail[@"video"];
                             NSArray *brList = vObj[@"bit_rate"];
                             [probeLog appendFormat:@"bit_rate条目数=%lu\n", (unsigned long)(brList ? brList.count : 0)];
@@ -4242,6 +4244,12 @@ static NSString *DYYYFetchAwemeDetailViaWebView(NSString *awemeId, NSMutableStri
             dispatch_semaphore_wait(healWarmSem, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC));
             [probeLog appendFormat:@"重新预热 GET www.douyin.com → HTTP %ld\n", (long)healWarmStatus];
             __block NSString *healTtwid = nil;
+            NSString *goodTtwid = [[NSUserDefaults standardUserDefaults] stringForKey:@"DYYYLastGoodTtwid"];
+            if (goodTtwid.length > 20) {
+                healTtwid = goodTtwid;
+                [probeLog appendFormat:@"[自愈] 优先复用历史成功ttwid len=%lu\n", (unsigned long)goodTtwid.length];
+            }
+            if (healTtwid.length == 0) { // 2.2-38: 无成功存档才注册新ttwid
             NSString *healTtwidURL = @"https://ttwid.bytedance.com/ttwid/union/register/";
             NSString *healTtwidBody = @"{\"region\":\"cn\",\"aid\":6383,\"needFid\":false,\"service\":\"www.douyin.com\",\"migrate_info\":{\"ticket\":\"\",\"source\":\"node\"},\"cbUrlProtocol\":\"https\",\"union\":true}";
             NSMutableURLRequest *healTtwidReq = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:healTtwidURL]];
@@ -4278,6 +4286,7 @@ static NSString *DYYYFetchAwemeDetailViaWebView(NSString *awemeId, NSMutableStri
                 ttwidStr = healTtwid;
                 [DYYYManager shared].localParseTtwid = healTtwid;
             }
+            } // 2.2-38 end
             NSMutableString *healCookie = [NSMutableString string];
             for (NSHTTPCookie *hc2 in [healStore cookiesForURL:healURL]) {
                 if ([[hc2 name] isEqualToString:@"__ac_nonce"]) {
