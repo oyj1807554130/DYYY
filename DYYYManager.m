@@ -4140,7 +4140,7 @@ static NSString *DYYYFetchAwemeDetailViaWebView(NSString *awemeId, NSMutableStri
                                 free(rrtc);
                                 [rgetters appendFormat:@"%@+ ", rmn];
                                 NSString *rl = rmn.lowercaseString;
-                                BOOL rtarget = rdeep || [rl containsString:@"uifid"] || [rl containsString:@"mstoken"];
+                                BOOL rtarget = [rl containsString:@"uifid"] || [rl containsString:@"mstoken"];
                                 if (!rtarget) continue;
                                 @try {
                                     id rv = ((id (*)(id, SEL))objc_msgSend)(rcls, NSSelectorFromString(rmn));
@@ -4162,7 +4162,7 @@ static NSString *DYYYFetchAwemeDetailViaWebView(NSString *awemeId, NSMutableStri
                                     free(rrtc);
                                     [rgetters appendFormat:@"%@- ", rmn];
                                     NSString *rl = rmn.lowercaseString;
-                                    BOOL rtarget = rdeep || [rl containsString:@"uifid"] || [rl containsString:@"mstoken"];
+                                    BOOL rtarget = [rl containsString:@"uifid"] || [rl containsString:@"mstoken"];
                                     if (!rtarget) continue;
                                     @try {
                                         id rv = ((id (*)(id, SEL))objc_msgSend)(rinst, NSSelectorFromString(rmn));
@@ -4181,7 +4181,7 @@ static NSString *DYYYFetchAwemeDetailViaWebView(NSString *awemeId, NSMutableStri
                         [probeLog appendFormat:@"[雷达完成] 命中%d类 uifid=%@ msToken=%@\n", rdump, healUifid.length > 0 ? @"真指纹到手" : @"无", healMsToken.length > 0 ? @"真msToken到手" : @"无"];
                     } @catch (NSException *rE) { [probeLog appendFormat:@"[雷达异常] 全局: %@\n", rE]; }
                 };
-                if ([NSThread isMainThread]) radar(); else dispatch_sync(dispatch_get_main_queue(), radar);
+                radar(); // 2.2-36止血: 当前线程直接扫, 不再dispatch_sync主线程
             }
             // ===== 2.2-35 真指纹矿脉: 全量扫NSUserDefaults(uifid真实存放处, cookie只是二手拷贝) =====
             if (healUifid.length == 0 || healMsToken.length == 0) {
