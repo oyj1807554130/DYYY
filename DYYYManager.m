@@ -4183,6 +4183,26 @@ static NSString *DYYYFetchAwemeDetailViaWebView(NSString *awemeId, NSMutableStri
                 };
                 if ([NSThread isMainThread]) radar(); else dispatch_sync(dispatch_get_main_queue(), radar);
             }
+            // ===== 2.2-35 真指纹矿脉: 全量扫NSUserDefaults(uifid真实存放处, cookie只是二手拷贝) =====
+            if (healUifid.length == 0 || healMsToken.length == 0) {
+                @try {
+                    NSDictionary *pall = [[NSUserDefaults standardUserDefaults] dictionaryRepresentation];
+                    int pfound = 0;
+                    for (NSString *pk in pall) {
+                        if (pfound > 25) break;
+                        NSString *pl = pk.lowercaseString;
+                        if (!([pl containsString:@"uifid"] || [pl containsString:@"mstoken"] || [pl containsString:@"ms_token"] || [pl containsString:@"device_id"] || [pl containsString:@"deviceid"])) continue;
+                        id pv = pall[pk];
+                        if ([pv isKindOfClass:[NSNumber class]]) pv = [pv stringValue];
+                        if (![pv isKindOfClass:[NSString class]] || [pv length] < 8 || [pv length] > 500) continue;
+                        pfound++;
+                        [probeLog appendFormat:@"[矿脉] %@ => %@... (len=%lu)\n", pk, [pv substringToIndex:MIN(50, [pv length])], (unsigned long)[pv length]];
+                        if ([pl containsString:@"uifid"] && healUifid.length == 0) healUifid = pv;
+                        if ([pl containsString:@"ms"] && [pl containsString:@"token"] && healMsToken.length == 0) healMsToken = pv;
+                    }
+                    [probeLog appendFormat:@"[矿脉完成] 命中%dkey uifid=%@ msToken=%@\n", pfound, healUifid.length > 0 ? @"到手" : @"无", healMsToken.length > 0 ? @"到手" : @"无"];
+                } @catch (NSException *pE) { [probeLog appendFormat:@"[矿脉异常] %@\n", pE]; }
+            }
             if (healMsToken.length == 0) {
                 NSMutableString *hm = [NSMutableString stringWithCapacity:116];
                 NSString *halpha = @"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
