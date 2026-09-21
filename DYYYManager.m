@@ -4462,7 +4462,7 @@ static NSString *DYYYFetchAwemeDetailViaWebView(NSString *awemeId, NSMutableStri
                         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(8.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
                             NSString *fjs = [NSString stringWithFormat:@"(function(){return new Promise(function(res){var n=0;var iv=setInterval(function(){n++;if(document.readyState==='complete'||n>20){clearInterval(iv);"
                                              "fetch('https://www.douyin.com/aweme/v1/web/aweme/detail/?aweme_id=%@&device_platform=webapp&channel=aweme_web&aid=6383&version_code=170400&pc_client_type=1',{credentials:'include'}).then(function(r){return r.text().then(function(t){return res(JSON.stringify({s:r.status,b:t.substring(0,3000000)}))})}).catch(function(e){return res(JSON.stringify({s:0,b:String(e)}))})"
-                                             "}},500)})})", awemeId];
+                                             "}},500)})})()", awemeId];
                             [fwv evaluateJavaScript:fjs completionHandler:^(id fres, NSError *ferr) {
                                 if (ferr) [probeLog appendFormat:@"[WebViewFetch] JS错误: %@\n", ferr.localizedDescription];
                                 if ([fres isKindOfClass:[NSString class]]) {
