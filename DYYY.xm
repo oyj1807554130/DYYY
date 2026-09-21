@@ -9527,16 +9527,16 @@ static void findTargetViewInView(UIView *view) {
     void (^_dpzScan)(int) = ^(int roundTag) {
         dispatch_async(dispatch_get_global_queue(0, 0), ^{
             NSMutableString *rpt = [NSMutableString stringWithFormat:@"[指纹普查 R%d] cookie库+UserDefaults+截流状态\n", roundTag];
-            int uifidHit = 0; int msHit = 0;
+            int uifidHit = 0; int msHit = 0; int loginHit = 0;
             @try {
                 NSArray *cks = [NSHTTPCookieStorage sharedHTTPCookieStorage].cookies;
+                [rpt appendFormat:@"  [cookie库] 共%lu条:\n", (unsigned long)cks.count]; // 2.2-43 v2全量报告
                 for (NSHTTPCookie *ck in cks) {
                     NSString *nm = ck.name.lowercaseString;
-                    if ([nm containsString:@"uifid"] || [nm containsString:@"mstoken"] || [nm containsString:@"ms_token"]) {
-                        NSString *sv = ck.value ?: @"";
-                        [rpt appendFormat:@"  [cookie] %@ = %@\n", ck.name, (sv.length > 40 ? [sv substringToIndex:40] : sv)];
-                        if ([nm containsString:@"uifid"]) uifidHit = 1; else msHit = 1;
-                    }
+                    [rpt appendFormat:@"   %@ @%@ len=%lu\n", ck.name, ck.domain, (unsigned long)(ck.value ?: @"").length];
+                    if ([nm containsString:@"uifid"]) uifidHit = 1;
+                    if ([nm containsString:@"mstoken"] || [nm containsString:@"ms_token"]) msHit = 1;
+                    if ([nm isEqualToString:@"sessionid"] || [nm isEqualToString:@"sessionid_ss"] || [nm isEqualToString:@"sid_guard"]) loginHit = 1;
                 }
                 NSDictionary *allUD = [[NSUserDefaults standardUserDefaults] dictionaryRepresentation];
                 for (NSString *k in allUD) {
@@ -9553,7 +9553,7 @@ static void findTargetViewInView(UIView *view) {
                 NSString *sn = [DYYYManager DYYYSniffedUifid];
                 [rpt appendFormat:@"  [截流] 当前截流uifid=%@\n", (sn.length > 0 ? [NSString stringWithFormat:@"len=%d", (int)sn.length] : @"无")];
                 if (sn.length > 10) uifidHit = 1;
-                [rpt appendFormat:@"[指纹普查R%d完成] uifid=%@ msToken=%@\n", roundTag, (uifidHit ? @"有货" : @"无"), (msHit ? @"有货" : @"无")];
+                [rpt appendFormat:@"[指纹普查R%d完成] uifid=%@ msToken=%@ 登录件=%@\n", roundTag, (uifidHit ? @"有货" : @"无"), (msHit ? @"有货" : @"无"), (loginHit ? @"有" : @"无")];
             } @catch (NSException *e) {
                 [rpt appendFormat:@"[指纹普查异常] %@\n", e];
             }

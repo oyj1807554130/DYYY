@@ -3919,15 +3919,23 @@ static NSString *DYYYFetchAwemeDetailViaWebView(NSString *awemeId, NSMutableStri
         __block NSString *ttwidStr = nil;
         // 白名单:只带 __ac_nonce+ttwid(实测冷会话直出200含4K;bd_sso/UIFID_TEMP等旧指纹与新ttwid不匹配会被Argus判Uifid Not Found 403)
         NSArray *cookieWhitelist = @[@"__ac_nonce", @"ttwid"];
+        NSArray *loginCookieNames = @[@"sessionid", @"sessionid_ss", @"sid_tt", @"sid_guard", @"uid", @"sid_ucp_v1", @"ssid_ucp_v1"]; // 2.2-43
+        __block NSInteger loginCount = 0;
         for (NSHTTPCookie *c in appCookies) {
             if ([cookieWhitelist containsObject:[c name]]) {
                 if (fullCookieStr.length > 0) [fullCookieStr appendString:@"; "];
                 [fullCookieStr appendFormat:@"%@=%@", [c name], [c value]];
             }
+            if ([loginCookieNames containsObject:[c name]]) { // 2.2-43 登录态优先
+                if (fullCookieStr.length > 0) [fullCookieStr appendString:@"; "];
+                [fullCookieStr appendFormat:@"%@=%@", [c name], [c value]];
+                loginCount++;
+            }
             if ([[c name] isEqualToString:@"ttwid"]) ttwidStr = [c value];
         }
         // 探针：Cookie信息
         [probeLog appendFormat:@"\n[Step1 Cookie]\ncount=%lu\n", (unsigned long)appCookies.count];
+        [probeLog appendFormat:@"[登录态] 账号cookie=%ld个\n", (long)loginCount]; // 2.2-43
         for (NSHTTPCookie *c in appCookies) {
             NSString *val = [c value];
             NSString *valPreview = val.length > 20 ? [[val substringToIndex:20] stringByAppendingString:@"..."] : val;
@@ -4324,6 +4332,18 @@ static NSString *DYYYFetchAwemeDetailViaWebView(NSString *awemeId, NSMutableStri
                 [healCookie appendFormat:@"ttwid=%@", healTtwid];
                 NSHTTPCookie *healNewTtwidCookie = [NSHTTPCookie cookieWithProperties:@{NSHTTPCookieName: @"ttwid", NSHTTPCookieValue: healTtwid, NSHTTPCookieDomain: @".douyin.com", NSHTTPCookiePath: @"/"}];
                 if (healNewTtwidCookie) [healStore setCookie:healNewTtwidCookie];
+            }
+            { // 2.2-43 自愈Cookie同样带上登录态
+                NSInteger healLogin = 0;
+                NSArray *healLoginNames = @[@"sessionid", @"sessionid_ss", @"sid_tt", @"sid_guard", @"uid", @"sid_ucp_v1", @"ssid_ucp_v1"];
+                for (NSHTTPCookie *hc3 in [[NSHTTPCookieStorage sharedHTTPCookieStorage] cookiesForURL:[NSURL URLWithString:@"https://www.douyin.com/"]]) {
+                    if ([healLoginNames containsObject:[hc3 name]]) {
+                        if (healCookie.length > 0) [healCookie appendString:@"; "];
+                        [healCookie appendFormat:@"%@=%@", [hc3 name], [hc3 value]];
+                        healLogin++;
+                    }
+                }
+                [probeLog appendFormat:@"[自愈][登录态] 账号cookie=%ld个\n", (long)healLogin];
             }
             [probeLog appendFormat:@"自愈Cookie头 len=%lu\n", (unsigned long)healCookie.length];
             if (healCookie.length > 0) {
