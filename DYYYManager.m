@@ -4480,7 +4480,7 @@ static NSString *DYYYFetchAwemeDetailViaWebView(NSString *awemeId, NSMutableStri
                         [fwv loadRequest:[NSURLRequest requestWithURL:[NSURL URLWithString:@"https://www.douyin.com/"]]];
                         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(8.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
                             NSString *fjs = [NSString stringWithFormat:@"(function(){var n=0;var iv=setInterval(function(){n++;if(document.readyState==='complete'||n>20){clearInterval(iv);"
-                                             "fetch('https://www.douyin.com/aweme/v1/web/aweme/detail/?aweme_id=%@&device_platform=webapp&channel=aweme_web&aid=6383&version_code=170400&pc_client_type=1',{credentials:'include'}).then(function(r){return r.text().then(function(t){window.__DYYY_RES=JSON.stringify({s:r.status,b:t.substring(0,3000000)})})}).catch(function(e){window.__DYYY_RES=JSON.stringify({s:0,b:String(e)})})"
+                                             "var x=new XMLHttpRequest();x.open('GET','https://www.douyin.com/aweme/v1/web/aweme/detail/?aweme_id=%@&device_platform=webapp&channel=aweme_web&aid=6383&version_code=170400&pc_client_type=1',true);x.withCredentials=true;x.onload=function(){window.__DYYY_RES=JSON.stringify({s:x.status,b:(x.responseText||'').substring(0,3000000)})};x.onerror=function(){window.__DYYY_RES=JSON.stringify({s:0,b:'XHRerr'})};x.send()"
                                              "}},500)})()", awemeId];
                             [fwv evaluateJavaScript:fjs completionHandler:^(id fres, NSError *ferr) {
                                 if (ferr) { [probeLog appendFormat:@"[WebViewFetch] 启动JS错误: %@\n", ferr.localizedDescription]; dispatch_semaphore_signal(fsem); return; }
