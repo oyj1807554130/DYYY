@@ -769,7 +769,7 @@ typedef NS_ENUM(NSInteger, DYYYSettingItemType) { DYYYSettingItemTypeSwitch, DYY
             [closeBtn.trailingAnchor constraintEqualToAnchor:modal.view.trailingAnchor constant:-14]
         ]];
 
-        [wv loadRequest:[NSURLRequest requestWithURL:[NSURL URLWithString:@"https://www.douyin.com/login"]]];  // 2.2-61 登录直达页,打开即弹登录窗
+        [wv loadRequest:[NSURLRequest requestWithURL:[NSURL URLWithString:@"https://sso.douyin.com/login/?service=https%3A%2F%2Fwww.douyin.com"]]];  // 2.2-62 抖音官方SSO登录页(扫码/验证码/密码),登录后回落www.douyin.com种session cookie
         [self presentViewController:modal animated:YES completion:nil];
 
         __block WKHTTPCookieStore *bStore = store;
