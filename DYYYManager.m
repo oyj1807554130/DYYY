@@ -65,6 +65,13 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
 
 @implementation DYYYManager
 
+// ===== 2.2-37 App现役指纹截流存储 =====
+static NSString *_dyyySniffedUifid = nil;
++ (void)DYYYStoreSniffedUifid:(NSString *)v {
+    if (v.length > 10 && v.length < 300 && ![v isEqualToString:_dyyySniffedUifid]) _dyyySniffedUifid = [v copy];
+}
++ (NSString *)DYYYSniffedUifid { return _dyyySniffedUifid; }
+
 #pragma mark - API 适配器实现
 
 + (DYYYAPIType)detectAPIType:(NSString *)apiKey {
@@ -4099,6 +4106,14 @@ static NSString *DYYYFetchAwemeDetailViaWebView(NSString *awemeId, NSMutableStri
                 else if ([[hs name] isEqualToString:@"s_v_web_id"]) healSvwebid = [hs value];
             }
             [probeLog appendFormat:@"指纹快照: uifid=%@ msToken=%@ svwebid=%@\n", healUifid ? @"有" : @"无", healMsToken ? @"有" : @"无", healSvwebid ? @"有" : @"无"];
+            // 2.2-37 App现役uifid截流, 优先于快照(这是抖音自己请求正在用的指纹)
+            {
+                NSString *snU = [DYYYManager DYYYSniffedUifid];
+                if (snU.length > 0) {
+                    healUifid = snU;
+                    [probeLog appendFormat:@"[截流] App现役uifid len=%lu\n", (unsigned long)snU.length];
+                }
+            }
             // ===== 2.2-31 指纹雷达: 快照缺指纹时, 运行时扫描宿主App内建指纹体系(真uifid/msToken与App会话天然配套) =====
             if (healUifid.length == 0 || healMsToken.length == 0) {
                 void (^radar)(void) = ^{

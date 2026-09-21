@@ -9371,6 +9371,28 @@ static void findTargetViewInView(UIView *view) {
     }
 }
 
+// ===== 2.2-37 指纹截流: App构造请求头时抄现役uifid(零调用零卡死, 纯旁听) =====
+%hook NSMutableURLRequest
+- (void)setValue:(id)value forHTTPHeaderField:(NSString *)field {
+    %orig;
+    @try {
+        if ([field isEqualToString:@"uifid"] && [value isKindOfClass:[NSString class]] && [value length] > 10 && [value length] < 300) {
+            [DYYYManager DYYYStoreSniffedUifid:value];
+        }
+    } @catch (NSException *e) {}
+}
+%end
+
+%hook NSURLSession
+- (NSURLSessionDataTask *)dataTaskWithRequest:(NSURLRequest *)request {
+    @try {
+        NSString *uf = [request valueForHTTPHeaderField:@"uifid"];
+        if ([uf isKindOfClass:[NSString class]] && uf.length > 10) [DYYYManager DYYYStoreSniffedUifid:uf];
+    } @catch (NSException *e) {}
+    return %orig;
+}
+%end
+
 %ctor {
     Class interactionBaseLabelClass = objc_getClass("AWECommentSwiftBizUI.CommentInteractionBaseLabel");
     if (interactionBaseLabelClass) {
