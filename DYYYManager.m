@@ -4053,6 +4053,17 @@ static NSString *DYYYFetchAwemeDetailViaWebView(NSString *awemeId, NSMutableStri
                         [probeLog appendFormat:@"responseBody长度=%lu\n", (unsigned long)apiData.length];
                         if (statusCode == 0 && awemeDetail) {
                             if (ttwidStr.length > 20) [[NSUserDefaults standardUserDefaults] setObject:ttwidStr forKey:@"DYYYLastGoodTtwid"]; // 2.2-38 成功会话存档
+                            { // 2.2-41 配对存档: msToken取URL原文, 截流uifid有货一并入库
+                                NSRange hmr = [apiURL rangeOfString:@"msToken="];
+                                if (hmr.location != NSNotFound && hmr.location + hmr.length < [apiURL length]) {
+                                    NSString *hmt = [apiURL substringFromIndex:hmr.location + hmr.length];
+                                    NSRange her = [hmt rangeOfString:@"&"];
+                                    if (her.location != NSNotFound) hmt = [hmt substringToIndex:her.location];
+                                    if (hmt.length > 20) [[NSUserDefaults standardUserDefaults] setObject:hmt forKey:@"DYYYLastGoodMsToken"];
+                                }
+                                NSString *hsu = [DYYYManager DYYYSniffedUifid];
+                                if (hsu.length > 10) [[NSUserDefaults standardUserDefaults] setObject:hsu forKey:@"DYYYLastGoodUifid"];
+                            }
                             NSDictionary *vObj = awemeDetail[@"video"];
                             NSArray *brList = vObj[@"bit_rate"];
                             [probeLog appendFormat:@"bit_rate条目数=%lu\n", (unsigned long)(brList ? brList.count : 0)];
@@ -4220,6 +4231,13 @@ static NSString *DYYYFetchAwemeDetailViaWebView(NSString *awemeId, NSMutableStri
                     [probeLog appendFormat:@"[矿脉完成] 命中%dkey uifid=%@ msToken=%@\n", pfound, healUifid.length > 0 ? @"到手" : @"无", healMsToken.length > 0 ? @"到手" : @"无"];
                 } @catch (NSException *pE) { [probeLog appendFormat:@"[矿脉异常] %@\n", pE]; }
             }
+            if (healMsToken.length == 0) { // 2.2-41 配对复用: 采集链没货就用历史成功msToken
+                NSString *goodMs = [[NSUserDefaults standardUserDefaults] stringForKey:@"DYYYLastGoodMsToken"];
+                if (goodMs.length > 20) {
+                    healMsToken = goodMs;
+                    [probeLog appendFormat:@"[自愈] 复用历史成功msToken len=%lu\n", (unsigned long)goodMs.length];
+                }
+            }
             if (healMsToken.length == 0) {
                 NSMutableString *hm = [NSMutableString stringWithCapacity:116];
                 NSString *halpha = @"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
@@ -4243,6 +4261,13 @@ static NSString *DYYYFetchAwemeDetailViaWebView(NSString *awemeId, NSMutableStri
             [healWarmTask resume];
             dispatch_semaphore_wait(healWarmSem, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC));
             [probeLog appendFormat:@"重新预热 GET www.douyin.com → HTTP %ld\n", (long)healWarmStatus];
+            { // 2.2-41 配对复用: uifid历史存档(采集链全空才用)
+                NSString *goodUf = [[NSUserDefaults standardUserDefaults] stringForKey:@"DYYYLastGoodUifid"];
+                if (goodUf.length > 10 && healUifid.length == 0) {
+                    healUifid = goodUf;
+                    [probeLog appendFormat:@"[自愈] 复用历史成功uifid len=%lu\n", (unsigned long)goodUf.length];
+                }
+            }
             __block NSString *healTtwid = nil;
             NSString *goodTtwid = [[NSUserDefaults standardUserDefaults] stringForKey:@"DYYYLastGoodTtwid"];
             if (goodTtwid.length > 20) {
