@@ -4239,6 +4239,51 @@ static NSString *DYYYFetchAwemeDetailViaWebView(NSString *awemeId, NSMutableStri
                     [probeLog appendFormat:@"[矿脉完成] 命中%dkey uifid=%@ msToken=%@\n", pfound, healUifid.length > 0 ? @"到手" : @"无", healMsToken.length > 0 ? @"到手" : @"无"];
                 } @catch (NSException *pE) { [probeLog appendFormat:@"[矿脉异常] %@\n", pE]; }
             }
+            // ===== 2.2-45 WebView uifid收割机: 隐藏WKWebView加载douyin.com让JS现场生成uifid(Argus点名要的东西只有真浏览器能生) =====
+            if (healUifid.length == 0) {
+                @try {
+                    [probeLog appendFormat:@"[WebView收割] 启动: 隐藏浏览器加载抖音网页等JS现场生成...\n"];
+                    __block dispatch_semaphore_t wsem = dispatch_semaphore_create(0);
+                    __block WKWebView *wv = nil;
+                    __block NSString *wcookie = nil;
+                    dispatch_async(dispatch_get_main_queue(), ^{
+                        WKWebViewConfiguration *wcfg = [[WKWebViewConfiguration alloc] init];
+                        wv = [[WKWebView alloc] initWithFrame:CGRectMake(0, 0, 1, 1) configuration:wcfg];
+                        wv.hidden = YES;
+                        [wv loadRequest:[NSURLRequest requestWithURL:[NSURL URLWithString:@"https://www.douyin.com/"]]];
+                        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(6.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                            [wv evaluateJavaScript:@"document.cookie" completionHandler:^(id wres, NSError *werr) {
+                                if ([wres isKindOfClass:[NSString class]]) wcookie = wres;
+                                dispatch_async(dispatch_get_main_queue(), ^{
+                                    [wv stopLoading];
+                                    [wv removeFromSuperview];
+                                    wv = nil;
+                                });
+                                dispatch_semaphore_signal(wsem);
+                            }];
+                        });
+                    });
+                    dispatch_semaphore_wait(wsem, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(12.0 * NSEC_PER_SEC)));
+                    if (wcookie.length > 0) {
+                        [probeLog appendFormat:@"[WebView收割] document.cookie len=%lu\n", (unsigned long)wcookie.length];
+                        NSError *wre = nil;
+                        NSRegularExpression *wrx = [NSRegularExpression regularExpressionWithPattern:@"(?i)(UIFID(?:_TEMP)?|uifid)=([^;\\s]+)" options:0 error:&wre];
+                        NSArray *wms = [wrx matchesInString:wcookie options:0 range:NSMakeRange(0, wcookie.length)];
+                        for (NSTextCheckingResult *wm in wms) {
+                            NSString *wname = [wcookie substringWithRange:[wm rangeAtIndex:1]];
+                            NSString *wval = [wcookie substringWithRange:[wm rangeAtIndex:2]];
+                            [probeLog appendFormat:@"[WebView收割] cookie内 %@ len=%lu\n", wname, (unsigned long)wval.length];
+                            if (wval.length > 10 && healUifid.length == 0) {
+                                healUifid = wval;
+                                [[NSUserDefaults standardUserDefaults] setObject:wval forKey:@"DYYYLastGoodUifid"];
+                            }
+                        }
+                    } else {
+                        [probeLog appendFormat:@"[WebView收割] document.cookie 空\n"];
+                    }
+                    [probeLog appendFormat:@"[WebView收割] 完成 uifid=%@\n", healUifid.length > 0 ? @"现场生成到手" : @"未产出"];
+                } @catch (NSException *wE) { [probeLog appendFormat:@"[WebView收割异常] %@\n", wE]; }
+            }
             if (healMsToken.length == 0) { // 2.2-41 配对复用: 采集链没货就用历史成功msToken
                 NSString *goodMs = [[NSUserDefaults standardUserDefaults] stringForKey:@"DYYYLastGoodMsToken"];
                 if (goodMs.length > 20) {
