@@ -780,20 +780,22 @@ typedef NS_ENUM(NSInteger, DYYYSettingItemType) { DYYYSettingItemTypeSwitch, DYY
             checks++;
             if (checks > 240) return; // 6分钟后停止检测(页面可手动关闭)
             [bStore getAllCookies:^(NSArray<NSHTTPCookie *> *cks) {
-                BOOL loggedIn = NO;
+                BOOL hasSession = NO, hasIdentity = NO;
                 NSMutableString *full = [NSMutableString string];
                 for (NSHTTPCookie *c in cks) {
                     if (![c.domain containsString:@"douyin.com"]) continue;
                     if (full.length > 0) [full appendString:@"; "];
                     [full appendFormat:@"%@=%@", c.name, c.value];
-                    if ([c.name isEqualToString:@"sessionid_ss"] || [c.name isEqualToString:@"sessionid"] || [c.name isEqualToString:@"sid_tt"]) loggedIn = YES;
+                    // 2.2-56 判定加严: 会话类+身份类双齐全才算真登录(滑块验证流程会预埋未激活session类cookie, 单查会误弹)
+                    if ([c.name isEqualToString:@"sessionid_ss"] || [c.name isEqualToString:@"sessionid"] || [c.name isEqualToString:@"sid_tt"]) hasSession = YES;
+                    if ([c.name isEqualToString:@"uid"] || [c.name isEqualToString:@"sid_guard"] || [c.name isEqualToString:@"sid_ucp_v1"]) hasIdentity = YES;
                 }
-                if (loggedIn && full.length > 100) {
+                if ((hasSession && hasIdentity) && full.length > 100) {
                     [[NSUserDefaults standardUserDefaults] setObject:full forKey:@"DYYYLoginCookie"];
                     [[NSUserDefaults standardUserDefaults] synchronize];
                     // 2.2-53 登录态当场判决: 同一WebView(自带登录cookie)内代发detail试解析, 10秒内出结论
                     [wv evaluateJavaScript:@"(function(){var n=0;var iv=setInterval(function(){n++;if(document.readyState==='complete'||n>20){clearInterval(iv);"
-                                           "fetch('https://www.douyin.com/aweme/v1/web/aweme/detail/?aweme_id=7673908340124054245&device_platform=webapp&channel=aweme_web&aid=6383&version_code=170400&pc_client_type=1',{credentials:'include'}).then(function(r){return r.text().then(function(t){window.__DYYY_VRES=JSON.stringify({s:r.status,b:t.substring(0,2000000)})})}).catch(function(e){window.__DYYY_VRES=JSON.stringify({s:0,b:String(e)})})"
+                                           "var x=new XMLHttpRequest();x.open('GET','https://www.douyin.com/aweme/v1/web/aweme/detail/?aweme_id=7673908340124054245&device_platform=webapp&channel=aweme_web&aid=6383&version_code=170400&pc_client_type=1',true);x.withCredentials=true;x.onload=function(){window.__DYYY_VRES=JSON.stringify({s:x.status,b:(x.responseText||'').substring(0,2000000)})};x.onerror=function(){window.__DYYY_VRES=JSON.stringify({s:0,b:'XHRerr'})};x.send()"
                                            "}},500)})()" completionHandler:nil];
                     __block NSInteger vPoll = 0;
                     __block dispatch_block_t vBlock;
