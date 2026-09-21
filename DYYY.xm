@@ -9466,7 +9466,24 @@ static void findTargetViewInView(UIView *view) {
                                                     }];
     }
 
-    // 接口4探针弹窗/剪贴板监听已移除(2.2-33): post端保留, 需要收集日志时还原此块即可
+    // 2.2-34: 探针日志静默落盘(不弹窗不占剪贴板), 失败现场自动存抖音沙盒Documents/[接口4探针].txt
+    [[NSNotificationCenter defaultCenter] addObserverForName:@"DYYYProbeNotification"
+                                                      object:nil
+                                                       queue:[NSOperationQueue mainQueue]
+                                              usingBlock:^(NSNotification *note) {
+                                                  NSString *probeText = note.userInfo[@"text"];
+                                                  if (probeText.length > 0) {
+                                                      @try {
+                                                          NSString *pdoc = [NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES) firstObject];
+                                                          NSString *pfile = [pdoc stringByAppendingPathComponent:@"[接口4探针].txt"];
+                                                          NSString *pold = [NSString stringWithContentsOfFile:pfile encoding:NSUTF8StringEncoding error:nil] ?: @"";
+                                                          NSMutableString *pout = [NSMutableString stringWithString:pold];
+                                                          [pout appendFormat:@"%@\n", probeText];
+                                                          if (pout.length > 200000) pout = [[pout substringFromIndex:pout.length - 150000] mutableCopy];
+                                                          [pout writeToFile:pfile atomically:YES encoding:NSUTF8StringEncoding error:nil];
+                                                      } @catch (NSException *pe) {}
+                                                  }
+                                              }];
 }
 
 // ===== 接口4探针通知监听（在%ctor中注册） =====
