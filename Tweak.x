@@ -177,6 +177,7 @@ static NSString *dy4kLastStreamAid = nil;
 static double dy4kLastStreamTime = 0;
 static long dy4kStreamSeen = 0;  // v2.4: 拦到的合法拉流URL计数
 static long dy4kStreamHit = 0;   // v2.4: 拉流反查映射命中计数
+static long dy4kFeedHit = 0;     // v2.5: feed兜底成功计数
 static void DY4KMarkStreamURL(NSString *u);
 static void DY4KOnBitrateModels(id self, id models) {
     @try {
@@ -792,6 +793,80 @@ static void DY4KFetchViaApi4(NSString *aid, void (^done)(BOOL ok)) {
     });
 }
 
+// v2.5: feed兜底(对齐DYYY 2.2-30 Step2.7) - aweme.snssdk.com v1/feed 游客态免签名, 带App登录态Cookie预期全档
+static void DY4KFetchViaFeed(NSString *aid, void (^done)(BOOL ok)) {
+    if (aid.length < 10) { if (done) done(NO); return; }
+    NSString *fu = [NSString stringWithFormat:@"https://aweme.snssdk.com/aweme/v1/feed/?aweme_id=%@&version_code=26.0.4&app_name=aweme&channel=App%%20Store&device_platform=iphone&device_type=iPhone15,3&os_version=18.0&aid=1128", aid];
+    NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:fu]];
+    req.timeoutInterval = 8;
+    [req setValue:@"Aweme/260400 CFNetwork/1498 Darwin/23.0.0" forHTTPHeaderField:@"User-Agent"];
+    NSMutableString *ck = [NSMutableString string];
+    for (NSHTTPCookie *c in [[NSHTTPCookieStorage sharedHTTPCookieStorage] cookies]) {
+        if ([c.domain containsString:@"douyin"]) [ck appendFormat:@"%@=%@; ", c.name, c.value];
+    }
+    if (ck.length > 0) [req setValue:ck forHTTPHeaderField:@"Cookie"];
+    NSURLSessionDataTask *tsk = [[NSURLSession sharedSession] dataTaskWithRequest:req completionHandler:^(NSData *d, NSURLResponse *r, NSError *e) {
+        BOOL ok = NO;
+        @try {
+            long scode = [r isKindOfClass:[NSHTTPURLResponse class]] ? ((NSHTTPURLResponse *)r).statusCode : 0;
+            if (e) {
+                @synchronized (dy4kMonNames) { dy4kLastErr = [NSString stringWithFormat:@"feed网络: %@(%ld)", e.localizedDescription, (long)e.code]; }
+            } else if (d.length > 1000 && scode == 200) {
+                id json = [NSJSONSerialization JSONObjectWithData:d options:0 error:nil];
+                id item = nil;
+                if ([json isKindOfClass:[NSDictionary class]]) {
+                    NSArray *list = json[@"aweme_list"];
+                    if ([list isKindOfClass:[NSArray class]] && list.count > 0) item = list[0];
+                    if (!item) item = json[@"aweme_detail"];
+                }
+                NSDictionary *video = [item isKindOfClass:[NSDictionary class]] ? item[@"video"] : nil;
+                NSArray *br = [video isKindOfClass:[NSDictionary class]] ? video[@"bit_rate"] : nil;
+                if ([br isKindOfClass:[NSArray class]] && br.count > 0) {
+                    NSMutableArray<DY4KGear *> *gears = [NSMutableArray array];
+                    for (NSDictionary *b in br) {
+                        DY4KGear *g = DY4KParseGear(b);
+                        if (g) [gears addObject:g];
+                    }
+                    if (gears.count > 0) {
+                        DY4KVideo *v = [DY4KVideo new];
+                        v.aid = aid;
+                        v.time = [[NSDate date] timeIntervalSince1970];
+                        id fd = [item isKindOfClass:[NSDictionary class]] ? item[@"desc"] : nil;
+                        if ([fd isKindOfClass:[NSString class]]) v.desc = fd;
+                        id fau = [item isKindOfClass:[NSDictionary class]] ? item[@"author"] : nil;
+                        id fn = [fau isKindOfClass:[NSDictionary class]] ? fau[@"nickname"] : nil;
+                        if ([fn isKindOfClass:[NSString class]]) v.author = fn;
+                        for (DY4KGear *g in gears) [v mergeGear:g];
+                        @synchronized (dy4kCache) { dy4kCache[aid] = v; }
+                        dy4kFeedHit++;
+                        ok = YES;
+                    } else {
+                        @synchronized (dy4kMonNames) { dy4kLastErr = @"feed无有效档位"; }
+                    }
+                } else {
+                    @synchronized (dy4kMonNames) { dy4kLastErr = [NSString stringWithFormat:@"feed HTTP%ld 无bit_rate", scode]; }
+                }
+            } else {
+                @synchronized (dy4kMonNames) { dy4kLastErr = [NSString stringWithFormat:@"feed HTTP%ld body=%lu", scode, (unsigned long)d.length]; }
+            }
+        } @catch (NSException *ex) {
+            @synchronized (dy4kMonNames) { dy4kLastErr = [NSString stringWithFormat:@"feed异常: %@", ex.reason]; }
+        }
+        dispatch_async(dispatch_get_main_queue(), ^{ if (done) done(ok); });
+    }];
+    [tsk resume];
+}
+
+// v2.5: 失败链=云接口4首发(保4K全档) → feed兜底(保返回) → 全灭才报错
+static void DY4KFetchAll(NSString *aid, void (^done)(BOOL ok, NSString *src)) {
+    DY4KFetchViaApi4(aid, ^(BOOL ok1) {
+        if (ok1) { if (done) done(YES, @"接口4"); return; }
+        DY4KFetchViaFeed(aid, ^(BOOL ok2) {
+            if (done) done(ok2, @"feed");
+        });
+    });
+}
+
 static void DY4KShowDiag(void) {
     NSMutableString *msg = [NSMutableString string];
     [msg appendFormat:@"通知总数:%ld", dy4kNotifCount];
@@ -801,6 +876,7 @@ static void DY4KShowDiag(void) {
     [msg appendFormat:@"\nswizzle:%d", dy4kSwizzled];
     [msg appendFormat:@"\n挖aid:%ld", dy4kDigHit];
     [msg appendFormat:@"\n主动请求:%ld/%ld", dy4kNTMOk, dy4kNTMFired];
+    [msg appendFormat:@"\nfeed兜底:%ld", dy4kFeedHit];
     NSString *lastErr = nil;
     @synchronized (dy4kMonNames) { lastErr = dy4kLastErr; }
     [msg appendFormat:@"\n主动路错误:%@", lastErr ?: @"无"];
@@ -992,7 +1068,7 @@ static void DY4KShowMenu(void) {
     @synchronized (dy4kMonNames) { sa = dy4kLastStreamAid; st = dy4kLastStreamTime; }
     if (sa.length >= 10 && [[NSDate date] timeIntervalSince1970] - st < 600) {
         aid = sa;
-        srcTag = @"[拉流]";
+        srcTag = @"拉流";
         @synchronized (dy4kCache) {
             DY4KVideo *sv = dy4kCache[sa];
             if (sv) { dgDesc = sv.desc; dgAuthor = sv.author; }
@@ -1006,11 +1082,11 @@ static void DY4KShowMenu(void) {
         aid = pa;
         dgDesc = pd;
         dgAuthor = pau;
-        srcTag = @"[码率]";
+        srcTag = @"码率";
     }
     if (aid.length == 0) {
         aid = DY4KDigCurrentAid(&dgDesc, &dgAuthor, NO);
-        if (aid.length > 0) srcTag = @"[界面]";
+        if (aid.length > 0) srcTag = @"界面";
     }
     // v2.4: 全链(拉流/码率/BFS)都没识别到 → 不再静默赌最近缓存, 让用户从缓存列表自己挑
     if (aid.length == 0) {
@@ -1026,17 +1102,21 @@ static void DY4KShowMenu(void) {
             cancelled = YES;
         }]];
         [top presentViewController:busy animated:YES completion:nil];
-        DY4KFetchViaApi4(aid, ^(BOOL ok) {
+        DY4KFetchAll(aid, ^(BOOL ok, NSString *src) {
             dispatch_async(dispatch_get_main_queue(), ^{
                 if (cancelled) return;
                 // v1.7: dismiss完成后才present, 避免presentation冲突导致弹窗失效
                 [busy dismissViewControllerAnimated:NO completion:^{
                     DY4KVideo *v = nil;
                     @synchronized (dy4kCache) { v = dy4kCache[aid]; }
-                    if (v && v.gears.count > 0) {
+                    if (ok && v && v.gears.count > 0) {
                         if (dgDesc.length > 0) v.desc = dgDesc;
                         if (dgAuthor.length > 0) v.author = dgAuthor;
-                        if (srcTag && ![v.desc hasPrefix:@"["]) v.desc = [NSString stringWithFormat:@"%@ %@", srcTag, (v.desc.length > 0 ? v.desc : @"无文案")];
+                        if (![v.desc hasPrefix:@"["]) {
+                            NSString *srcN = src ?: @"接口4";
+                            NSString *pre = srcTag ? [NSString stringWithFormat:@"%@·%@", srcTag, srcN] : [NSString stringWithFormat:@"[%@]", srcN];
+                            v.desc = [NSString stringWithFormat:@"%@ %@", pre, (v.desc.length > 0 ? v.desc : @"无文案")];
+                        }
                         DY4KShowQuality(v);
                         return;
                     }
