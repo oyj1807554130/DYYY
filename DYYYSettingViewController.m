@@ -2,8 +2,9 @@
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
 #import "DYYYConstants.h"
+#import <WebKit/WebKit.h>
 
-typedef NS_ENUM(NSInteger, DYYYSettingItemType) { DYYYSettingItemTypeSwitch, DYYYSettingItemTypeTextField, DYYYSettingItemTypePicker };
+typedef NS_ENUM(NSInteger, DYYYSettingItemType) { DYYYSettingItemTypeSwitch, DYYYSettingItemTypeTextField, DYYYSettingItemTypePicker, DYYYSettingItemTypeAction };
 
 @interface DYYYSettingItem : NSObject
 
@@ -131,7 +132,8 @@ typedef NS_ENUM(NSInteger, DYYYSettingItemType) { DYYYSettingItemTypeSwitch, DYY
 - (void)setupSettingItems {
     self.settingSections = @[
         @[
-            [DYYYSettingItem itemWithTitle:@"视频背景颜色" key:@"DYYYVideoBGColor" type:DYYYSettingItemTypeTextField placeholder:@"十六进制"],
+                        [DYYYSettingItem itemWithTitle:@"抖音扫码登录(解析增强)" key:@"DYYYLoginEntry" type:DYYYSettingItemTypeAction],
+[DYYYSettingItem itemWithTitle:@"视频背景颜色" key:@"DYYYVideoBGColor" type:DYYYSettingItemTypeTextField placeholder:@"十六进制"],
             [DYYYSettingItem itemWithTitle:@"启用弹幕改色" key:@"DYYYEnableDanmuColor" type:DYYYSettingItemTypeSwitch],
             [DYYYSettingItem itemWithTitle:@"自定弹幕颜色" key:@"DYYYDanmuColor" type:DYYYSettingItemTypeTextField placeholder:@"十六进制"],
             [DYYYSettingItem itemWithTitle:@"设置默认倍速" key:@"DYYYDefaultSpeed" type:DYYYSettingItemTypePicker],
@@ -632,12 +634,14 @@ typedef NS_ENUM(NSInteger, DYYYSettingItemType) { DYYYSettingItemTypeSwitch, DYY
     }
 
     if (item.type == DYYYSettingItemTypeSwitch) {
+        cell.accessoryType = UITableViewCellAccessoryNone;
         UISwitch *switchView = [[UISwitch alloc] init];
         [switchView setOn:[[NSUserDefaults standardUserDefaults] boolForKey:item.key]];
         [switchView addTarget:self action:@selector(switchToggled:) forControlEvents:UIControlEventValueChanged];
         switchView.tag = indexPath.section * 1000 + indexPath.row;
         cell.accessoryView = switchView;
     } else if (item.type == DYYYSettingItemTypeTextField) {
+        cell.accessoryType = UITableViewCellAccessoryNone;
         UITextField *textField = [[UITextField alloc] initWithFrame:CGRectMake(0, 0, 100, 30)];
         textField.borderStyle = UITextBorderStyleRoundedRect;
         textField.placeholder = item.placeholder;
@@ -676,6 +680,11 @@ typedef NS_ENUM(NSInteger, DYYYSettingItemType) { DYYYSettingItemTypeSwitch, DYY
         ]];
 
         cell.accessoryView = containerView;
+    } else if (item.type == DYYYSettingItemTypeAction) { // 2.2-52 登录入口
+        cell.accessoryView = nil;
+        cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+        NSString *savedLogin = [[NSUserDefaults standardUserDefaults] stringForKey:@"DYYYLoginCookie"];
+        cell.textLabel.text = (savedLogin.length > 100) ? @"抖音扫码登录(解析增强)·已登录" : @"抖音扫码登录(解析增强)·未登录";
     }
 
     return cell;
@@ -692,8 +701,112 @@ typedef NS_ENUM(NSInteger, DYYYSettingItemType) { DYYYSettingItemTypeSwitch, DYY
     DYYYSettingItem *item = self.settingSections[indexPath.section][indexPath.row];
     if (item.type == DYYYSettingItemTypePicker) {
         [self showUniversalPickerForIndexPath:indexPath];
+    } else if (item.type == DYYYSettingItemTypeAction) { // 2.2-52
+        if ([item.key isEqualToString:@"DYYYLoginEntry"]) [self showDouyinLogin];
     }
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
+}
+
+#pragma mark - 2.2-52 抖音扫码登录(登录态=Argus免死金牌: 登录Cookie免签名直出全档)
+
+- (void)showDouyinLogin {
+    NSString *savedLogin = [[NSUserDefaults standardUserDefaults] stringForKey:@"DYYYLoginCookie"];
+    NSString *stateMsg = (savedLogin.length > 100) ? @"当前: 已存登录态(解析直出全档)\n可重新登录或清除" : @"当前: 未登录\n登录后解析自动获得全部画质(免签名)";
+    UIAlertController *tip = [UIAlertController alertControllerWithTitle:@"抖音扫码登录" message:stateMsg preferredStyle:UIAlertControllerStyleAlert];
+    [tip addAction:[UIAlertAction actionWithTitle:@"开始登录" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a1) { [self openLoginWebView]; }]];
+    if (savedLogin.length > 100) {
+        [tip addAction:[UIAlertAction actionWithTitle:@"清除已存登录态" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *a2) {
+            [[NSUserDefaults standardUserDefaults] removeObjectForKey:@"DYYYLoginCookie"];
+            [[NSUserDefaults standardUserDefaults] synchronize];
+            [self.tableView reloadData];
+        }]];
+    }
+    [tip addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+    [self presentViewController:tip animated:YES completion:nil];
+}
+
+- (void)closeLoginTapped:(UIButton *)b {
+    [self dismissViewControllerAnimated:YES completion:nil];
+}
+
+- (void)openLoginWebView {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        WKWebViewConfiguration *cfg = [[WKWebViewConfiguration alloc] init];
+        WKHTTPCookieStore *store = cfg.websiteDataStore.httpCookieStore;
+        WKWebView *wv = [[WKWebView alloc] initWithFrame:CGRectZero configuration:cfg];
+        UIViewController *modal = [[UIViewController alloc] init];
+        modal.view.backgroundColor = [UIColor blackColor];
+        modal.modalPresentationStyle = UIModalPresentationOverFullScreen;
+
+        UILabel *hint = [[UILabel alloc] init];
+        hint.text = @"在下方登录抖音(验证码/扫码均可), 登录成功自动保存";
+        hint.textColor = [UIColor whiteColor];
+        hint.font = [UIFont systemFontOfSize:12];
+        hint.textAlignment = NSTextAlignmentCenter;
+        hint.translatesAutoresizingMaskIntoConstraints = NO;
+        wv.translatesAutoresizingMaskIntoConstraints = NO;
+        [modal.view addSubview:wv];
+        [modal.view addSubview:hint];
+        [NSLayoutConstraint activateConstraints:@[
+            [hint.topAnchor constraintEqualToAnchor:modal.view.safeAreaLayoutGuide.topAnchor constant:6],
+            [hint.leadingAnchor constraintEqualToAnchor:modal.view.leadingAnchor constant:10],
+            [hint.trailingAnchor constraintEqualToAnchor:modal.view.trailingAnchor constant:-90],
+            [wv.topAnchor constraintEqualToAnchor:hint.bottomAnchor constant:6],
+            [wv.leadingAnchor constraintEqualToAnchor:modal.view.leadingAnchor],
+            [wv.trailingAnchor constraintEqualToAnchor:modal.view.trailingAnchor],
+            [wv.bottomAnchor constraintEqualToAnchor:modal.view.bottomAnchor]
+        ]];
+
+        UIButton *closeBtn = [UIButton buttonWithType:UIButtonTypeSystem];
+        [closeBtn setTitle:@"关闭" forState:UIControlStateNormal];
+        [closeBtn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
+        closeBtn.titleLabel.font = [UIFont systemFontOfSize:15];
+        closeBtn.translatesAutoresizingMaskIntoConstraints = NO;
+        [closeBtn addTarget:self action:@selector(closeLoginTapped:) forControlEvents:UIControlEventTouchUpInside];
+        [modal.view addSubview:closeBtn];
+        [NSLayoutConstraint activateConstraints:@[
+            [closeBtn.centerYAnchor constraintEqualToAnchor:hint.centerYAnchor],
+            [closeBtn.trailingAnchor constraintEqualToAnchor:modal.view.trailingAnchor constant:-14]
+        ]];
+
+        [wv loadRequest:[NSURLRequest requestWithURL:[NSURL URLWithString:@"https://www.douyin.com/?recommend=1"]]];
+        [self presentViewController:modal animated:YES completion:nil];
+
+        __block WKHTTPCookieStore *bStore = store;
+        __block UIViewController *bModal = modal;
+        __block NSInteger checks = 0;
+        __block dispatch_block_t checkBlock;
+        checkBlock = ^{
+            checks++;
+            if (checks > 240) return; // 6分钟后停止检测(页面可手动关闭)
+            [bStore getAllCookies:^(NSArray<NSHTTPCookie *> *cks) {
+                BOOL loggedIn = NO;
+                NSMutableString *full = [NSMutableString string];
+                for (NSHTTPCookie *c in cks) {
+                    if (![c.domain containsString:@"douyin.com"]) continue;
+                    if (full.length > 0) [full appendString:@"; "];
+                    [full appendFormat:@"%@=%@", c.name, c.value];
+                    if ([c.name isEqualToString:@"sessionid_ss"] || [c.name isEqualToString:@"sessionid"] || [c.name isEqualToString:@"sid_tt"]) loggedIn = YES;
+                }
+                if (loggedIn && full.length > 100) {
+                    [[NSUserDefaults standardUserDefaults] setObject:full forKey:@"DYYYLoginCookie"];
+                    [[NSUserDefaults standardUserDefaults] synchronize];
+                    dispatch_async(dispatch_get_main_queue(), ^{
+                        UIAlertController *ok = [UIAlertController alertControllerWithTitle:@"登录成功" message:[NSString stringWithFormat:@"登录态已保存(Cookie %lu条), 之后解析自动带登录态直出全档", (unsigned long)cks.count] preferredStyle:UIAlertControllerStyleAlert];
+                        [ok addAction:[UIAlertAction actionWithTitle:@"完成" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a3) {
+                            [bModal dismissViewControllerAnimated:YES completion:^{
+                                [self.tableView reloadData];
+                            }];
+                        }]];
+                        [bModal presentViewController:ok animated:YES completion:nil];
+                    });
+                    return;
+                }
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), checkBlock);
+            }];
+        };
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), checkBlock);
+    });
 }
 
 - (void)showUniversalPickerForIndexPath:(NSIndexPath *)indexPath {

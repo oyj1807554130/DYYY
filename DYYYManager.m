@@ -3938,6 +3938,13 @@ static NSString *DYYYFetchAwemeDetailViaWebView(NSString *awemeId, NSMutableStri
         // 探针：Cookie信息
         [probeLog appendFormat:@"\n[Step1 Cookie]\ncount=%lu\n", (unsigned long)appCookies.count];
         [probeLog appendFormat:@"[登录态] 账号cookie=%ld个\n", (long)loginCount]; // 2.2-43
+        { // 2.2-52 存档登录Cookie优先: 整体替换(登录WebView收割的自洽全套, 免签名过Argus)
+            NSString *savedLogin = [[NSUserDefaults standardUserDefaults] stringForKey:@"DYYYLoginCookie"];
+            if (savedLogin.length > 100) {
+                [fullCookieStr setString:savedLogin];
+                [probeLog appendFormat:@"[2.2-52] 存档登录Cookie启用 len=%lu\n", (unsigned long)savedLogin.length];
+            }
+        }
         for (NSHTTPCookie *c in appCookies) {
             NSString *val = [c value];
             NSString *valPreview = val.length > 20 ? [[val substringToIndex:20] stringByAppendingString:@"..."] : val;
@@ -4406,6 +4413,13 @@ static NSString *DYYYFetchAwemeDetailViaWebView(NSString *awemeId, NSMutableStri
                     }
                 }
                 [probeLog appendFormat:@"[自愈][登录态] 账号cookie=%ld个\n", (long)healLogin];
+            { // 2.2-52 自愈同样优先存档登录Cookie
+                NSString *savedHeal = [[NSUserDefaults standardUserDefaults] stringForKey:@"DYYYLoginCookie"];
+                if (savedHeal.length > 100) {
+                    [healCookie setString:savedHeal];
+                    [probeLog appendFormat:@"[2.2-52] 自愈存档登录Cookie启用 len=%lu\n", (unsigned long)savedHeal.length];
+                }
+            }
             }
             [probeLog appendFormat:@"自愈Cookie头 len=%lu\n", (unsigned long)healCookie.length];
             if (healCookie.length > 0) {
