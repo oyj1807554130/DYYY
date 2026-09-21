@@ -4446,6 +4446,58 @@ static NSString *DYYYFetchAwemeDetailViaWebView(NSString *awemeId, NSMutableStri
                 dispatch_semaphore_wait(healApiSem, dispatch_time(DISPATCH_TIME_NOW, 15 * NSEC_PER_SEC));
                 [probeLog appendFormat:@"自愈重试结果: HTTP %ld status_code=%ld 成功=%@\n", (long)healHttpStatus, (long)healStatusCode, awemeDetail ? @"YES" : @"NO"];
             }
+            // ===== 2.2-47 WebView代答: 隐身浏览器内fetch detail, 网页acrawler签名引擎自动补uifid+签名, 只收答案 =====
+            if (!awemeDetail || ![awemeDetail isKindOfClass:[NSDictionary class]]) {
+                @try {
+                    [probeLog appendFormat:@"\n[WebViewFetch] 启动: 隐身浏览器让网页代发detail请求 awemeId=%@\n", awemeId];
+                    __block dispatch_semaphore_t fsem = dispatch_semaphore_create(0);
+                    __block WKWebView *fwv = nil;
+                    __block NSString *fresp = nil;
+                    __block NSInteger fstatus = 0;
+                    dispatch_async(dispatch_get_main_queue(), ^{
+                        WKWebViewConfiguration *fcfg = [[WKWebViewConfiguration alloc] init];
+                        fwv = [[WKWebView alloc] initWithFrame:CGRectMake(0, 0, 1, 1) configuration:fcfg];
+                        fwv.hidden = YES;
+                        [fwv loadRequest:[NSURLRequest requestWithURL:[NSURL URLWithString:@"https://www.douyin.com/"]]];
+                        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(8.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                            NSString *fjs = [NSString stringWithFormat:@"fetch('/aweme/v1/web/aweme/detail/?aweme_id=%@&device_platform=webapp&channel=aweme_web&aid=6383&version_code=170400&pc_client_type=1', {credentials:'include'}).then(function(r){return r.text().then(function(t){return JSON.stringify({status:r.status, body:t.substring(0,3000000)})})}).catch(function(e){return JSON.stringify({status:0, body:String(e)})", awemeId];
+                            [fwv evaluateJavaScript:fjs completionHandler:^(id fres, NSError *ferr) {
+                                if (ferr) [probeLog appendFormat:@"[WebViewFetch] JS错误: %@\n", ferr.localizedDescription];
+                                if ([fres isKindOfClass:[NSString class]]) {
+                                    @try {
+                                        NSDictionary *fj = [NSJSONSerialization JSONObjectWithData:[fres dataUsingEncoding:NSUTF8StringEncoding] options:0 error:nil];
+                                        if ([fj isKindOfClass:[NSDictionary class]]) {
+                                            fstatus = [fj[@"status"] isKindOfClass:[NSNumber class]] ? [fj[@"status"] integerValue] : 0;
+                                            fresp = fj[@"body"];
+                                        }
+                                    } @catch (NSException *fje) {}
+                                }
+                                dispatch_semaphore_signal(fsem);
+                            }];
+                        });
+                    });
+                    dispatch_semaphore_wait(fsem, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(26.0 * NSEC_PER_SEC)));
+                    dispatch_async(dispatch_get_main_queue(), ^{
+                        [fwv stopLoading];
+                        [fwv removeFromSuperview];
+                        fwv = nil;
+                    });
+                    [probeLog appendFormat:@"[WebViewFetch] 网页代发结果: HTTP %ld body=%lu字节\n", (long)fstatus, (unsigned long)fresp.length];
+                    if (fstatus == 200 && fresp.length > 5000 && [fresp containsString:@"bit_rate"]) {
+                        NSDictionary *fj = [NSJSONSerialization JSONObjectWithData:[fresp dataUsingEncoding:NSUTF8StringEncoding] options:0 error:nil];
+                        if ([fj isKindOfClass:[NSDictionary class]]) {
+                            NSDictionary *fd = fj[@"aweme_detail"];
+                            if (![fd isKindOfClass:[NSDictionary class]]) fd = fj[@"item_list"][0];
+                            if ([fd isKindOfClass:[NSDictionary class]] && [fd objectForKey:@"bit_rate"]) {
+                                awemeDetail = fd;
+                                [probeLog appendFormat:@"[WebViewFetch] 成功: 网页亲答 bit_rate=%lu档, uifid/签名全由网页自己补齐\n", (unsigned long)((NSArray *)fd[@"bit_rate"]).count];
+                            }
+                        }
+                    } else if (fresp.length > 0 && fresp.length <= 600) {
+                        [probeLog appendFormat:@"[WebViewFetch] 响应原文: %@\n", fresp];
+                    }
+                } @catch (NSException *fE) { [probeLog appendFormat:@"[WebViewFetch异常] %@\n", fE]; }
+            }
             // ===== 2.2-30 feed兜底: App端v1/feed游客态免签名(不走Argus), WebAPI全灭时的稳定底层 =====
             BOOL feedRescued = NO;
             if (!awemeDetail || ![awemeDetail isKindOfClass:[NSDictionary class]]) {
