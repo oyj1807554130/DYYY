@@ -167,6 +167,7 @@
  */
 + (void)localParseFromAwemeModel:(id)awemeModel completion:(void(^)(NSDictionary *result))completion;
 + (void)localParseFullFromAwemeModel:(id)awemeModel completion:(void(^)(NSDictionary *result))completion;
++ (void)requestTikHubDirect:(NSString *)shareLink;  // 2.2-60 接口2内置TikHub直连
 + (NSString *)getDouyinFullCookieString;
 + (void)localParseFromShareLink:(NSString *)shareLink completion:(void(^)(NSDictionary *result))completion;
 + (void)handleVideoData:(NSDictionary *)dataDict;
