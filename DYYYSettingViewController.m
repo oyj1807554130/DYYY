@@ -791,9 +791,25 @@ typedef NS_ENUM(NSInteger, DYYYSettingItemType) { DYYYSettingItemTypeSwitch, DYY
                     if ([c.name isEqualToString:@"uid"] || [c.name isEqualToString:@"sid_guard"] || [c.name isEqualToString:@"sid_ucp_v1"]) hasIdentity = YES;
                 }
                 if ((hasSession && hasIdentity) && full.length > 100) {
-                    [[NSUserDefaults standardUserDefaults] setObject:full forKey:@"DYYYLoginCookie"];
-                    [[NSUserDefaults standardUserDefaults] synchronize];
-                    // 2.2-53 登录态当场判决: 同一WebView(自带登录cookie)内代发detail试解析, 10秒内出结论
+                    // 2.2-57 验证页连身份类cookie都预埋(双条件拦不住), 用登录态接口终审: profile/self返回sec_uid才认真登录
+                    NSString *bFull = [full copy];
+                    __block NSInteger profPoll = 0;
+                    __block dispatch_block_t profBlock;
+                    [wv evaluateJavaScript:@"window.__DYYY_PROF=''" completionHandler:nil];
+                    [wv evaluateJavaScript:@"(function(){var n=0;var iv=setInterval(function(){n++;if(document.readyState==='complete'||n>20){clearInterval(iv);var x=new XMLHttpRequest();x.open('GET','https://www.douyin.com/aweme/v1/web/user/profile/self/?device_platform=webapp&aid=6383&version_code=170400&pc_client_type=1',true);x.withCredentials=true;x.onload=function(){window.__DYYY_PROF=(x.responseText||'').substring(0,4000)};x.onerror=function(){window.__DYYY_PROF='ERR'};x.send()}},500)})()" completionHandler:nil];
+                    profBlock = ^{
+                        profPoll++;
+                        if (profPoll > 20) { dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), checkBlock); return; }
+                        [wv evaluateJavaScript:@"(window.__DYYY_PROF||'')" completionHandler:^(id pr, NSError *pe) {
+                            NSString *prof = [pr isKindOfClass:[NSString class]] ? pr : @"";
+                            if (!(prof.length > 50 && [prof containsString:@"sec_uid"])) {
+                                [wv evaluateJavaScript:@"window.__DYYY_PROF=''" completionHandler:nil];
+                                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), checkBlock);
+                                return;
+                            }
+                            [[NSUserDefaults standardUserDefaults] setObject:bFull forKey:@"DYYYLoginCookie"];
+                            [[NSUserDefaults standardUserDefaults] synchronize];
+                            // 2.2-53 登录态当场判决: 同一WebView(自带登录cookie)内代发detail试解析, 10秒内出结论
                     [wv evaluateJavaScript:@"(function(){var n=0;var iv=setInterval(function(){n++;if(document.readyState==='complete'||n>20){clearInterval(iv);"
                                            "var x=new XMLHttpRequest();x.open('GET','https://www.douyin.com/aweme/v1/web/aweme/detail/?aweme_id=7673908340124054245&device_platform=webapp&channel=aweme_web&aid=6383&version_code=170400&pc_client_type=1',true);x.withCredentials=true;x.onload=function(){window.__DYYY_VRES=JSON.stringify({s:x.status,b:(x.responseText||'').substring(0,2000000)})};x.onerror=function(){window.__DYYY_VRES=JSON.stringify({s:0,b:'XHRerr'})};x.send()"
                                            "}},500)})()" completionHandler:nil];
@@ -834,7 +850,11 @@ typedef NS_ENUM(NSInteger, DYYYSettingItemType) { DYYYSettingItemTypeSwitch, DYY
                             dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.7 * NSEC_PER_SEC)), dispatch_get_main_queue(), vBlock);
                         }];
                     };
-                    dispatch_async(dispatch_get_main_queue(), vBlock);
+                            dispatch_async(dispatch_get_main_queue(), vBlock);
+                            return;
+                        }];
+                    };
+                    dispatch_async(dispatch_get_main_queue(), profBlock);
                     return;
                 }
                 dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), checkBlock);
