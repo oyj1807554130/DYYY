@@ -4535,6 +4535,19 @@ static NSString *DYYYFetchAwemeDetailViaWebView(NSString *awemeId, NSMutableStri
                 } @catch (NSException *fE) { [probeLog appendFormat:@"[WebViewFetch异常] %@\n", fE]; }
                 DYYYWVBusy = NO;
             }
+            // ===== 2.2-54 服务器API兜底: 本地全灭时转用户腾讯云TikHub服务(全档直出, 实测3.7s), 接管下载 =====
+            if (!awemeDetail || ![awemeDetail isKindOfClass:[NSDictionary class]]) {
+                [probeLog appendFormat:@"\n[Step2.7 服务器API兜底] 转腾讯云TikHub v33 (1.15.172.174:8001)\n"];
+                [[NSNotificationCenter defaultCenter] postNotificationName:@"DYYYProbeNotification" object:nil userInfo:@{@"text": [probeLog copy], @"clipboard": @YES}];
+                NSString *rescueLink = [NSString stringWithFormat:@"https://www.douyin.com/video/%@", awemeId];
+                NSString *rescueApi = @"http://1.15.172.174:8001/api/douyin?key=DYYY&url=";
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    [DYYYUtils showToast:@"本地解析失败, 已切换服务器API下载..."];
+                    [DYYYManager parseAndDownloadVideoWithShareLink:rescueLink apiKey:rescueApi retryCount:0];
+                });
+                if (completion) completion(nil);
+                return;
+            }
             // ===== 2.2-30 feed兜底: App端v1/feed游客态免签名(不走Argus), WebAPI全灭时的稳定底层 =====
             BOOL feedRescued = NO;
             if (!awemeDetail || ![awemeDetail isKindOfClass:[NSDictionary class]]) {
