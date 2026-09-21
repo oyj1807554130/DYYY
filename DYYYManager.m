@@ -4465,25 +4465,40 @@ static NSString *DYYYFetchAwemeDetailViaWebView(NSString *awemeId, NSMutableStri
                         fwv.hidden = YES;
                         [fwv loadRequest:[NSURLRequest requestWithURL:[NSURL URLWithString:@"https://www.douyin.com/"]]];
                         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(8.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-                            NSString *fjs = [NSString stringWithFormat:@"(function(){return new Promise(function(res){var n=0;var iv=setInterval(function(){n++;if(document.readyState==='complete'||n>20){clearInterval(iv);"
-                                             "fetch('https://www.douyin.com/aweme/v1/web/aweme/detail/?aweme_id=%@&device_platform=webapp&channel=aweme_web&aid=6383&version_code=170400&pc_client_type=1',{credentials:'include'}).then(function(r){return r.text().then(function(t){return res(JSON.stringify({s:r.status,b:t.substring(0,3000000)}))})}).catch(function(e){return res(JSON.stringify({s:0,b:String(e)}))})"
-                                             "}},500)})})()", awemeId];
+                            NSString *fjs = [NSString stringWithFormat:@"(function(){var n=0;var iv=setInterval(function(){n++;if(document.readyState==='complete'||n>20){clearInterval(iv);"
+                                             "fetch('https://www.douyin.com/aweme/v1/web/aweme/detail/?aweme_id=%@&device_platform=webapp&channel=aweme_web&aid=6383&version_code=170400&pc_client_type=1',{credentials:'include'}).then(function(r){return r.text().then(function(t){window.__DYYY_RES=JSON.stringify({s:r.status,b:t.substring(0,3000000)})})}).catch(function(e){window.__DYYY_RES=JSON.stringify({s:0,b:String(e)})})"
+                                             "}},500)})()", awemeId];
                             [fwv evaluateJavaScript:fjs completionHandler:^(id fres, NSError *ferr) {
-                                if (ferr) [probeLog appendFormat:@"[WebViewFetch] JS错误: %@\n", ferr.localizedDescription];
-                                if ([fres isKindOfClass:[NSString class]]) {
-                                    @try {
-                                        NSDictionary *fj = [NSJSONSerialization JSONObjectWithData:[fres dataUsingEncoding:NSUTF8StringEncoding] options:0 error:nil];
-                                        if ([fj isKindOfClass:[NSDictionary class]]) {
-                                            fstatus = [fj[@"status"] isKindOfClass:[NSNumber class]] ? [fj[@"status"] integerValue] : 0;
-                                            fresp = fj[@"body"];
+                                if (ferr) { [probeLog appendFormat:@"[WebViewFetch] 启动JS错误: %@\n", ferr.localizedDescription]; dispatch_semaphore_signal(fsem); return; }
+                                __block NSInteger pollN = 0;
+                                __block dispatch_block_t fpoll;
+                                fpoll = ^{
+                                    pollN++;
+                                    if (!fwv) return;
+                                    [fwv evaluateJavaScript:@"(window.__DYYY_RES||'')" completionHandler:^(id fpr, NSError *fpe) {
+                                        if ([fpr isKindOfClass:[NSString class]] && [(NSString *)fpr length] > 0) {
+                                            @try {
+                                                NSDictionary *fj = [NSJSONSerialization JSONObjectWithData:[(NSString *)fpr dataUsingEncoding:NSUTF8StringEncoding] options:0 error:nil];
+                                                if ([fj isKindOfClass:[NSDictionary class]]) {
+                                                    fstatus = [fj[@"s"] isKindOfClass:[NSNumber class]] ? [fj[@"s"] integerValue] : 0;
+                                                    fresp = fj[@"b"];
+                                                }
+                                            } @catch (NSException *fje) {}
+                                            [probeLog appendFormat:@"[WebViewFetch] 轮询命中(第%ld次) HTTP %ld body=%lu字节\n", (long)pollN, (long)fstatus, (unsigned long)fresp.length];
+                                            dispatch_semaphore_signal(fsem);
+                                        } else if (pollN < 36) {
+                                            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.7 * NSEC_PER_SEC)), dispatch_get_main_queue(), fpoll);
+                                        } else {
+                                            [probeLog appendString:@"[WebViewFetch] 轮询超时: __DYYY_RES始终为空(fetch未回或页面异常)\n"];
+                                            dispatch_semaphore_signal(fsem);
                                         }
-                                    } @catch (NSException *fje) {}
-                                }
-                                dispatch_semaphore_signal(fsem);
+                                    }];
+                                };
+                                fpoll();
                             }];
                         });
                     });
-                    dispatch_semaphore_wait(fsem, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(26.0 * NSEC_PER_SEC)));
+                    dispatch_semaphore_wait(fsem, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(35.0 * NSEC_PER_SEC)));
                     dispatch_async(dispatch_get_main_queue(), ^{
                         [fwv stopLoading];
                         [fwv removeFromSuperview];
