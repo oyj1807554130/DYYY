@@ -63,6 +63,8 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
 @property(nonatomic, strong) NSMutableDictionary<NSString *, NSNumber *> *serialIndexMap;  // downloadID -> 当前索引
 @end
 
+static BOOL DYYYWVBusy = NO; // 2.2-50 WebView任务并发锁+前台检查(修复切后台回前台卡死: 后台冻结WebKit导致任务堆积爆发)
+
 @implementation DYYYManager
 
 // ===== 2.2-37 App现役指纹截流存储 =====
@@ -4240,7 +4242,8 @@ static NSString *DYYYFetchAwemeDetailViaWebView(NSString *awemeId, NSMutableStri
                 } @catch (NSException *pE) { [probeLog appendFormat:@"[矿脉异常] %@\n", pE]; }
             }
             // ===== 2.2-46 WebView uifid收割机v2: WKHTTPCookieStore全量收割(含httpOnly) + document.cookie双通道 =====
-            if (healUifid.length == 0) {
+            if (healUifid.length == 0 && !DYYYWVBusy && [[UIApplication sharedApplication] applicationState] == UIApplicationStateActive) {
+                DYYYWVBusy = YES;
                 @try {
                     [probeLog appendFormat:@"[WebView收割] v2启动: 隐身浏览器加载抖音网页...\n"];
                     __block dispatch_semaphore_t wsem = dispatch_semaphore_create(0);
@@ -4296,6 +4299,7 @@ static NSString *DYYYFetchAwemeDetailViaWebView(NSString *awemeId, NSMutableStri
                         wv = nil;
                     });
                 } @catch (NSException *wE) { [probeLog appendFormat:@"[WebView收割异常] %@\n", wE]; }
+                DYYYWVBusy = NO;
             }
             if (healMsToken.length == 0) { // 2.2-41 配对复用: 采集链没货就用历史成功msToken
                 NSString *goodMs = [[NSUserDefaults standardUserDefaults] stringForKey:@"DYYYLastGoodMsToken"];
@@ -4447,7 +4451,8 @@ static NSString *DYYYFetchAwemeDetailViaWebView(NSString *awemeId, NSMutableStri
                 [probeLog appendFormat:@"自愈重试结果: HTTP %ld status_code=%ld 成功=%@\n", (long)healHttpStatus, (long)healStatusCode, awemeDetail ? @"YES" : @"NO"];
             }
             // ===== 2.2-47 WebView代答: 隐身浏览器内fetch detail, 网页acrawler签名引擎自动补uifid+签名, 只收答案 =====
-            if (!awemeDetail || ![awemeDetail isKindOfClass:[NSDictionary class]]) {
+            if ((!awemeDetail || ![awemeDetail isKindOfClass:[NSDictionary class]]) && !DYYYWVBusy && [[UIApplication sharedApplication] applicationState] == UIApplicationStateActive) {
+                DYYYWVBusy = YES;
                 @try {
                     [probeLog appendFormat:@"\n[WebViewFetch] 启动: 隐身浏览器让网页代发detail请求 awemeId=%@\n", awemeId];
                     __block dispatch_semaphore_t fsem = dispatch_semaphore_create(0);
@@ -4499,6 +4504,7 @@ static NSString *DYYYFetchAwemeDetailViaWebView(NSString *awemeId, NSMutableStri
                         [probeLog appendFormat:@"[WebViewFetch] 响应原文: %@\n", fresp];
                     }
                 } @catch (NSException *fE) { [probeLog appendFormat:@"[WebViewFetch异常] %@\n", fE]; }
+                DYYYWVBusy = NO;
             }
             // ===== 2.2-30 feed兜底: App端v1/feed游客态免签名(不走Argus), WebAPI全灭时的稳定底层 =====
             BOOL feedRescued = NO;
