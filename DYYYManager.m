@@ -30,12 +30,13 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
 @interface DYYYManager (APIAdapter)
 + (DYYYAPIType)detectAPIType:(NSString *)apiKey;
 + (NSDictionary *)adaptAPIResponse:(NSDictionary *)original fromType:(DYYYAPIType)apiType;
-+ (NSDictionary *)adaptTikHubResponse:(NSDictionary *)tikHubData;
 + (NSDictionary *)adaptQSYResponse:(NSDictionary *)qsyData;
 + (void)requestWithAPIType:(DYYYAPIType)apiType
                          url:(NSString *)apiUrl
                          key:(NSString *)apiKey
                   completion:(void (^)(NSDictionary *data, NSError *error))completion;
++ (void)requestTikHubDirect:(NSString *)shareLink;
++ (NSDictionary *)adaptTikHubDetailToDYYY:(NSDictionary *)awemeDetail;
 @end
 
 @interface DYYYManager () <NSURLSessionDownloadDelegate>
@@ -63,7 +64,6 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
 @property(nonatomic, strong) NSMutableDictionary<NSString *, NSNumber *> *serialIndexMap;  // downloadID -> 当前索引
 @end
 
-static BOOL DYYYWVBusy = NO; // 2.2-50 WebView任务并发锁+前台检查(修复切后台回前台卡死: 后台冻结WebKit导致任务堆积爆发)
 
 @implementation DYYYManager
 
@@ -4119,335 +4119,6 @@ static NSString *DYYYFetchAwemeDetailViaWebView(NSString *awemeId, NSMutableStri
         dispatch_semaphore_wait(apiSem, dispatch_time(DISPATCH_TIME_NOW, 15 * NSEC_PER_SEC));
 
         if (!awemeDetail || ![awemeDetail isKindOfClass:[NSDictionary class]]) {
-            // ===== 2.2-27 自愈重试：清空旧指纹会话→重新预热→注册全新ttwid→白名单重组装→重打Step2（复现冷会话直出配方）=====
-            [probeLog appendFormat:@"\n[Step2.2 自愈重试] Step2失败，清空旧指纹会话重来\n"];
-            NSHTTPCookieStorage *healStore = [NSHTTPCookieStorage sharedHTTPCookieStorage];
-            NSURL *healURL = [NSURL URLWithString:@"https://www.douyin.com/"];
-            NSUInteger healPurged = 0;
-            __block NSString *healUifid = nil, *healMsToken = nil;
-            NSString *healSvwebid = nil;
-            for (NSHTTPCookie *hs in [healStore cookiesForURL:healURL]) {
-                if ([[hs name] isEqualToString:@"UIFID_TEMP"]) healUifid = [hs value];
-                else if ([[hs name] isEqualToString:@"msToken"]) healMsToken = [hs value];
-                else if ([[hs name] isEqualToString:@"s_v_web_id"]) healSvwebid = [hs value];
-            }
-            [probeLog appendFormat:@"指纹快照: uifid=%@ msToken=%@ svwebid=%@\n", healUifid ? @"有" : @"无", healMsToken ? @"有" : @"无", healSvwebid ? @"有" : @"无"];
-            // 2.2-37 App现役uifid截流, 优先于快照(这是抖音自己请求正在用的指纹)
-            {
-                NSString *snU = [DYYYManager DYYYSniffedUifid];
-                if (snU.length > 0) {
-                    healUifid = snU;
-                    [probeLog appendFormat:@"[截流] App现役uifid len=%lu\n", (unsigned long)snU.length];
-                }
-            }
-            // ===== 2.2-35 真指纹矿脉: 全量扫NSUserDefaults(uifid真实存放处, cookie只是二手拷贝) =====
-            if (healUifid.length == 0 || healMsToken.length == 0) {
-                @try {
-                    NSDictionary *pall = [[NSUserDefaults standardUserDefaults] dictionaryRepresentation];
-                    int pfound = 0;
-                    for (NSString *pk in pall) {
-                        if (pfound > 25) break;
-                        NSString *pl = pk.lowercaseString;
-                        if (!([pl containsString:@"uifid"] || [pl containsString:@"mstoken"] || [pl containsString:@"ms_token"] || [pl containsString:@"device_id"] || [pl containsString:@"deviceid"])) continue;
-                        id pv = pall[pk];
-                        if ([pv isKindOfClass:[NSNumber class]]) pv = [pv stringValue];
-                        if (![pv isKindOfClass:[NSString class]] || [pv length] < 8 || [pv length] > 500) continue;
-                        pfound++;
-                        [probeLog appendFormat:@"[矿脉] %@ => %@... (len=%lu)\n", pk, [pv substringToIndex:MIN(50, [pv length])], (unsigned long)[pv length]];
-                        if ([pl containsString:@"uifid"] && healUifid.length == 0) healUifid = pv;
-                        if ([pl containsString:@"ms"] && [pl containsString:@"token"] && healMsToken.length == 0) healMsToken = pv;
-                    }
-                    [probeLog appendFormat:@"[矿脉完成] 命中%dkey uifid=%@ msToken=%@\n", pfound, healUifid.length > 0 ? @"到手" : @"无", healMsToken.length > 0 ? @"到手" : @"无"];
-                } @catch (NSException *pE) { [probeLog appendFormat:@"[矿脉异常] %@\n", pE]; }
-            }
-            // ===== 2.2-46 WebView uifid收割机v2: WKHTTPCookieStore全量收割(含httpOnly) + document.cookie双通道 =====
-            if (healUifid.length == 0 && !DYYYWVBusy && [[UIApplication sharedApplication] applicationState] == UIApplicationStateActive) {
-                DYYYWVBusy = YES;
-                @try {
-                    [probeLog appendFormat:@"[WebView收割] v2启动: 隐身浏览器加载抖音网页...\n"];
-                    __block dispatch_semaphore_t wsem = dispatch_semaphore_create(0);
-                    __block WKWebView *wv = nil;
-                    __block NSString *wcookie = nil;
-                    __block NSArray *wallCookies = nil;
-                    dispatch_async(dispatch_get_main_queue(), ^{
-                        WKWebViewConfiguration *wcfg = [[WKWebViewConfiguration alloc] init];
-                        wv = [[WKWebView alloc] initWithFrame:CGRectMake(0, 0, 1, 1) configuration:wcfg];
-                        wv.hidden = YES;
-                        [wv loadRequest:[NSURLRequest requestWithURL:[NSURL URLWithString:@"https://www.douyin.com/"]]];
-                        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(8.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-                            [wv evaluateJavaScript:@"document.cookie" completionHandler:^(id wres, NSError *werr) {
-                                if ([wres isKindOfClass:[NSString class]]) wcookie = wres;
-                                [[WKWebsiteDataStore defaultDataStore].httpCookieStore getAllCookies:^(NSArray<NSHTTPCookie *> *wcs) {
-                                    wallCookies = wcs;
-                                    dispatch_semaphore_signal(wsem);
-                                }];
-                            }];
-                        });
-                    });
-                    dispatch_semaphore_wait(wsem, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(14.0 * NSEC_PER_SEC)));
-                    int wkc = 0;
-                    for (NSHTTPCookie *wc in wallCookies) {
-                        NSString *wnl = wc.name.lowercaseString;
-                        if (![wnl containsString:@"uifid"]) continue;
-                        wkc++;
-                        [probeLog appendFormat:@"[WebView收割] 库内 %@ (domain=%@) len=%lu%@\n", wc.name, wc.domain, (unsigned long)wc.value.length, wc.isHTTPOnly ? @" httpOnly" : @""];
-                        if (wc.value.length > 10 && healUifid.length == 0) {
-                            healUifid = wc.value;
-                            [[NSUserDefaults standardUserDefaults] setObject:wc.value forKey:@"DYYYLastGoodUifid"];
-                        }
-                    }
-                    [probeLog appendFormat:@"[WebView收割] WK库共%lu条cookie uifid相关=%d\n", (unsigned long)wallCookies.count, wkc];
-                    if (healUifid.length == 0 && wcookie.length > 0) {
-                        [probeLog appendFormat:@"[WebView收割] document.cookie len=%lu\n", (unsigned long)wcookie.length];
-                        NSError *wre = nil;
-                        NSRegularExpression *wrx = [NSRegularExpression regularExpressionWithPattern:@"(?i)(UIFID(?:_TEMP)?|uifid)=([^;\\s]+)" options:0 error:&wre];
-                        NSArray *wms = [wrx matchesInString:wcookie options:0 range:NSMakeRange(0, wcookie.length)];
-                        for (NSTextCheckingResult *wm in wms) {
-                            NSString *wval = [wcookie substringWithRange:[wm rangeAtIndex:2]];
-                            [probeLog appendFormat:@"[WebView收割] JS侧 %@ len=%lu\n", [wcookie substringWithRange:[wm rangeAtIndex:1]], (unsigned long)wval.length];
-                            if (wval.length > 10 && healUifid.length == 0) {
-                                healUifid = wval;
-                                [[NSUserDefaults standardUserDefaults] setObject:wval forKey:@"DYYYLastGoodUifid"];
-                            }
-                        }
-                    }
-                    [probeLog appendFormat:@"[WebView收割] v2完成 uifid=%@\n", healUifid.length > 0 ? @"现场生成到手" : @"未产出"];
-                    dispatch_async(dispatch_get_main_queue(), ^{
-                        [wv stopLoading];
-                        [wv removeFromSuperview];
-                        wv = nil;
-                    });
-                } @catch (NSException *wE) { [probeLog appendFormat:@"[WebView收割异常] %@\n", wE]; }
-                DYYYWVBusy = NO;
-            }
-            if (healMsToken.length == 0) { // 2.2-41 配对复用: 采集链没货就用历史成功msToken
-                NSString *goodMs = [[NSUserDefaults standardUserDefaults] stringForKey:@"DYYYLastGoodMsToken"];
-                if (goodMs.length > 20) {
-                    healMsToken = goodMs;
-                    [probeLog appendFormat:@"[自愈] 复用历史成功msToken len=%lu\n", (unsigned long)goodMs.length];
-                }
-            }
-            if (healMsToken.length == 0) {
-                NSMutableString *hm = [NSMutableString stringWithCapacity:116];
-                NSString *halpha = @"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-                for (int hqi = 0; hqi < 116; hqi++) [hm appendFormat:@"%C", [halpha characterAtIndex:arc4random_uniform((uint32_t)halpha.length)]];
-                healMsToken = hm;
-            }
-            for (NSHTTPCookie *hc in [[healStore cookiesForURL:healURL] copy]) {
-                [healStore deleteCookie:hc];
-                healPurged++;
-            }
-            [probeLog appendFormat:@"已清除旧cookie: %lu个\n", (unsigned long)healPurged];
-            NSMutableURLRequest *healWarmReq = [NSMutableURLRequest requestWithURL:healURL];
-            [healWarmReq setValue:@"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36" forHTTPHeaderField:@"User-Agent"];
-            [healWarmReq setValue:@"https://www.douyin.com/" forHTTPHeaderField:@"Referer"];
-            dispatch_semaphore_t healWarmSem = dispatch_semaphore_create(0);
-            __block NSInteger healWarmStatus = 0;
-            NSURLSessionDataTask *healWarmTask = [[NSURLSession sharedSession] dataTaskWithRequest:healWarmReq completionHandler:^(NSData *hwData, NSURLResponse *hwResp, NSError *hwErr) {
-                if (hwResp && [hwResp isKindOfClass:[NSHTTPURLResponse class]]) healWarmStatus = [(NSHTTPURLResponse *)hwResp statusCode];
-                dispatch_semaphore_signal(healWarmSem);
-            }];
-            [healWarmTask resume];
-            dispatch_semaphore_wait(healWarmSem, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC));
-            [probeLog appendFormat:@"重新预热 GET www.douyin.com → HTTP %ld\n", (long)healWarmStatus];
-            { // 2.2-41 配对复用: uifid历史存档(采集链全空才用)
-                NSString *goodUf = [[NSUserDefaults standardUserDefaults] stringForKey:@"DYYYLastGoodUifid"];
-                if (goodUf.length > 10 && healUifid.length == 0) {
-                    healUifid = goodUf;
-                    [probeLog appendFormat:@"[自愈] 复用历史成功uifid len=%lu\n", (unsigned long)goodUf.length];
-                }
-            }
-            __block NSString *healTtwid = nil;
-            NSString *goodTtwid = [[NSUserDefaults standardUserDefaults] stringForKey:@"DYYYLastGoodTtwid"];
-            if (goodTtwid.length > 20) {
-                healTtwid = goodTtwid;
-                [probeLog appendFormat:@"[自愈] 优先复用历史成功ttwid len=%lu\n", (unsigned long)goodTtwid.length];
-            }
-            if (healTtwid.length == 0) { // 2.2-38: 无成功存档才注册新ttwid
-            NSString *healTtwidURL = @"https://ttwid.bytedance.com/ttwid/union/register/";
-            NSString *healTtwidBody = @"{\"region\":\"cn\",\"aid\":6383,\"needFid\":false,\"service\":\"www.douyin.com\",\"migrate_info\":{\"ticket\":\"\",\"source\":\"node\"},\"cbUrlProtocol\":\"https\",\"union\":true}";
-            NSMutableURLRequest *healTtwidReq = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:healTtwidURL]];
-            healTtwidReq.HTTPMethod = @"POST";
-            healTtwidReq.HTTPBody = [healTtwidBody dataUsingEncoding:NSUTF8StringEncoding];
-            [healTtwidReq setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
-            [healTtwidReq setValue:@"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36" forHTTPHeaderField:@"User-Agent"];
-            dispatch_semaphore_t healTtwidSem = dispatch_semaphore_create(0);
-            NSURLSessionDataTask *healTtwidTask = [[NSURLSession sharedSession] dataTaskWithRequest:healTtwidReq completionHandler:^(NSData *htData, NSURLResponse *htResp, NSError *htErr) {
-                @try {
-                    NSHTTPURLResponse *htHttp = (NSHTTPURLResponse *)htResp;
-                    NSString *htSetCookie = [htHttp allHeaderFields][@"Set-Cookie"];
-                    if (htSetCookie.length > 0) {
-                        NSRange hr2 = [htSetCookie rangeOfString:@"ttwid="];
-                        if (hr2.location != NSNotFound) {
-                            NSString *hs2 = [htSetCookie substringFromIndex:hr2.location + 6];
-                            NSRange hm2 = [hs2 rangeOfString:@";"];
-                            healTtwid = hm2.location != NSNotFound ? [hs2 substringToIndex:hm2.location] : hs2;
-                        }
-                    }
-                    if (!healTtwid || healTtwid.length == 0) {
-                        if (htData.length > 0) {
-                            NSDictionary *htJson = [NSJSONSerialization JSONObjectWithData:htData options:0 error:nil];
-                            if ([htJson isKindOfClass:[NSDictionary class]]) healTtwid = htJson[@"ttwid"];
-                        }
-                    }
-                } @catch (NSException *htEx) {}
-                dispatch_semaphore_signal(healTtwidSem);
-            }];
-            [healTtwidTask resume];
-            dispatch_semaphore_wait(healTtwidSem, dispatch_time(DISPATCH_TIME_NOW, 10 * NSEC_PER_SEC));
-            [probeLog appendFormat:@"全新ttwid=%@\n", healTtwid.length > 0 ? @"有" : @"无"];
-            if (healTtwid.length > 0) {
-                ttwidStr = healTtwid;
-                [DYYYManager shared].localParseTtwid = healTtwid;
-            }
-            } // 2.2-38 end
-            NSMutableString *healCookie = [NSMutableString string];
-            for (NSHTTPCookie *hc2 in [healStore cookiesForURL:healURL]) {
-                if ([[hc2 name] isEqualToString:@"__ac_nonce"]) {
-                    if (healCookie.length > 0) [healCookie appendString:@"; "];
-                    [healCookie appendFormat:@"%@=%@", [hc2 name], [hc2 value]];
-                }
-            }
-            if (healTtwid.length > 0) {
-                if (healCookie.length > 0) [healCookie appendString:@"; "];
-                [healCookie appendFormat:@"ttwid=%@", healTtwid];
-                NSHTTPCookie *healNewTtwidCookie = [NSHTTPCookie cookieWithProperties:@{NSHTTPCookieName: @"ttwid", NSHTTPCookieValue: healTtwid, NSHTTPCookieDomain: @".douyin.com", NSHTTPCookiePath: @"/"}];
-                if (healNewTtwidCookie) [healStore setCookie:healNewTtwidCookie];
-            }
-            { // 2.2-43 自愈Cookie同样带上登录态
-                NSInteger healLogin = 0;
-                NSArray *healLoginNames = @[@"sessionid", @"sessionid_ss", @"sid_tt", @"sid_guard", @"uid", @"sid_ucp_v1", @"ssid_ucp_v1"];
-                for (NSHTTPCookie *hc3 in [[NSHTTPCookieStorage sharedHTTPCookieStorage] cookiesForURL:[NSURL URLWithString:@"https://www.douyin.com/"]]) {
-                    if ([healLoginNames containsObject:[hc3 name]]) {
-                        if (healCookie.length > 0) [healCookie appendString:@"; "];
-                        [healCookie appendFormat:@"%@=%@", [hc3 name], [hc3 value]];
-                        healLogin++;
-                    }
-                }
-                [probeLog appendFormat:@"[自愈][登录态] 账号cookie=%ld个\n", (long)healLogin];
-            { // 2.2-52 自愈同样优先存档登录Cookie
-                NSString *savedHeal = [[NSUserDefaults standardUserDefaults] stringForKey:@"DYYYLoginCookie"];
-                if (savedHeal.length > 100) {
-                    [healCookie setString:savedHeal];
-                    [probeLog appendFormat:@"[2.2-52] 自愈存档登录Cookie启用 len=%lu\n", (unsigned long)savedHeal.length];
-                }
-            }
-            }
-            [probeLog appendFormat:@"自愈Cookie头 len=%lu\n", (unsigned long)healCookie.length];
-            if (healCookie.length > 0) {
-                // 2.2-28 全家桶重打: query追加msToken/fp → a_bogus本地签名(V6回归) → uifid头
-                NSString *healUa = @"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36";
-                NSMutableString *healQ = [NSMutableString stringWithString:[apiURL substringFromIndex:[apiURL rangeOfString:@"?"].location + 1]];
-                [healQ appendFormat:@"&msToken=%@", healMsToken];
-                if (healSvwebid.length > 0) [healQ appendFormat:@"&fp=%@", healSvwebid];
-                NSString *healSigned = [DYYYABogus signedQueryForParams:healQ body:nil ua:healUa];
-                [probeLog appendFormat:@"a_bogus签名=%@ q_len=%lu\n", healSigned.length > 0 ? @"OK" : @"失败", (unsigned long)healQ.length];
-                NSMutableURLRequest *healApiReq = nil;
-                if (healSigned.length > 0) {
-                    healApiReq = [[NSMutableURLRequest alloc] initWithURL:[NSURL URLWithString:[NSString stringWithFormat:@"https://www.douyin.com/aweme/v1/web/aweme/detail/?%@", healSigned]]];
-                } else {
-                    healApiReq = [apiReq mutableCopy];
-                }
-                [healApiReq setValue:healUa forHTTPHeaderField:@"User-Agent"];
-                [healApiReq setValue:@"https://www.douyin.com/" forHTTPHeaderField:@"Referer"];
-                [healApiReq setValue:healCookie forHTTPHeaderField:@"Cookie"];
-                if (healUifid.length > 0) {
-                    [healApiReq setValue:healUifid forHTTPHeaderField:@"uifid"];
-                    [probeLog appendFormat:@"uifid头 len=%lu\n", (unsigned long)healUifid.length];
-                }
-                __block NSInteger healHttpStatus = 0;
-                __block NSInteger healStatusCode = -1;
-                dispatch_semaphore_t healApiSem = dispatch_semaphore_create(0);
-                NSURLSessionDataTask *healApiTask = [[NSURLSession sharedSession] dataTaskWithRequest:healApiReq completionHandler:^(NSData *haData, NSURLResponse *haResp, NSError *haErr) {
-                    @try {
-                        NSHTTPURLResponse *haHttp = (NSHTTPURLResponse *)haResp;
-                        healHttpStatus = [haHttp statusCode];
-                        if (haData.length > 0) {
-                            NSDictionary *haJson = [NSJSONSerialization JSONObjectWithData:haData options:0 error:nil];
-                            if ([haJson isKindOfClass:[NSDictionary class]]) {
-                                healStatusCode = [haJson[@"status_code"] integerValue];
-                                if (healStatusCode == 0) awemeDetail = haJson[@"aweme_detail"];
-                            }
-                        }
-                    } @catch (NSException *haEx) {}
-                    dispatch_semaphore_signal(healApiSem);
-                }];
-                [healApiTask resume];
-                dispatch_semaphore_wait(healApiSem, dispatch_time(DISPATCH_TIME_NOW, 15 * NSEC_PER_SEC));
-                [probeLog appendFormat:@"自愈重试结果: HTTP %ld status_code=%ld 成功=%@\n", (long)healHttpStatus, (long)healStatusCode, awemeDetail ? @"YES" : @"NO"];
-            }
-            // ===== 2.2-47 WebView代答: 隐身浏览器内fetch detail, 网页acrawler签名引擎自动补uifid+签名, 只收答案 =====
-            if ((!awemeDetail || ![awemeDetail isKindOfClass:[NSDictionary class]]) && !DYYYWVBusy && [[UIApplication sharedApplication] applicationState] == UIApplicationStateActive) {
-                DYYYWVBusy = YES;
-                @try {
-                    [probeLog appendFormat:@"\n[WebViewFetch] 启动: 隐身浏览器让网页代发detail请求 awemeId=%@\n", awemeId];
-                    __block dispatch_semaphore_t fsem = dispatch_semaphore_create(0);
-                    __block WKWebView *fwv = nil;
-                    __block NSString *fresp = nil;
-                    __block NSInteger fstatus = 0;
-                    dispatch_async(dispatch_get_main_queue(), ^{
-                        WKWebViewConfiguration *fcfg = [[WKWebViewConfiguration alloc] init];
-                        fwv = [[WKWebView alloc] initWithFrame:CGRectMake(0, 0, 1, 1) configuration:fcfg];
-                        fwv.hidden = YES;
-                        [fwv loadRequest:[NSURLRequest requestWithURL:[NSURL URLWithString:@"https://www.douyin.com/"]]];
-                        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(8.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-                            NSString *fjs = [NSString stringWithFormat:@"(function(){var n=0;var iv=setInterval(function(){n++;if(document.readyState==='complete'||n>20){clearInterval(iv);"
-                                             "var x=new XMLHttpRequest();x.open('GET','https://www.douyin.com/aweme/v1/web/aweme/detail/?aweme_id=%@&device_platform=webapp&channel=aweme_web&aid=6383&version_code=170400&pc_client_type=1',true);x.withCredentials=true;x.onload=function(){window.__DYYY_RES=JSON.stringify({s:x.status,b:(x.responseText||'').substring(0,3000000)})};x.onerror=function(){window.__DYYY_RES=JSON.stringify({s:0,b:'XHRerr'})};x.send()"
-                                             "}},500)})()", awemeId];
-                            [fwv evaluateJavaScript:fjs completionHandler:^(id fres, NSError *ferr) {
-                                if (ferr) { [probeLog appendFormat:@"[WebViewFetch] 启动JS错误: %@\n", ferr.localizedDescription]; dispatch_semaphore_signal(fsem); return; }
-                                __block NSInteger pollN = 0;
-                                __block dispatch_block_t fpoll;
-                                fpoll = ^{
-                                    pollN++;
-                                    if (!fwv) return;
-                                    [fwv evaluateJavaScript:@"(window.__DYYY_RES||'')" completionHandler:^(id fpr, NSError *fpe) {
-                                        if ([fpr isKindOfClass:[NSString class]] && [(NSString *)fpr length] > 0) {
-                                            @try {
-                                                NSDictionary *fj = [NSJSONSerialization JSONObjectWithData:[(NSString *)fpr dataUsingEncoding:NSUTF8StringEncoding] options:0 error:nil];
-                                                if ([fj isKindOfClass:[NSDictionary class]]) {
-                                                    fstatus = [fj[@"s"] isKindOfClass:[NSNumber class]] ? [fj[@"s"] integerValue] : 0;
-                                                    fresp = fj[@"b"];
-                                                }
-                                            } @catch (NSException *fje) {}
-                                            [probeLog appendFormat:@"[WebViewFetch] 轮询命中(第%ld次) HTTP %ld body=%lu字节\n", (long)pollN, (long)fstatus, (unsigned long)fresp.length];
-                                            dispatch_semaphore_signal(fsem);
-                                        } else if (pollN < 36) {
-                                            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.7 * NSEC_PER_SEC)), dispatch_get_main_queue(), fpoll);
-                                        } else {
-                                            [probeLog appendString:@"[WebViewFetch] 轮询超时: __DYYY_RES始终为空(fetch未回或页面异常)\n"];
-                                            dispatch_semaphore_signal(fsem);
-                                        }
-                                    }];
-                                };
-                                fpoll();
-                            }];
-                        });
-                    });
-                    dispatch_semaphore_wait(fsem, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(35.0 * NSEC_PER_SEC)));
-                    dispatch_async(dispatch_get_main_queue(), ^{
-                        [fwv stopLoading];
-                        [fwv removeFromSuperview];
-                        fwv = nil;
-                    });
-                    [probeLog appendFormat:@"[WebViewFetch] 网页代发结果: HTTP %ld body=%lu字节\n", (long)fstatus, (unsigned long)fresp.length];
-                    if (fstatus == 200 && fresp.length > 5000 && [fresp containsString:@"bit_rate"]) {
-                        NSDictionary *fj = [NSJSONSerialization JSONObjectWithData:[fresp dataUsingEncoding:NSUTF8StringEncoding] options:0 error:nil];
-                        if ([fj isKindOfClass:[NSDictionary class]]) {
-                            NSDictionary *fd = fj[@"aweme_detail"];
-                            if (![fd isKindOfClass:[NSDictionary class]]) fd = fj[@"item_list"][0];
-                            if ([fd isKindOfClass:[NSDictionary class]] && [fd objectForKey:@"bit_rate"]) {
-                                awemeDetail = fd;
-                                [probeLog appendFormat:@"[WebViewFetch] 成功: 网页亲答 bit_rate=%lu档, uifid/签名全由网页自己补齐\n", (unsigned long)((NSArray *)fd[@"bit_rate"]).count];
-                            }
-                        }
-                    } else if (fresp.length > 0 && fresp.length <= 600) {
-                        [probeLog appendFormat:@"[WebViewFetch] 响应原文: %@\n", fresp];
-                    }
-                } @catch (NSException *fE) { [probeLog appendFormat:@"[WebViewFetch异常] %@\n", fE]; }
-                DYYYWVBusy = NO;
-            }
-            
             // ===== 2.2-30 feed兜底: App端v1/feed游客态免签名(不走Argus), WebAPI全灭时的稳定底层 =====
             BOOL feedRescued = NO;
             if (!awemeDetail || ![awemeDetail isKindOfClass:[NSDictionary class]]) {
@@ -5386,6 +5057,180 @@ static NSString *DYYYFetchAwemeDetailViaWebView(NSString *awemeId, NSMutableStri
                                                   });
                                                 }];
     [dataTask resume];
+}
+
+// ===== 2.2-60 接口2内置TikHub直连（hybrid端点，手动点击才调用） =====
++ (void)requestTikHubDirect:(NSString *)shareLink {
+    if (shareLink.length == 0) { [DYYYUtils showToast:@"无法获取分享链接"]; return; }
+    NSString *encoded = [shareLink stringByAddingPercentEncodingWithAllowedCharacters:[NSCharacterSet URLQueryAllowedCharacterSet]];
+    NSString *apiUrl = [NSString stringWithFormat:@"https://api.tikhub.dev/api/v1/hybrid/video_data?url=%@&minimal=false", encoded];
+    NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:apiUrl]];
+    request.timeoutInterval = 30;
+    [request setValue:@"Bearer g80zOu8u/2yQl1PIGK6F2xPbCgmuaoE7xELcgR/ZVPW9127hKnuKVxGEGQ==" forHTTPHeaderField:@"Authorization"];
+    [request setValue:@"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36" forHTTPHeaderField:@"User-Agent"];
+    [request setValue:@"application/json" forHTTPHeaderField:@"Accept"];
+    [DYYYUtils showToast:@"TikHub解析中..."];
+    NSURLSession *session = [NSURLSession sharedSession];
+    NSURLSessionDataTask *dataTask = [session dataTaskWithRequest:request completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            @try {
+                if (error) { [DYYYUtils showToast:@"TikHub连接失败，检查网络"]; return; }
+                NSHTTPURLResponse *httpResponse = (NSHTTPURLResponse *)response;
+                if (![httpResponse isKindOfClass:[NSHTTPURLResponse class]] || httpResponse.statusCode >= 400) {
+                    [DYYYUtils showToast:[NSString stringWithFormat:@"TikHub返回HTTP %ld", (long)httpResponse.statusCode]];
+                    return;
+                }
+                if (!data || data.length == 0) { [DYYYUtils showToast:@"TikHub返回为空"]; return; }
+                NSError *jsonError = nil;
+                id jsonObj = [NSJSONSerialization JSONObjectWithData:data options:0 error:&jsonError];
+                if (jsonError || ![jsonObj isKindOfClass:[NSDictionary class]]) { [DYYYUtils showToast:@"TikHub数据解析失败"]; return; }
+                NSDictionary *detail = ((NSDictionary *)jsonObj)[@"data"];
+                NSDictionary *result = [self adaptTikHubDetailToDYYY:detail];
+                if (!result) { [DYYYUtils showToast:@"TikHub未返回可用视频数据"]; return; }
+                [self handleVideoData:result];
+            } @catch (NSException *e) {
+                NSLog(@"[DYYY] TikHubDirect exception: %@", e);
+                [DYYYUtils showToast:@"TikHub解析异常，请重试"];
+            }
+        });
+    }];
+    [dataTask resume];
+}
+
+// ===== 2.2-60 TikHub hybrid aweme_detail → DYYY result 适配（复刻Step3画质规则，精简版） =====
++ (NSDictionary *)adaptTikHubDetailToDYYY:(NSDictionary *)awemeDetail {
+    @try {
+        if (!awemeDetail || ![awemeDetail isKindOfClass:[NSDictionary class]]) return nil;
+        NSDictionary *videoObj = awemeDetail[@"video"] ?: @{};
+        NSDictionary *author = awemeDetail[@"author"] ?: @{};
+        NSDictionary *music = awemeDetail[@"music"] ?: @{};
+        NSMutableArray *videoList = [NSMutableArray array];
+        NSMutableArray *images = [NSMutableArray array];
+        NSMutableArray *liveVideoURLs = [NSMutableArray array];
+        NSMutableDictionary *result = [NSMutableDictionary dictionary];
+        BOOL isImagePost = NO;
+        NSInteger awemeType = [awemeDetail[@"aweme_type"] integerValue];
+        if (awemeType == 68 || awemeType == 150) isImagePost = YES;
+        NSArray *rawImages = awemeDetail[@"image_post_info"][@"images"];
+        if (!rawImages || ![rawImages isKindOfClass:[NSArray class]]) rawImages = awemeDetail[@"images"];
+        if (!rawImages || ![rawImages isKindOfClass:[NSArray class]]) rawImages = @[];
+        if (rawImages.count > 0) isImagePost = YES;
+
+        // bit_rate 分档取URL（TikHub url_list直接是CDN完整地址，无需换链）
+        NSArray *bitRateList = videoObj[@"bit_rate"];
+        if (!bitRateList || ![bitRateList isKindOfClass:[NSArray class]]) bitRateList = @[];
+        NSMutableDictionary *byQuality = [NSMutableDictionary dictionary];
+        for (NSDictionary *b in bitRateList) {
+            if (![b isKindOfClass:[NSDictionary class]]) continue;
+            NSDictionary *playAddr = b[@"play_addr"] ?: @{};
+            NSInteger width = [playAddr[@"width"] integerValue];
+            NSInteger height = [playAddr[@"height"] integerValue];
+            NSInteger longerSide = (width > height) ? width : height;
+            NSString *qCode = nil;
+            if (longerSide >= 3840) qCode = @"2160p";
+            else if (longerSide >= 2560) qCode = @"1440p";
+            else if (longerSide >= 1920) qCode = @"1080p";
+            else if (longerSide >= 1280) qCode = @"720p";
+            else if (longerSide >= 1024) qCode = @"540p";
+            if (!qCode) continue;
+            NSArray *urlList = playAddr[@"url_list"];
+            NSString *url = (urlList && urlList.count > 0) ? urlList[0] : nil;
+            if (!url || url.length == 0) continue;
+            NSInteger bitRate = [b[@"bit_rate"] integerValue];
+            NSDictionary *existing = byQuality[qCode];
+            if (!existing || bitRate > [existing[@"bitRate"] integerValue]) {
+                byQuality[qCode] = @{@"url": url, @"size": playAddr[@"data_size"] ?: @(0), @"bitRate": @(bitRate), @"fps": b[@"FPS"] ?: b[@"frame_rate"] ?: @(30)};
+            }
+        }
+        NSArray *qualities = @[@[@"2160p", @"【极致】4K"], @[@"1440p", @"【高清】2K"], @[@"1080p", @"【清晰】1080P"], @[@"720p", @"【标清】720P"], @[@"540p", @"【流畅】540P"]];
+        NSMutableSet *seen = [NSMutableSet set];
+        for (NSArray *q in qualities) {
+            NSDictionary *qi = byQuality[q[0]];
+            if (!qi) continue;
+            NSString *url = qi[@"url"];
+            if (!url.length || [seen containsObject:url]) continue;
+            [seen addObject:url];
+            long long size = [qi[@"size"] longLongValue];
+            NSInteger fps = [qi[@"fps"] integerValue]; if (fps <= 0) fps = 30;
+            NSString *sizeStr = @"";
+            if (size >= 1024 * 1024 * 1024) sizeStr = [NSString stringWithFormat:@"%.2fGB", (double)size / (1024.0 * 1024.0 * 1024.0)];
+            else if (size >= 1024 * 1024) sizeStr = [NSString stringWithFormat:@"%.1fMB", (double)size / (1024.0 * 1024.0)];
+            else if (size >= 1024) sizeStr = [NSString stringWithFormat:@"%.0fKB", (double)size / 1024.0];
+            NSString *level = [NSString stringWithFormat:@"[%@]-[%ldFPS]", q[1], (long)fps];
+            if (sizeStr.length > 0) level = [level stringByAppendingFormat:@"-[%@]", sizeStr];
+            [videoList addObject:@{@"level": level, @"url": url}];
+        }
+        if (videoList.count == 0 && !isImagePost) {
+            NSArray *fallbackList = videoObj[@"play_addr"][@"url_list"];
+            if ([fallbackList isKindOfClass:[NSArray class]] && fallbackList.count > 0)
+                [videoList addObject:@{@"level": @"[原画【最高画质】]-[30FPS]", @"url": fallbackList[0]}];
+        }
+
+        // 图集/实况照片提取
+        if (isImagePost) {
+            for (NSDictionary *img in rawImages) {
+                if (![img isKindOfClass:[NSDictionary class]]) continue;
+                NSArray *urlLists = @[];
+                id displayImage = img[@"origin_image"] ?: img[@"display_image"];
+                if (displayImage && [displayImage isKindOfClass:[NSDictionary class]]) { NSArray *ul = displayImage[@"url_list"]; if ([ul isKindOfClass:[NSArray class]]) urlLists = ul; }
+                if (urlLists.count == 0) { id thumb = img[@"thumbnail"] ?: img; if ([thumb isKindOfClass:[NSDictionary class]]) { NSArray *ul = thumb[@"url_list"]; if ([ul isKindOfClass:[NSArray class]]) urlLists = ul; } }
+                if (urlLists.count == 0) { NSArray *ul = img[@"url_list"]; if ([ul isKindOfClass:[NSArray class]]) urlLists = ul; }
+                NSString *imgUrl = nil;
+                for (NSString *u in urlLists) { if ([u hasSuffix:@".jpeg"] || [u hasSuffix:@".jpg"] || [u hasSuffix:@".png"]) { imgUrl = u; break; } }
+                if (!imgUrl && urlLists.count > 0) imgUrl = urlLists[0];
+                NSDictionary *imgVideo = img[@"video"];
+                NSString *liveVideoUrl = nil;
+                if (imgVideo && [imgVideo isKindOfClass:[NSDictionary class]]) {
+                    NSDictionary *playAddr = imgVideo[@"play_addr"];
+                    if (playAddr && [playAddr isKindOfClass:[NSDictionary class]]) {
+                        NSArray *lvUrls = playAddr[@"url_list"];
+                        if ([lvUrls isKindOfClass:[NSArray class]] && lvUrls.count > 0) liveVideoUrl = lvUrls[0];
+                    }
+                }
+                if (liveVideoUrl.length > 0 && imgUrl.length > 0) {
+                    [videoList addObject:@{@"level": @"实况", @"url": liveVideoUrl}];
+                    [liveVideoURLs addObject:liveVideoUrl];
+                    [images addObject:imgUrl];
+                } else if (imgUrl.length > 0) {
+                    [images addObject:imgUrl];
+                }
+            }
+        }
+
+        NSArray *coverUrls = videoObj[@"cover"][@"url_list"];
+        if (!coverUrls) coverUrls = videoObj[@"origin_cover"][@"url_list"];
+        NSString *coverUrl = ([coverUrls isKindOfClass:[NSArray class]] && coverUrls.count > 0) ? coverUrls[0] : nil;
+        NSString *musicUrl = music[@"play_url"][@"uri"];
+        if (!musicUrl || ![musicUrl isKindOfClass:[NSString class]] || musicUrl.length == 0) { NSArray *mul = music[@"play_url"][@"url_list"]; if ([mul isKindOfClass:[NSArray class]] && mul.count > 0) musicUrl = mul[0]; }
+        NSString *primaryUrl = videoList.count > 0 ? videoList[0][@"url"] : @"";
+        if (!isImagePost) { result[@"cover"] = coverUrl ?: @""; result[@"pics"] = coverUrl ?: @""; }
+        result[@"music"] = musicUrl ?: @"";
+        result[@"music_url"] = musicUrl ?: @"";
+        result[@"url"] = isImagePost ? @"" : primaryUrl;
+        result[@"video"] = isImagePost ? @"" : primaryUrl;
+        result[@"video_url"] = isImagePost ? @"" : primaryUrl;
+        result[@"images"] = isImagePost ? images : @[];
+        result[@"img"] = @[];
+        result[@"live_videos"] = isImagePost ? liveVideoURLs : @[];
+        result[@"image_count"] = @(isImagePost ? images.count : 0);
+        result[@"batch_download"] = @(isImagePost && images.count > 1);
+        if (isImagePost) {
+            NSMutableArray *liveOnlyList = [NSMutableArray array];
+            for (id item in videoList) {
+                if ([item isKindOfClass:[NSDictionary class]] && [((NSDictionary *)item)[@"level"] containsString:@"实况"]) [liveOnlyList addObject:item];
+            }
+            result[@"video_list"] = liveOnlyList;
+        } else {
+            result[@"video_list"] = videoList;
+        }
+        result[@"title"] = awemeDetail[@"desc"] ?: @"";
+        result[@"author"] = author[@"nickname"] ?: @"";
+        if (((NSArray *)result[@"video_list"]).count == 0 && ((NSArray *)result[@"images"]).count == 0) return nil;
+        return result;
+    } @catch (NSException *e) {
+        NSLog(@"[DYYY] adaptTikHubDetail exception: %@", e);
+        return nil;
+    }
 }
 
 // 双API智能合并：调用辅助信息API，合并到主数据中

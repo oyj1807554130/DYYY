@@ -521,15 +521,12 @@
                        if (localData) {
                            [DYYYManager handleVideoData:localData];
                        } else {
-                           // 失败探针：Full版失败→降级本地解析
-                           [[NSNotificationCenter defaultCenter] postNotificationName:@"DYYYProbeNotification" object:nil userInfo:@{@"text": @"[接口4探针][主保存] Full版失败 → 已降级本地解析(1080p)"}];
+                           // Full版失败→降级本地解析
                            [DYYYManager localParseFromAwemeModel:capturedAwemeModel completion:^(NSDictionary *fallbackData) {
                                dispatch_async(dispatch_get_main_queue(), ^{
                                    if (fallbackData) {
                                        [DYYYManager handleVideoData:fallbackData];
                                    } else {
-                                       // 失败探针：降级也失败
-                                       [[NSNotificationCenter defaultCenter] postNotificationName:@"DYYYProbeNotification" object:nil userInfo:@{@"text": @"[接口4探针][主保存] 本地解析降级也失败"}];
                                        [DYYYUtils showToast:@"本地解析失败"];
                                    }
                                });
@@ -563,12 +560,15 @@
           [DYYYManager storeMetadataFromAwemeModel:capturedAwemeModel2];
           // 存储当前浏览的图片索引，用于接口保存实况照片时定位
           [DYYYManager shared].currentImageIndex = capturedImageIndex2;
-          if (apiKey2.length == 0) {
-              [DYYYUtils showToast:@"请先在设置页面填写接口2地址"];
-              return;
-          }
           if (capturedShareLink2.length == 0) {
               [DYYYUtils showToast:@"无法获取分享链接"];
+              return;
+          }
+          if (apiKey2.length == 0) {
+              // 未填接口2地址：内置TikHub国内直连（手动触发）
+              [DYYYManager requestTikHubDirect:capturedShareLink2];
+              AWELongPressPanelManager *panelManager = [%c(AWELongPressPanelManager) shareInstance];
+              [panelManager dismissWithAnimation:YES completion:nil];
               return;
           }
           [DYYYManager parseAndDownloadVideoWithShareLink:capturedShareLink2 apiKey:apiKey2];
@@ -639,7 +639,16 @@
                   if (localData) {
                       [DYYYManager handleVideoData:localData];
                   } else {
-                      [DYYYUtils showToast:@"接口4保存失败"];
+                      // Full版失败→降级本地解析（2.2-60）
+                      [DYYYManager localParseFromAwemeModel:capturedAwemeModelLP completion:^(NSDictionary *fallbackData) {
+                          dispatch_async(dispatch_get_main_queue(), ^{
+                              if (fallbackData) {
+                                  [DYYYManager handleVideoData:fallbackData];
+                              } else {
+                                  [DYYYUtils showToast:@"接口4保存失败"];
+                              }
+                          });
+                      }];
                   }
               });
           }];
@@ -1604,15 +1613,12 @@
                        if (localData) {
                            [DYYYManager handleVideoData:localData];
                        } else {
-                           // 失败探针：Full版失败→降级本地解析
-                           [[NSNotificationCenter defaultCenter] postNotificationName:@"DYYYProbeNotification" object:nil userInfo:@{@"text": @"[接口4探针][主保存] Full版失败 → 已降级本地解析(1080p)"}];
+                           // Full版失败→降级本地解析
                            [DYYYManager localParseFromAwemeModel:capturedAwemeModel completion:^(NSDictionary *fallbackData) {
                                dispatch_async(dispatch_get_main_queue(), ^{
                                    if (fallbackData) {
                                        [DYYYManager handleVideoData:fallbackData];
                                    } else {
-                                       // 失败探针：降级也失败
-                                       [[NSNotificationCenter defaultCenter] postNotificationName:@"DYYYProbeNotification" object:nil userInfo:@{@"text": @"[接口4探针][主保存] 本地解析降级也失败"}];
                                        [DYYYUtils showToast:@"本地解析失败"];
                                    }
                                });
@@ -1646,12 +1652,15 @@
           [DYYYManager storeMetadataFromAwemeModel:capturedAwemeModel2];
           // 存储当前浏览的图片索引，用于接口保存实况照片时定位
           [DYYYManager shared].currentImageIndex = capturedImageIndex2;
-          if (apiKey2.length == 0) {
-              [DYYYUtils showToast:@"请先在设置页面填写接口2地址"];
-              return;
-          }
           if (capturedShareLink2.length == 0) {
               [DYYYUtils showToast:@"无法获取分享链接"];
+              return;
+          }
+          if (apiKey2.length == 0) {
+              // 未填接口2地址：内置TikHub国内直连（手动触发）
+              [DYYYManager requestTikHubDirect:capturedShareLink2];
+              AWELongPressPanelManager *panelManager = [%c(AWELongPressPanelManager) shareInstance];
+              [panelManager dismissWithAnimation:YES completion:nil];
               return;
           }
           [DYYYManager parseAndDownloadVideoWithShareLink:capturedShareLink2 apiKey:apiKey2];
@@ -1723,7 +1732,16 @@
                   if (localData) {
                       [DYYYManager handleVideoData:localData];
                   } else {
-                      [DYYYUtils showToast:@"接口4保存失败"];
+                      // Full版失败→降级本地解析（2.2-60）
+                      [DYYYManager localParseFromAwemeModel:capturedAwemeModelLP completion:^(NSDictionary *fallbackData) {
+                          dispatch_async(dispatch_get_main_queue(), ^{
+                              if (fallbackData) {
+                                  [DYYYManager handleVideoData:fallbackData];
+                              } else {
+                                  [DYYYUtils showToast:@"接口4保存失败"];
+                              }
+                          });
+                      }];
                   }
               });
           }];
