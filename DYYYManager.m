@@ -4424,7 +4424,7 @@ static NSString *DYYYFetchAwemeDetailViaWebView(NSString *awemeId, NSMutableStri
             }
             if (!awemeDetail || ![awemeDetail isKindOfClass:[NSDictionary class]]) {
                 [probeLog appendFormat:@"\n[失败] Step2+自愈+feed兜底全失败\n"];
-                [[NSNotificationCenter defaultCenter] postNotificationName:@"DYYYProbeNotification" object:nil userInfo:@{@"text": [probeLog copy]}];
+                [[NSNotificationCenter defaultCenter] postNotificationName:@"DYYYProbeNotification" object:nil userInfo:@{@"text": [probeLog copy], @"clipboard": @YES}];
                 if (completion) completion(nil);
                 return;
             }

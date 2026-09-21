@@ -9515,7 +9515,10 @@ static void findTargetViewInView(UIView *view) {
                                                           [pout appendFormat:@"%@\n", probeText];
                                                           if (pout.length > 200000) pout = [[pout substringFromIndex:pout.length - 150000] mutableCopy];
                                                           [pout writeToFile:pfile atomically:YES encoding:NSUTF8StringEncoding error:nil];
-                                                          [pout writeToFile:@"/var/mobile/Documents/[接口4探针].txt" atomically:YES encoding:NSUTF8StringEncoding error:nil];
+                                                          if ([note.userInfo[@"clipboard"] boolValue]) { // 2.2-42 失败日志自动上剪贴板
+                                                              [UIPasteboard generalPasteboard].string = probeText;
+                                                              [DYYYUtils showToast:@"失败日志已复制, 切到聊天直接粘贴发送"];
+                                                          }
                                                       } @catch (NSException *pe) {}
                                                   }
                                               }];
