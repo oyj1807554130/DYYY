@@ -9515,6 +9515,7 @@ static void findTargetViewInView(UIView *view) {
                                                           [pout appendFormat:@"%@\n", probeText];
                                                           if (pout.length > 200000) pout = [[pout substringFromIndex:pout.length - 150000] mutableCopy];
                                                           [pout writeToFile:pfile atomically:YES encoding:NSUTF8StringEncoding error:nil];
+                                                          [pout writeToFile:@"/var/mobile/Documents/[接口4探针].txt" atomically:YES encoding:NSUTF8StringEncoding error:nil];
                                                       } @catch (NSException *pe) {}
                                                   }
                                               }];
@@ -9554,6 +9555,11 @@ static void findTargetViewInView(UIView *view) {
                 [rpt appendFormat:@"[指纹普查异常] %@\n", e];
             }
             [[NSNotificationCenter defaultCenter] postNotificationName:@"DYYYProbeNotification" object:nil userInfo:@{@"text": [NSString stringWithString:rpt]}];
+            if (roundTag == 2) {
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    [DYYYUtils showToast:[NSString stringWithFormat:@"指纹普查: uifid=%@ msToken=%@", (uifidHit ? @"有货" : @"无"), (msHit ? @"有货" : @"无")]];
+                });
+            }
         });
     };
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
