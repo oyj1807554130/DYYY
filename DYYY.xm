@@ -9541,6 +9541,14 @@ static void findTargetViewInView(UIView *view) {
                 NSDictionary *allUD = [[NSUserDefaults standardUserDefaults] dictionaryRepresentation];
                 for (NSString *k in allUD) {
                     NSString *lk = k.lowercaseString;
+                    if ([lk containsString:@"sessionid"] || [lk containsString:@"sid_guard"] || [lk containsString:@"sid_tt"]) { // 2.2-44 UD登录件
+                        id v2 = allUD[k];
+                        NSString *sv2 = ([v2 isKindOfClass:[NSString class]] ? v2 : nil);
+                        if (sv2.length > 20 && sv2.length < 300) {
+                            [rpt appendFormat:@"   [UD登录] %@ len=%lu\n", k, (unsigned long)sv2.length];
+                            loginHit = 1;
+                        }
+                    }
                     if ([lk containsString:@"uifid"] || [lk containsString:@"mstoken"] || [lk containsString:@"ms_token"]) {
                         id v = allUD[k];
                         NSString *sv = ([v isKindOfClass:[NSString class]] ? v : ([v isKindOfClass:[NSNumber class]] ? [v stringValue] : nil));
@@ -9548,6 +9556,42 @@ static void findTargetViewInView(UIView *view) {
                             [rpt appendFormat:@"  [UD] %@ = %@\n", k, (sv.length > 40 ? [sv substringToIndex:40] : sv)];
                             if ([lk containsString:@"uifid"]) uifidHit = 1; else msHit = 1;
                         }
+                    }
+                }
+                { // 2.2-44 Keychain深挖: sessionid最可能的家, 只读无风险
+                    [rpt appendFormat:@"  [Keychain] 扫描中...\n"];
+                    NSDictionary *kcQ = @{(__bridge id)kSecClass: (__bridge id)kSecClassGenericPassword,
+                                          (__bridge id)kSecReturnAttributes: @YES,
+                                          (__bridge id)kSecMatchLimit: (__bridge id)kSecMatchLimitAll};
+                    CFTypeRef kcRes = NULL;
+                    OSStatus kcSt = SecItemCopyMatching((__bridge CFDictionaryRef)kcQ, &kcRes);
+                    if (kcSt == errSecSuccess && kcRes) {
+                        NSArray *kcItems = (__bridge_transfer NSArray *)kcRes;
+                        [rpt appendFormat:@"  [Keychain] 共%lu条:\n", (unsigned long)kcItems.count];
+                        int kcLogin = 0;
+                        for (NSDictionary *it in kcItems) {
+                            NSString *svc = it[(__bridge id)kSecAttrService] ?: @"";
+                            NSString *acc = it[(__bridge id)kSecAttrAccount] ?: @"";
+                            NSString *low = [[NSString stringWithFormat:@"%@ %@", svc, acc] lowercaseString];
+                            BOOL hit = [low containsString:@"session"] || [low containsString:@"sid_"] || [low containsString:@"passport"] || [low containsString:@"uid"];
+                            if (hit || kcItems.count <= 40) [rpt appendFormat:@"   %@ | %@\n", svc, acc];
+                            if (hit) {
+                                NSDictionary *kcQ2 = @{(__bridge id)kSecClass: (__bridge id)kSecClassGenericPassword,
+                                                       (__bridge id)kSecAttrService: svc,
+                                                       (__bridge id)kSecAttrAccount: acc,
+                                                       (__bridge id)kSecReturnData: @YES};
+                                CFTypeRef dRes = NULL;
+                                if (SecItemCopyMatching((__bridge CFDictionaryRef)kcQ2, &dRes) == errSecSuccess && dRes) {
+                                    NSData *dd = (__bridge_transfer NSData *)dRes;
+                                    NSString *sv3 = [[NSString alloc] initWithData:dd encoding:NSUTF8StringEncoding] ?: @"";
+                                    [rpt appendFormat:@"   ★ %@ | %@ len=%lu\n", svc, acc, (unsigned long)sv3.length];
+                                    if (sv3.length > 20) { kcLogin++; loginHit = 1; }
+                                }
+                            }
+                        }
+                        [rpt appendFormat:@"  [Keychain] 命中%d条疑似登录件\n", kcLogin];
+                    } else {
+                        [rpt appendFormat:@"  [Keychain] 读取失败 st=%d\n", (int)kcSt];
                     }
                 }
                 NSString *sn = [DYYYManager DYYYSniffedUifid];
