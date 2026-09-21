@@ -14,13 +14,6 @@
 #import "DYYYToast.h"
 #import "DYYYUtils.h"
 
-// MARK: - API 类型定义
-typedef NS_ENUM(NSInteger, DYYYAPIType) {
-    DYYYAPITypeTikHub,     // TikHub API
-    DYYYAPITypeQSY,        // qsy.ink (备用)
-    DYYYAPITypeCustom       // 自定义API
-};
-
 @interface DYYYManager () {
     AVAssetExportSession *session;
     AVURLAsset *asset;
@@ -28,13 +21,6 @@ typedef NS_ENUM(NSInteger, DYYYAPIType) {
 @end
 
 @interface DYYYManager (APIAdapter)
-+ (DYYYAPIType)detectAPIType:(NSString *)apiKey;
-+ (NSDictionary *)adaptAPIResponse:(NSDictionary *)original fromType:(DYYYAPIType)apiType;
-+ (NSDictionary *)adaptQSYResponse:(NSDictionary *)qsyData;
-+ (void)requestWithAPIType:(DYYYAPIType)apiType
-                         url:(NSString *)apiUrl
-                         key:(NSString *)apiKey
-                  completion:(void (^)(NSDictionary *data, NSError *error))completion;
 + (void)requestTikHubDirect:(NSString *)shareLink;
 + (NSDictionary *)adaptTikHubDetailToDYYY:(NSDictionary *)awemeDetail;
 @end
@@ -75,74 +61,6 @@ static NSString *_dyyySniffedUifid = nil;
 + (NSString *)DYYYSniffedUifid { return _dyyySniffedUifid; }
 
 #pragma mark - API 适配器实现
-
-+ (DYYYAPIType)detectAPIType:(NSString *)apiKey {
-    if ([apiKey rangeOfString:@"tikhub.io"].location != NSNotFound || 
-        [apiKey rangeOfString:@"tikhub"].location != NSNotFound) {
-        return DYYYAPITypeTikHub;
-    }
-    if ([apiKey rangeOfString:@"qsy.ink"].location != NSNotFound) {
-        return DYYYAPITypeQSY;
-    }
-    return DYYYAPITypeCustom;
-}
-
-+ (NSDictionary *)adaptAPIResponse:(NSDictionary *)original fromType:(DYYYAPIType)apiType {
-    if (!original) return nil;
-    switch (apiType) {
-        case DYYYAPITypeTikHub:
-            return [self adaptTikHubResponse:original];
-        case DYYYAPITypeQSY:
-            return [self adaptQSYResponse:original];
-        default:
-            return original; // 自定义直接用
-    }
-}
-
-
-
-+ (NSDictionary *)adaptQSYResponse:(NSDictionary *)qsyData {
-    // qsy.ink 格式已经兼容，直接透传
-    return qsyData;
-}
-
-+ (void)requestWithAPIType:(DYYYAPIType)apiType
-                         url:(NSString *)apiUrl
-                         key:(NSString *)apiKey
-                  completion:(void (^)(NSDictionary *data, NSError *error))completion {
-    NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:apiUrl]];
-    request.timeoutInterval = 30;
-    
-    // TikHub 需要 Authorization header
-    if (apiType == DYYYAPITypeTikHub) {
-        NSString *token = apiKey;
-        // 如果 apiKey 是完整URL，提取 Token（格式可能是 tikhub://{token} 或直接传 token）
-        if ([apiKey rangeOfString:@"http"].location != NSNotFound) {
-            // 从URL参数里提取 token？或者 token 是单独传的
-            // 暂时假设 apiKey 传的是 token 字符串，或者已经包含 token
-            NSLog(@"[DYYY-API] TikHub API 模式，请确保传的是 Bearer Token");
-        } else {
-            [request setValue:[NSString stringWithFormat:@"Bearer %@", apiKey] forHTTPHeaderField:@"Authorization"];
-        }
-    }
-    
-    NSURLSession *session = [NSURLSession sharedSession];
-    NSURLSessionDataTask *dataTask = [session dataTaskWithRequest:request
-                                                completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
-        if (error) {
-            completion(nil, error);
-            return;
-        }
-        NSError *jsonError;
-        NSDictionary *json = [NSJSONSerialization JSONObjectWithData:data options:0 error:&jsonError];
-        if (jsonError) {
-            completion(nil, jsonError);
-            return;
-        }
-        completion(json, nil);
-    }];
-    [dataTask resume];
-}
 
 #pragma mark - 作者元数据 Caption 功能
 
