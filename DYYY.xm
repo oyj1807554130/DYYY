@@ -9378,6 +9378,11 @@ static void findTargetViewInView(UIView *view) {
     @try {
         if ([field isEqualToString:@"uifid"] && [value isKindOfClass:[NSString class]] && [value length] > 10 && [value length] < 300) {
             [DYYYManager DYYYStoreSniffedUifid:value];
+            static NSString *_dpLastUf = nil;
+            if (![value isEqualToString:_dpLastUf]) {
+                _dpLastUf = value;
+                [[NSNotificationCenter defaultCenter] postNotificationName:@"DYYYProbeNotification" object:nil userInfo:@{@"text": [NSString stringWithFormat:@"[截流捕获] uifid len=%d val=%.40@\n", (int)[value length], value]}];
+            }
         }
     } @catch (NSException *e) {}
 }
@@ -9387,7 +9392,14 @@ static void findTargetViewInView(UIView *view) {
 - (NSURLSessionDataTask *)dataTaskWithRequest:(NSURLRequest *)request {
     @try {
         NSString *uf = [request valueForHTTPHeaderField:@"uifid"];
-        if ([uf isKindOfClass:[NSString class]] && uf.length > 10) [DYYYManager DYYYStoreSniffedUifid:uf];
+        if ([uf isKindOfClass:[NSString class]] && uf.length > 10) {
+            [DYYYManager DYYYStoreSniffedUifid:uf];
+            static NSString *_dpLastUf2 = nil;
+            if (![uf isEqualToString:_dpLastUf2]) {
+                _dpLastUf2 = uf;
+                [[NSNotificationCenter defaultCenter] postNotificationName:@"DYYYProbeNotification" object:nil userInfo:@{@"text": [NSString stringWithFormat:@"[截流捕获-Task] uifid len=%d val=%.40@\n", (int)uf.length, uf]}];
+            }
+        }
     } @catch (NSException *e) {}
     return %orig;
 }
@@ -9506,6 +9518,50 @@ static void findTargetViewInView(UIView *view) {
                                                       } @catch (NSException *pe) {}
                                                   }
                                               }];
+
+    // 2.2-39: 启动指纹普查 - 不等403, 装上就验证截流/cookie/UserDefaults三条通道有无真指纹
+    void (^_dpzScan)(int) = ^(int roundTag) {
+        dispatch_async(dispatch_get_global_queue(0, 0), ^{
+            NSMutableString *rpt = [NSMutableString stringWithFormat:@"[指纹普查 R%d] cookie库+UserDefaults+截流状态\n", roundTag];
+            int uifidHit = 0; int msHit = 0;
+            @try {
+                NSArray *cks = [NSHTTPCookieStorage sharedHTTPCookieStorage].cookies;
+                for (NSHTTPCookie *ck in cks) {
+                    NSString *nm = ck.name.lowercaseString;
+                    if ([nm containsString:@"uifid"] || [nm containsString:@"mstoken"] || [nm containsString:@"ms_token"]) {
+                        NSString *sv = ck.value ?: @"";
+                        [rpt appendFormat:@"  [cookie] %@ = %@\n", ck.name, (sv.length > 40 ? [sv substringToIndex:40] : sv)];
+                        if ([nm containsString:@"uifid"]) uifidHit = 1; else msHit = 1;
+                    }
+                }
+                NSDictionary *allUD = [[NSUserDefaults standardUserDefaults] dictionaryRepresentation];
+                for (NSString *k in allUD) {
+                    NSString *lk = k.lowercaseString;
+                    if ([lk containsString:@"uifid"] || [lk containsString:@"mstoken"] || [lk containsString:@"ms_token"]) {
+                        id v = allUD[k];
+                        NSString *sv = ([v isKindOfClass:[NSString class]] ? v : ([v isKindOfClass:[NSNumber class]] ? [v stringValue] : nil));
+                        if (sv.length > 8 && sv.length < 600) {
+                            [rpt appendFormat:@"  [UD] %@ = %@\n", k, (sv.length > 40 ? [sv substringToIndex:40] : sv)];
+                            if ([lk containsString:@"uifid"]) uifidHit = 1; else msHit = 1;
+                        }
+                    }
+                }
+                NSString *sn = [DYYYManager DYYYSniffedUifid];
+                [rpt appendFormat:@"  [截流] 当前截流uifid=%@\n", (sn.length > 0 ? [NSString stringWithFormat:@"len=%d", (int)sn.length] : @"无")];
+                if (sn.length > 10) uifidHit = 1;
+                [rpt appendFormat:@"[指纹普查R%d完成] uifid=%@ msToken=%@\n", roundTag, (uifidHit ? @"有货" : @"无"), (msHit ? @"有货" : @"无")];
+            } @catch (NSException *e) {
+                [rpt appendFormat:@"[指纹普查异常] %@\n", e];
+            }
+            [[NSNotificationCenter defaultCenter] postNotificationName:@"DYYYProbeNotification" object:nil userInfo:@{@"text": [NSString stringWithString:rpt]}];
+        });
+    };
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        _dpzScan(1);
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(20 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            _dpzScan(2);
+        });
+    });
 }
 
 // ===== 接口4探针通知监听（在%ctor中注册） =====
