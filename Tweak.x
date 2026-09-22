@@ -175,7 +175,6 @@ static NSString *dy4kLastStreamAid = nil;
 static double dy4kLastStreamTime = 0;
 static long dy4kStreamSeen = 0;  // v2.4: 拦到的合法拉流URL计数
 static long dy4kStreamHit = 0;   // v2.4: 拉流反查映射命中计数
-static long dy4kFeedHit = 0;     // v2.5: feed兜底成功计数
 static long dy4kWebHit = 0;      // v2.7: Step2 Web detail首发成功计数
 static long dy4kHealHit = 0;     // v2.7: 自愈重打成功计数
 // v2.9: 播放页交互VC viewDidAppear锚定(DYYY同款权威信号: AWEPlayInteractionViewController.awemeModel就是当前视频)
@@ -939,72 +938,12 @@ static void DY4KBuildVideo(NSString *aid, NSDictionary *item, void (^done)(BOOL 
     dispatch_async(dispatch_get_main_queue(), ^{ if (done) done(YES); });
 }
 
-// v2.5: feed兜底(对齐DYYY 2.2-30 Step2.7) - aweme.snssdk.com v1/feed 游客态免签名, 带App登录态Cookie预期全档
-static void DY4KFetchViaFeed(NSString *aid, void (^done)(BOOL ok)) {
-    if (aid.length < 10) { if (done) done(NO); return; }
-    NSString *fu = [NSString stringWithFormat:@"https://aweme.snssdk.com/aweme/v1/feed/?aweme_id=%@&version_code=26.0.4&app_name=aweme&channel=App%%20Store&device_platform=iphone&device_type=iPhone15,3&os_version=18.0&aid=1128", aid];
-    NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:fu]];
-    req.timeoutInterval = 8;
-    [req setValue:@"Aweme/260400 CFNetwork/1498 Darwin/23.0.0" forHTTPHeaderField:@"User-Agent"];
-    NSMutableString *ck = [NSMutableString string];
-    for (NSHTTPCookie *c in [[NSHTTPCookieStorage sharedHTTPCookieStorage] cookies]) {
-        if ([c.domain containsString:@"douyin"]) [ck appendFormat:@"%@=%@; ", c.name, c.value];
-    }
-    if (ck.length > 0) [req setValue:ck forHTTPHeaderField:@"Cookie"];
-    NSURLSessionDataTask *tsk = [[NSURLSession sharedSession] dataTaskWithRequest:req completionHandler:^(NSData *d, NSURLResponse *r, NSError *e) {
-        BOOL ok = NO;
-        @try {
-            long scode = [r isKindOfClass:[NSHTTPURLResponse class]] ? ((NSHTTPURLResponse *)r).statusCode : 0;
-            if (e) {
-                @synchronized (dy4kMonNames) { dy4kLastErr = [NSString stringWithFormat:@"feed网络: %@(%ld)", e.localizedDescription, (long)e.code]; }
-            } else if (d.length > 1000 && scode == 200) {
-                id json = [NSJSONSerialization JSONObjectWithData:d options:0 error:nil];
-                // v2.7防串台(对齐DYYY 2.2-32): 逐条校验aweme_id, 游客态降级推荐流时严禁取别人的视频
-                id match = nil;
-                if ([json isKindOfClass:[NSDictionary class]]) {
-                    NSArray *list = json[@"aweme_list"];
-                    if ([list isKindOfClass:[NSArray class]]) {
-                        for (NSDictionary *fc in list) {
-                            if (![fc isKindOfClass:[NSDictionary class]]) continue;
-                            NSString *fid = [fc[@"aweme_id"] isKindOfClass:[NSString class]] ? fc[@"aweme_id"] : [NSString stringWithFormat:@"%@", fc[@"aweme_id"] ?: @""];
-                            if ([fid isEqualToString:aid]) { match = fc; break; }
-                        }
-                    }
-                    if (!match && [json[@"aweme_detail"] isKindOfClass:[NSDictionary class]]) {
-                        NSDictionary *fd1 = json[@"aweme_detail"];
-                        NSString *did1 = [fd1[@"aweme_id"] isKindOfClass:[NSString class]] ? fd1[@"aweme_id"] : [NSString stringWithFormat:@"%@", fd1[@"aweme_id"] ?: @""];
-                        if ([did1 isEqualToString:aid]) match = fd1;
-                    }
-                }
-                if (match) {
-                    DY4KBuildVideo(aid, match, ^(BOOL bok) {
-                        if (bok) dy4kFeedHit++;
-                        dispatch_async(dispatch_get_main_queue(), ^{ if (done) done(bok); });
-                    });
-                    return;
-                } else {
-                    @synchronized (dy4kMonNames) { dy4kLastErr = @"feed无匹配ID(疑似推荐流降级)"; }
-                }
-            } else {
-                @synchronized (dy4kMonNames) { dy4kLastErr = [NSString stringWithFormat:@"feed HTTP%ld body=%lu", scode, (unsigned long)d.length]; }
-            }
-        } @catch (NSException *ex) {
-            @synchronized (dy4kMonNames) { dy4kLastErr = [NSString stringWithFormat:@"feed异常: %@", ex.reason]; }
-        }
-        dispatch_async(dispatch_get_main_queue(), ^{ if (done) done(ok); });
-    }];
-    [tsk resume];
-}
-
-// v2.7: 对齐DYYY 2.2-33三级链: Step2 Web detail首发(保4K) → 自愈重打(冷会话配方) → feed兜底(保返回) → 全灭落缓存列表
+// v2.10: 对齐DYYY 2.2-69删feed兜底(App端v1/feed档位封顶1080P永无4K, 游客态整块移除): Step2 Web detail首发 → 自愈重打 → 失败报错
 static void DY4KFetchAll(NSString *aid, void (^done)(BOOL ok, NSString *src)) {
     DY4KFetchViaWeb(aid, ^(BOOL ok1) {
         if (ok1) { if (done) done(YES, @"web"); return; }
         DY4KFetchHeal(aid, ^(BOOL ok2) {
-            if (ok2) { if (done) done(YES, @"heal"); return; }
-            DY4KFetchViaFeed(aid, ^(BOOL ok3) {
-                if (done) done(ok3, ok3 ? @"feed" : nil);
-            });
+            if (done) done(ok2, ok2 ? @"heal" : nil);
         });
     });
 }
@@ -1017,7 +956,6 @@ static void DY4KShowDiag(void) {
     [msg appendFormat:@"\n码率模型:%ld", dy4kBRHit];
     [msg appendFormat:@"\nswizzle:%d", dy4kSwizzled];
     [msg appendFormat:@"\n挖aid:%ld 页面:%ld(hook:%ld)", dy4kDigHit, dy4kPageHit, dy4kPageHooked];
-    [msg appendFormat:@"\nfeed兜底:%ld", dy4kFeedHit];
     [msg appendFormat:@"\nStep2:%ld 自愈:%ld", dy4kWebHit, dy4kHealHit];
     NSString *lastErr = nil;
     @synchronized (dy4kMonNames) { lastErr = dy4kLastErr; }
@@ -1165,7 +1103,7 @@ static void DY4KShowMenuLegacy(void) {
         NSMutableString *dg = [NSMutableString string];
         [dg appendString:@"DY4K v1.5 已运行\n"];
         [dg appendFormat:@"通知:%ld Monitor:%ld 大响应:%ld\n", dy4kNotifCount, dy4kMonitorHit, dy4kBigHit];
-        [dg appendFormat:@"挖aid:%ld 页面:%ld Step2:%ld 自愈:%ld feed:%ld swizzle:%d\n", dy4kDigHit, dy4kPageHit, dy4kWebHit, dy4kHealHit, dy4kFeedHit, dy4kSwizzled];
+        [dg appendFormat:@"挖aid:%ld 页面:%ld Step2:%ld 自愈:%ld swizzle:%d\n", dy4kDigHit, dy4kPageHit, dy4kWebHit, dy4kHealHit, dy4kSwizzled];
         NSString *err = nil;
         @synchronized (dy4kMonNames) { err = dy4kLastErr; }
         if (err.length > 0) [dg appendFormat:@"错误:%@\n", err];
