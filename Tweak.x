@@ -658,6 +658,8 @@ static NSString *DY4KDigCurrentAid(NSString **outDesc, NSString **outAuthor, BOO
         if (!quiet) { @synchronized (dy4kMonNames) { dy4kLastErr = @"无TopVC"; } }
         return nil;
     }
+    // v2.8: 两轮BFS——第一轮只挖可见VC(isViewLoaded且view.window!=nil, 预加载页不在window层级被排除), 第二轮不过滤兜底
+    for (int dgRound = 0; dgRound < 2; dgRound++) {
     NSMutableArray<UIViewController *> *queue = [NSMutableArray arrayWithObject:top];
     int steps = 0;
     while (queue.count > 0 && steps < 64) {
@@ -665,6 +667,7 @@ static NSString *DY4KDigCurrentAid(NSString **outDesc, NSString **outAuthor, BOO
         UIViewController *vc = queue.firstObject;
         [queue removeObjectAtIndex:0];
         if (!vc) continue;
+        if (dgRound == 0 && !(vc.isViewLoaded && vc.view.window != nil)) continue; // v2.8: 不可见页跳过(预加载页)
         // v1.5: 不筛类名(新版抖音类名可能变), 对每个VC无差别尝试KVC挖model
         for (NSString *mk in @[@"model", @"awemeModel", @"currentAwemeModel", @"awemeDetailModel"]) {
             @try {
@@ -689,6 +692,7 @@ static NSString *DY4KDigCurrentAid(NSString **outDesc, NSString **outAuthor, BOO
         [queue addObjectsFromArray:vc.childViewControllers];
         if (vc.presentedViewController) [queue addObject:vc.presentedViewController];
     }
+    } // v2.8: 两轮BFS结束
     if (!quiet) { @synchronized (dy4kMonNames) { dy4kLastErr = @"未找到播放页VC"; } }
     return nil;
 }
@@ -1192,31 +1196,34 @@ static void DY4KShowMenu(void) {
     NSString *dgDesc = nil, *dgAuthor = nil;
     NSString *srcTag = nil; // v2.4: 识别路径标记
     NSString *aid = nil;
-    // v2.3: 拉流事实最优先(真正在播的视频才会拉流, 10分钟内有效)
-    NSString *sa = nil;
-    double st = 0;
-    @synchronized (dy4kMonNames) { sa = dy4kLastStreamAid; st = dy4kLastStreamTime; }
-    if (sa.length >= 10 && [[NSDate date] timeIntervalSince1970] - st < 600) {
-        aid = sa;
-        srcTag = @"拉流";
-        @synchronized (dy4kCache) {
-            DY4KVideo *sv = dy4kCache[sa];
-            if (sv) { dgDesc = sv.desc; dgAuthor = sv.author; }
-        }
-    }
-    // v2.2: 次选用码率回调记录的"正在播放"aid(60秒内), BFS挖VC model可能命中预加载页
+    // v2.8修复"下载成其他视频": ①码率回调最优先(setBitrateModels只有真实在播才触发, 预加载页不会回调; 窗口60→150秒覆盖暂停看评论)
     NSString *pa = nil, *pd = nil, *pau = nil;
     double pt = 0;
     @synchronized (dy4kMonNames) { pa = dy4kPlayingAid; pd = dy4kPlayingDesc; pau = dy4kPlayingAuthor; pt = dy4kPlayingTime; }
-    if (pa.length >= 10 && ![pa hasPrefix:@"__"] && [[NSDate date] timeIntervalSince1970] - pt < 60) {
+    if (pa.length >= 10 && ![pa hasPrefix:@"__"] && [[NSDate date] timeIntervalSince1970] - pt < 150) {
         aid = pa;
         dgDesc = pd;
         dgAuthor = pau;
         srcTag = @"码率";
     }
+    // v2.8: ②可见VC挖当前model(DY4KDigCurrentAid两轮BFS: 第一轮只挖可见页, 预加载页view.window为nil被排除)
     if (aid.length == 0) {
         aid = DY4KDigCurrentAid(&dgDesc, &dgAuthor, NO);
         if (aid.length > 0) srcTag = @"界面";
+    }
+    // v2.8: ③拉流降为兜底(根因: 预加载下个视频也拉流且时间戳反超当前视频, v2.3把拉流放最优先导致"下载成其他视频")
+    if (aid.length == 0) {
+        NSString *sa = nil;
+        double st = 0;
+        @synchronized (dy4kMonNames) { sa = dy4kLastStreamAid; st = dy4kLastStreamTime; }
+        if (sa.length >= 10 && [[NSDate date] timeIntervalSince1970] - st < 300) {
+            aid = sa;
+            srcTag = @"拉流";
+            @synchronized (dy4kCache) {
+                DY4KVideo *sv = dy4kCache[sa];
+                if (sv) { dgDesc = sv.desc; dgAuthor = sv.author; }
+            }
+        }
     }
     // v2.4: 全链(拉流/码率/BFS)都没识别到 → 不再静默赌最近缓存, 让用户从缓存列表自己挑
     if (aid.length == 0) {
