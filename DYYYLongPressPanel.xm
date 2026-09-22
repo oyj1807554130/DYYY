@@ -393,20 +393,9 @@
           [DYYYManager shared].currentImageIndex = capturedImageIndex;
           BOOL isImg1 = (capturedAwemeModel.awemeType == 68 || capturedAwemeModel.albumImages.count > 0);
           if (isImg1) {
-              // 2.2-75 图集改走接口4的JS规则：先Step2拿web原图，成功走handleVideoData（与接口4同大小），失败降级原内存菜单
+              // 图集：弹出选择菜单
               AWELongPressPanelManager *pm1 = [%c(AWELongPressPanelManager) shareInstance];
-              [pm1 dismissWithAnimation:YES completion:nil];
-              [DYYYUtils showToast:@"正在解析图片..."];
-              [DYYYManager localParseFullFromAwemeModel:capturedAwemeModel completion:^(NSDictionary *localData) {
-                  dispatch_async(dispatch_get_main_queue(), ^{
-                      NSArray *webImages75 = localData[@"images"];
-                      BOOL webHasImages75 = [webImages75 isKindOfClass:[NSArray class]] && webImages75.count > 0;
-                      if (localData && webHasImages75) {
-                          [DYYYUtils showToast:@"已获取web原图"];
-                          [DYYYManager handleVideoData:localData];
-                      } else {
-                          // Step2失败/无图集数据→降级原内存图集菜单
-                          [DYYYUtils showToast:@"web解析失败，已用本地图"];
+              [pm1 dismissWithAnimation:YES completion:^{
                   AWEUserActionSheetView *imgSheet1 = [[NSClassFromString(@"AWEUserActionSheetView") alloc] init];
                   NSMutableArray *imgActs1 = [NSMutableArray array];
                   AWEImageAlbumImageModel *curI1ForTitle = nil;
@@ -522,9 +511,7 @@
                   }
                   [imgSheet1 setActions:imgActs1];
                   [imgSheet1 show];
-                      }
-                  });
-              } tikHubFallback:NO];
+              }];
            } else {
                AWELongPressPanelManager *panelManager = [%c(AWELongPressPanelManager) shareInstance];
                [panelManager dismissWithAnimation:YES completion:nil];
@@ -1498,20 +1485,9 @@
           [DYYYManager shared].currentImageIndex = capturedImageIndex;
           BOOL isImg1 = (capturedAwemeModel.awemeType == 68 || capturedAwemeModel.albumImages.count > 0);
           if (isImg1) {
-              // 2.2-75 图集改走接口4的JS规则：先Step2拿web原图，成功走handleVideoData（与接口4同大小），失败降级原内存菜单
+              // 图集：弹出选择菜单
               AWELongPressPanelManager *pm1 = [%c(AWELongPressPanelManager) shareInstance];
-              [pm1 dismissWithAnimation:YES completion:nil];
-              [DYYYUtils showToast:@"正在解析图片..."];
-              [DYYYManager localParseFullFromAwemeModel:capturedAwemeModel completion:^(NSDictionary *localData) {
-                  dispatch_async(dispatch_get_main_queue(), ^{
-                      NSArray *webImages75 = localData[@"images"];
-                      BOOL webHasImages75 = [webImages75 isKindOfClass:[NSArray class]] && webImages75.count > 0;
-                      if (localData && webHasImages75) {
-                          [DYYYUtils showToast:@"已获取web原图"];
-                          [DYYYManager handleVideoData:localData];
-                      } else {
-                          // Step2失败/无图集数据→降级原内存图集菜单
-                          [DYYYUtils showToast:@"web解析失败，已用本地图"];
+              [pm1 dismissWithAnimation:YES completion:^{
                   AWEUserActionSheetView *imgSheet1 = [[NSClassFromString(@"AWEUserActionSheetView") alloc] init];
                   NSMutableArray *imgActs1 = [NSMutableArray array];
                   AWEImageAlbumImageModel *curI1ForTitle = nil;
@@ -1627,9 +1603,7 @@
                   }
                   [imgSheet1 setActions:imgActs1];
                   [imgSheet1 show];
-                      }
-                  });
-              } tikHubFallback:NO];
+              }];
            } else {
                AWELongPressPanelManager *panelManager = [%c(AWELongPressPanelManager) shareInstance];
                [panelManager dismissWithAnimation:YES completion:nil];
