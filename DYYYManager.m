@@ -4037,87 +4037,21 @@ static NSString *DYYYFetchAwemeDetailViaWebView(NSString *awemeId, NSMutableStri
         [apiTask resume];
         dispatch_semaphore_wait(apiSem, dispatch_time(DISPATCH_TIME_NOW, 15 * NSEC_PER_SEC));
 
-        // ===== 2.2-65 TikHub 最终兜底（仅主链全失败后启用，与feed游客态并行，结果合并一起出来） =====
-        __block NSDictionary *thResult = nil;
-        dispatch_semaphore_t thSem = dispatch_semaphore_create(0);
-
         if (!awemeDetail || ![awemeDetail isKindOfClass:[NSDictionary class]]) {
-            // 2.2-67: TikHub兜底仅接口4按钮启用（tikHubFallback:YES）；本地解析按钮不消耗额度
+            // 2.2-69: feed兜底已移除（App端档位封顶1080P无4K）；接口4走TikHub最终兜底（完整画质），本地接口1直接本地降级零额度
             if (allowTikHub) {
-                dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
-                    thResult = [self _dyyySyncTikHubByAwemeId:awemeId];
-                    dispatch_semaphore_signal(thSem);
-                });
-            }
-            // ===== 2.2-30 feed兜底: App端v1/feed游客态免签名(不走Argus), WebAPI全灭时的稳定底层 =====
-            BOOL feedRescued = NO;
-            if (!awemeDetail || ![awemeDetail isKindOfClass:[NSDictionary class]]) {
-                [probeLog appendFormat:@"\n[Step2.8 feed兜底] aweme.snssdk.com v1/feed 游客态\n"];
-                NSString *feedURL = [NSString stringWithFormat:@"https://aweme.snssdk.com/aweme/v1/feed/?aweme_id=%@&version_code=26.0.4&app_name=aweme&channel=App%%20Store&device_platform=iphone&device_type=iPhone15,3&os_version=18.0&aid=1128", awemeId];
-                NSMutableURLRequest *feedReq = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:feedURL]];
-                feedReq.timeoutInterval = 8;
-                [feedReq setValue:@"Aweme/260400 CFNetwork/1498 Darwin/23.0.0" forHTTPHeaderField:@"User-Agent"];
-                // 2.2-68: feed兜底去游客态，改用登录态Cookie（Step1构建：存档登录Cookie优先+ttwid白名单）
-                [feedReq setValue:fullCookieStr forHTTPHeaderField:@"Cookie"];
-                __block NSData *feedData = nil;
-                __block NSInteger feedStatus = 0;
-                dispatch_semaphore_t feedSem = dispatch_semaphore_create(0);
-                NSURLSessionDataTask *feedTask = [[NSURLSession sharedSession] dataTaskWithRequest:feedReq completionHandler:^(NSData *fd, NSURLResponse *fr, NSError *fe) {
-                    if ([fr isKindOfClass:[NSHTTPURLResponse class]]) feedStatus = [(NSHTTPURLResponse *)fr statusCode];
-                    feedData = fd;
-                    dispatch_semaphore_signal(feedSem);
-                }];
-                [feedTask resume];
-                dispatch_semaphore_wait(feedSem, dispatch_time(DISPATCH_TIME_NOW, 8 * NSEC_PER_SEC));
-                [probeLog appendFormat:@"feed响应: HTTP %ld body=%lu\n", (long)feedStatus, (unsigned long)feedData.length];
-                if (feedData.length > 1000) {
-                    @try {
-                        id fjson = [NSJSONSerialization JSONObjectWithData:feedData options:0 error:nil];
-                        id fitem = nil;
-                        int flistCnt = 0;
-                        if ([fjson isKindOfClass:[NSDictionary class]]) {
-                            NSArray *flist = fjson[@"aweme_list"];
-                            // 2.2-32: 逐条校验aweme_id, 游客态可能降级推荐流, 严禁取别人的视频
-                            if ([flist isKindOfClass:[NSArray class]]) {
-                                for (NSDictionary *fc in flist) {
-                                    if (![fc isKindOfClass:[NSDictionary class]]) continue;
-                                    flistCnt++;
-                                    NSString *fid = [fc[@"aweme_id"] isKindOfClass:[NSString class]] ? fc[@"aweme_id"] : [NSString stringWithFormat:@"%@", fc[@"aweme_id"] ?: @""];
-                                    if ([fid isEqualToString:awemeId]) { fitem = fc; break; }
-                                }
-                            }
-                            if (!fitem && [fjson[@"aweme_detail"] isKindOfClass:[NSDictionary class]]) {
-                                NSDictionary *fd1 = fjson[@"aweme_detail"];
-                                NSString *did1 = [fd1[@"aweme_id"] isKindOfClass:[NSString class]] ? fd1[@"aweme_id"] : [NSString stringWithFormat:@"%@", fd1[@"aweme_id"] ?: @""];
-                                if ([did1 isEqualToString:awemeId]) fitem = fd1;
-                            }
-                        }
-                        [probeLog appendFormat:@"feed条目=%d ID匹配=%@\n", flistCnt, fitem ? @"YES" : @"NO"];
-                        NSDictionary *fvideo = [fitem isKindOfClass:[NSDictionary class]] ? fitem[@"video"] : nil;
-                        NSArray *fbr = [fvideo isKindOfClass:[NSDictionary class]] ? fvideo[@"bit_rate"] : nil;
-                        if ([fitem isKindOfClass:[NSDictionary class]] && [fbr isKindOfClass:[NSArray class]] && fbr.count > 0) {
-                            awemeDetail = fitem;
-                            feedRescued = YES;
-                            [probeLog appendFormat:@"[feed兜底成功] bit_rate %lu条 gears=%@\n", (unsigned long)fbr.count, [fbr valueForKeyPath:@"gear_name"]];
-                        } else {
-                            [probeLog appendFormat:@"feed无匹配ID或无bit_rate(疑似推荐流降级)\n"];
-                        }
-                    } @catch (NSException *fe2) { [probeLog appendFormat:@"feed解析异常: %@\n", fe2]; }
-                }
-            }
-            if (!awemeDetail || ![awemeDetail isKindOfClass:[NSDictionary class]]) {
-                // 2.2-65: feed未救回，等TikHub最终兜底结果（上限45s；本地解析路径无TikHub直接跳过）
-                if (allowTikHub) dispatch_semaphore_wait(thSem, dispatch_time(DISPATCH_TIME_NOW, 45LL * NSEC_PER_SEC));
+                NSDictionary *thResult = [self _dyyySyncTikHubByAwemeId:awemeId];
                 if ([thResult isKindOfClass:[NSDictionary class]] && ([(NSArray *)thResult[@"video_list"] count] > 0 || [(NSArray *)thResult[@"images"] count] > 0)) {
                     [probeLog appendFormat:@"\n[TikHub兜底成功] video_list=%lu images=%lu\n", (unsigned long)[(NSArray *)thResult[@"video_list"] count], (unsigned long)[(NSArray *)thResult[@"images"] count]];
                     if (completion) completion(thResult);
                     return;
                 }
-                [probeLog appendFormat:@"\n[失败] Step2+自愈+feed+TikHub全失败\n"];
-                if (completion) completion(nil);
-                return;
+                [probeLog appendFormat:@"\n[失败] Step2+TikHub全失败\n"];
+            } else {
+                [probeLog appendFormat:@"\n[失败] Step2全失败（本地模式不消耗TikHub额度）\n"];
             }
-            if (feedRescued) [probeLog appendFormat:@"[feed救回] 本次画质来自App端feed接口\n"];
+            if (completion) completion(nil);
+            return;
         }
         // Step 3: bit_rate全画质解析（JS规则）
         NSDictionary *videoObj = awemeDetail[@"video"] ?: @{};
@@ -4327,21 +4261,6 @@ static NSString *DYYYFetchAwemeDetailViaWebView(NSString *awemeId, NSMutableStri
         [probeLog appendFormat:@"\nvideoURI=%@\n", videoURI ?: @"无"];
         {
             NSString *probeText = [probeLog copy];
-        }
-
-        // ===== 2.2-65: feed救回后等TikHub结果合并——两个来源一起出来（普通视频帖；实况/图集帖feed条目已含实况不重复合并） =====
-        if (allowTikHub && !isImagePost && [thResult isKindOfClass:[NSDictionary class]]) {
-            dispatch_semaphore_wait(thSem, dispatch_time(DISPATCH_TIME_NOW, 45LL * NSEC_PER_SEC));
-            NSArray *thList = [thResult isKindOfClass:[NSDictionary class]] ? thResult[@"video_list"] : nil;
-            if ([thList isKindOfClass:[NSArray class]] && thList.count > 0) {
-                NSArray *feedList = [result[@"video_list"] isKindOfClass:[NSArray class]] ? result[@"video_list"] : @[];
-                NSUInteger thN = thList.count, feedN = feedList.count;
-                NSMutableArray *merged = [NSMutableArray array];
-                [merged addObjectsFromArray:thList];
-                [merged addObjectsFromArray:feedList];
-                result[@"video_list"] = [self _dyyyDedupeVideos:merged];
-                [probeLog appendFormat:@"\n[合并展示] TikHub %lu条 + feed %lu条 → 去重后 %lu条\n", (unsigned long)thN, (unsigned long)feedN, (unsigned long)((NSArray *)result[@"video_list"]).count];
-            }
         }
         if (completion) completion(result.count > 0 ? result : nil);
     });
