@@ -742,6 +742,7 @@ typedef NS_ENUM(NSInteger, DYYYSettingItemType) { DYYYSettingItemTypeSwitch, DYY
         hint.text = @"在下方登录抖音(验证码/扫码均可), 登录成功自动保存";
         hint.textColor = [UIColor whiteColor];
         hint.font = [UIFont systemFontOfSize:12];
+        hint.numberOfLines = 2; // 2.2-70 状态条两行防截断
         hint.textAlignment = NSTextAlignmentCenter;
         hint.translatesAutoresizingMaskIntoConstraints = NO;
         wv.translatesAutoresizingMaskIntoConstraints = NO;
@@ -773,12 +774,15 @@ typedef NS_ENUM(NSInteger, DYYYSettingItemType) { DYYYSettingItemTypeSwitch, DYY
         [self presentViewController:modal animated:YES completion:nil];
 
         __block WKHTTPCookieStore *bStore = store;
+        __block UILabel *bHint = hint;
         __block UIViewController *bModal = modal;
         __block NSInteger checks = 0;
+        __block NSInteger lastProf = -99;
+        __block NSString *lastVerdict = @"";
         __block dispatch_block_t checkBlock;
         checkBlock = ^{
             checks++;
-            if (checks > 240) return; // 6分钟后停止检测(页面可手动关闭)
+            if (checks > 800) { bHint.text = @"检测已停(20分钟): 请确认页面已登录后重新打开"; return; } // 2.2-70 检测窗6分钟→20分钟
             [bStore getAllCookies:^(NSArray<NSHTTPCookie *> *cks) {
                 BOOL hasSession = NO, hasIdentity = NO;
                 NSMutableString *full = [NSMutableString string];
@@ -786,78 +790,101 @@ typedef NS_ENUM(NSInteger, DYYYSettingItemType) { DYYYSettingItemTypeSwitch, DYY
                     if (![c.domain containsString:@"douyin.com"]) continue;
                     if (full.length > 0) [full appendString:@"; "];
                     [full appendFormat:@"%@=%@", c.name, c.value];
-                    // 2.2-56 判定加严: 会话类+身份类双齐全才算真登录(滑块验证流程会预埋未激活session类cookie, 单查会误弹)
+                    // 2.2-56 cookie双条件仅作就绪信号(滑块验证会预埋未激活session类cookie)
                     if ([c.name isEqualToString:@"sessionid_ss"] || [c.name isEqualToString:@"sessionid"] || [c.name isEqualToString:@"sid_tt"]) hasSession = YES;
                     if ([c.name isEqualToString:@"uid"] || [c.name isEqualToString:@"sid_guard"] || [c.name isEqualToString:@"sid_ucp_v1"]) hasIdentity = YES;
                 }
-                if ((hasSession && hasIdentity) && full.length > 100) {
-                    // 2.2-57 验证页连身份类cookie都预埋(双条件拦不住), 用登录态接口终审: profile/self返回sec_uid才认真登录
-                    NSString *bFull = [full copy];
-                    __block NSInteger profPoll = 0;
-                    __block dispatch_block_t profBlock;
-                    [wv evaluateJavaScript:@"window.__DYYY_PROF=''" completionHandler:nil];
-                    [wv evaluateJavaScript:@"(function(){var n=0;var iv=setInterval(function(){n++;if(document.readyState==='complete'||n>20){clearInterval(iv);var x=new XMLHttpRequest();x.open('GET','https://www.douyin.com/aweme/v1/web/user/profile/self/?device_platform=webapp&aid=6383&version_code=170400&pc_client_type=1',true);x.withCredentials=true;x.onload=function(){window.__DYYY_PROF=(x.responseText||'').substring(0,4000)};x.onerror=function(){window.__DYYY_PROF='ERR'};x.send()}},500)})()" completionHandler:nil];
-                    profBlock = ^{
-                        profPoll++;
-                        if (profPoll > 20) { dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), checkBlock); return; }
-                        [wv evaluateJavaScript:@"(window.__DYYY_PROF||'')" completionHandler:^(id pr, NSError *pe) {
-                            NSString *prof = [pr isKindOfClass:[NSString class]] ? pr : @"";
-                            if (!(prof.length > 50 && [prof containsString:@"sec_uid"])) {
-                                [wv evaluateJavaScript:@"window.__DYYY_PROF=''" completionHandler:nil];
-                                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), checkBlock);
-                                return;
-                            }
-                            [[NSUserDefaults standardUserDefaults] setObject:bFull forKey:@"DYYYLoginCookie"];
-                            [[NSUserDefaults standardUserDefaults] synchronize];
-                            // 2.2-53 登录态当场判决: 同一WebView(自带登录cookie)内代发detail试解析, 10秒内出结论
-                    [wv evaluateJavaScript:@"(function(){var n=0;var iv=setInterval(function(){n++;if(document.readyState==='complete'||n>20){clearInterval(iv);"
-                                           "var x=new XMLHttpRequest();x.open('GET','https://www.douyin.com/aweme/v1/web/aweme/detail/?aweme_id=7673908340124054245&device_platform=webapp&channel=aweme_web&aid=6383&version_code=170400&pc_client_type=1',true);x.withCredentials=true;x.onload=function(){window.__DYYY_VRES=JSON.stringify({s:x.status,b:(x.responseText||'').substring(0,2000000)})};x.onerror=function(){window.__DYYY_VRES=JSON.stringify({s:0,b:'XHRerr'})};x.send()"
-                                           "}},500)})()" completionHandler:nil];
-                    __block NSInteger vPoll = 0;
-                    __block dispatch_block_t vBlock;
-                    vBlock = ^{
-                        vPoll++;
-                        if (vPoll > 32) return;
-                        [wv evaluateJavaScript:@"(window.__DYYY_VRES||'')" completionHandler:^(id vr, NSError *ve) {
-                            NSInteger vcode = -1;
-                            NSString *vbody = @"";
-                            if ([vr isKindOfClass:[NSString class]] && [(NSString *)vr length] > 0) {
-                                @try {
-                                    NSDictionary *vj = [NSJSONSerialization JSONObjectWithData:[(NSString *)vr dataUsingEncoding:NSUTF8StringEncoding] options:0 error:nil];
-                                    if ([vj isKindOfClass:[NSDictionary class]]) {
-                                        vcode = [vj[@"s"] isKindOfClass:[NSNumber class]] ? [vj[@"s"] integerValue] : -1;
-                                        vbody = [vj[@"b"] isKindOfClass:[NSString class]] ? vj[@"b"] : @"";
-                                    }
-                                } @catch (NSException *vje) {}
-                            }
-                            if (vcode >= 0 || vPoll > 30) {
-                                NSString *vmsg;
-                                if (vcode == 200 && vbody.length > 5000 && [vbody containsString:@"bit_rate"]) vmsg = @"判决: HTTP 200 ✅ 登录态直出全档成立, 关闭后解析自动带登录态";
-                                else if (vcode == 200) vmsg = [NSString stringWithFormat:@"判决: HTTP 200 但body仅%lu字节(响应异常)", (unsigned long)vbody.length];
-                                else if (vcode == 403) vmsg = @"判决: HTTP 403 ❌ 登录态也被Argus拦(原生路线到头, 转兜底API)";
-                                else if (vcode == 0) vmsg = @"判决: 页面网络异常, 登录态已保存(返回后解析实测)";
-                                else if (vcode < 0) vmsg = @"判决: 验证超时(登录态已保存, 返回后解析实测)";
-                                else vmsg = [NSString stringWithFormat:@"判决: HTTP %ld(页面/网络异常)", (long)vcode];
-                                UIAlertController *ok = [UIAlertController alertControllerWithTitle:@"登录成功·当场验证" message:[NSString stringWithFormat:@"Cookie %lu条已保存。%@", (unsigned long)cks.count, vmsg] preferredStyle:UIAlertControllerStyleAlert];
-                                [ok addAction:[UIAlertAction actionWithTitle:@"完成" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a3) {
-                                    [bModal dismissViewControllerAnimated:YES completion:^{
-                                        [self.tableView reloadData];
-                                    }];
-                                }]];
-                                [bModal presentViewController:ok animated:YES completion:nil];
-                                return;
-                            }
-                            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.7 * NSEC_PER_SEC)), dispatch_get_main_queue(), vBlock);
-                        }];
-                    };
-                            dispatch_async(dispatch_get_main_queue(), vBlock);
-                            return;
-                        }];
-                    };
-                    dispatch_async(dispatch_get_main_queue(), profBlock);
+                BOOL cookieReady = (hasSession && hasIdentity) && full.length > 100;
+                BOOL onWww = [wv.URL.host isEqualToString:@"www.douyin.com"]; // 2.2-70 判定反转: SSO回落www.douyin.com即具备终审条件, 不再死等cookie双条件
+                // 2.2-70 状态实时上屏: 卡在哪层一眼可见, 截图即可远程定位
+                bHint.text = [NSString stringWithFormat:@"检测中 %ld/800·cookie %lu条·会%@身%@·审:%@", (long)checks, (unsigned long)cks.count, hasSession ? @"✅" : @"❌", hasIdentity ? @"✅" : @"❌", lastVerdict.length ? lastVerdict : ((cookieReady || onWww) ? @"就绪" : @"待回落www")];
+                if (!(cookieReady || onWww) || (checks - lastProf) < 4) {
+                    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), checkBlock);
                     return;
                 }
-                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), checkBlock);
+                // 2.2-70 终审前置+节流(每4轮≈6s一次): profile/self返回sec_uid才认真登录(2.2-57终审结论), 状态码区分403风控/0跨域/200无sec_uid
+                lastProf = checks;
+                NSString *bFull = [full copy];
+                __block NSInteger profPoll = 0;
+                __block dispatch_block_t profBlock;
+                [wv evaluateJavaScript:@"window.__DYYY_PROF=''" completionHandler:nil];
+                [wv evaluateJavaScript:@"(function(){var n=0;var iv=setInterval(function(){n++;if(document.readyState==='complete'||n>20){clearInterval(iv);var x=new XMLHttpRequest();x.open('GET','https://www.douyin.com/aweme/v1/web/user/profile/self/?device_platform=webapp&aid=6383&version_code=170400&pc_client_type=1',true);x.withCredentials=true;x.onload=function(){try{window.__DYYY_PROF=JSON.stringify({s:x.status,b:(x.responseText||'').substring(0,4000)})}catch(e){window.__DYYY_PROF='ERR'}};x.onerror=function(){window.__DYYY_PROF='{\"s\":0,\"b\":\"XHRerr\"}'};x.send()}},500)})()" completionHandler:nil];
+                profBlock = ^{
+                    profPoll++;
+                    if (profPoll > 20) { lastVerdict = @"响应超时·重试"; dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), checkBlock); return; }
+                    [wv evaluateJavaScript:@"(window.__DYYY_PROF||'')" completionHandler:^(id pr, NSError *pe) {
+                        NSString *prof = [pr isKindOfClass:[NSString class]] ? pr : @"";
+                        NSInteger pcode = -99;
+                        NSString *pbody = @"";
+                        if (prof.length > 2) {
+                            @try {
+                                NSDictionary *pj = [NSJSONSerialization JSONObjectWithData:[prof dataUsingEncoding:NSUTF8StringEncoding] options:0 error:nil];
+                                if ([pj isKindOfClass:[NSDictionary class]]) {
+                                    if ([pj[@"s"] isKindOfClass:[NSNumber class]]) pcode = [pj[@"s"] integerValue];
+                                    if ([pj[@"b"] isKindOfClass:[NSString class]]) pbody = pj[@"b"];
+                                }
+                            } @catch (NSException *pje) {}
+                        }
+                        if (!(pcode == 200 && pbody.length > 50 && [pbody containsString:@"sec_uid"])) {
+                            lastVerdict = (pcode == 403) ? @"403风控拦" : ((pcode == 0) ? @"0跨域/网络" : ((pcode == 200) ? @"200无sec_uid" : @"待响应"));
+                            [wv evaluateJavaScript:@"window.__DYYY_PROF=''" completionHandler:nil];
+                            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), checkBlock);
+                            return;
+                        }
+                        lastVerdict = @"sec_uid✅已保存";
+                        [[NSUserDefaults standardUserDefaults] setObject:bFull forKey:@"DYYYLoginCookie"];
+                        [[NSUserDefaults standardUserDefaults] synchronize];
+                        // 2.2-53 登录态当场判决: 同一WebView(自带登录cookie)内代发detail试解析, 10秒内出结论
+                        [wv evaluateJavaScript:@"(function(){var n=0;var iv=setInterval(function(){n++;if(document.readyState==='complete'||n>20){clearInterval(iv);"
+                                               "var x=new XMLHttpRequest();x.open('GET','https://www.douyin.com/aweme/v1/web/aweme/detail/?aweme_id=7673908340124054245&device_platform=webapp&channel=aweme_web&aid=6383&version_code=170400&pc_client_type=1',true);x.withCredentials=true;x.onload=function(){window.__DYYY_VRES=JSON.stringify({s:x.status,b:(x.responseText||'').substring(0,2000000)})};x.onerror=function(){window.__DYYY_VRES=JSON.stringify({s:0,b:'XHRerr'})};x.send()"
+                                               "}},500)})()" completionHandler:nil];
+                        __block NSInteger vPoll = 0;
+                        __block dispatch_block_t vBlock;
+                        vBlock = ^{
+                            vPoll++;
+                            if (vPoll > 32) { // 2.2-70 判决超时也弹窗收尾(原版直接return导致弹窗永不出现)
+                                UIAlertController *to = [UIAlertController alertControllerWithTitle:@"登录已保存·验证超时" message:@"Cookie已保存, 当场验证未出结论, 关闭后解析实测" preferredStyle:UIAlertControllerStyleAlert];
+                                [to addAction:[UIAlertAction actionWithTitle:@"完成" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a4) {
+                                    [bModal dismissViewControllerAnimated:YES completion:^{ [self.tableView reloadData]; }];
+                                }]];
+                                [bModal presentViewController:to animated:YES completion:nil];
+                                return;
+                            }
+                            [wv evaluateJavaScript:@"(window.__DYYY_VRES||'')" completionHandler:^(id vr, NSError *ve) {
+                                NSInteger vcode = -1;
+                                NSString *vbody = @"";
+                                if ([vr isKindOfClass:[NSString class]] && [(NSString *)vr length] > 0) {
+                                    @try {
+                                        NSDictionary *vj = [NSJSONSerialization JSONObjectWithData:[(NSString *)vr dataUsingEncoding:NSUTF8StringEncoding] options:0 error:nil];
+                                        if ([vj isKindOfClass:[NSDictionary class]]) {
+                                            vcode = [vj[@"s"] isKindOfClass:[NSNumber class]] ? [vj[@"s"] integerValue] : -1;
+                                            vbody = [vj[@"b"] isKindOfClass:[NSString class]] ? vj[@"b"] : @"";
+                                        }
+                                    } @catch (NSException *vje) {}
+                                }
+                                if (vcode >= 0 || vPoll > 30) {
+                                    NSString *vmsg;
+                                    if (vcode == 200 && vbody.length > 5000 && [vbody containsString:@"bit_rate"]) vmsg = @"判决: HTTP 200 ✅ 登录态直出全档成立, 关闭后解析自动带登录态";
+                                    else if (vcode == 200) vmsg = [NSString stringWithFormat:@"判决: HTTP 200 但body仅%lu字节(响应异常)", (unsigned long)vbody.length];
+                                    else if (vcode == 403) vmsg = @"判决: HTTP 403 ❌ 登录态也被Argus拦(原生路线到头, 转兜底API)";
+                                    else if (vcode == 0) vmsg = @"判决: 页面网络异常, 登录态已保存(返回后解析实测)";
+                                    else vmsg = @"判决: 验证超时(登录态已保存, 返回后解析实测)";
+                                    UIAlertController *ok = [UIAlertController alertControllerWithTitle:@"登录成功·当场验证" message:[NSString stringWithFormat:@"Cookie %lu条已保存。%@", (unsigned long)cks.count, vmsg] preferredStyle:UIAlertControllerStyleAlert];
+                                    [ok addAction:[UIAlertAction actionWithTitle:@"完成" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a3) {
+                                        [bModal dismissViewControllerAnimated:YES completion:^{
+                                            [self.tableView reloadData];
+                                        }];
+                                    }]];
+                                    [bModal presentViewController:ok animated:YES completion:nil];
+                                    return;
+                                }
+                                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.7 * NSEC_PER_SEC)), dispatch_get_main_queue(), vBlock);
+                            }];
+                        };
+                        dispatch_async(dispatch_get_main_queue(), vBlock);
+                    }];
+                };
+                dispatch_async(dispatch_get_main_queue(), profBlock);
             }];
         };
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), checkBlock);
