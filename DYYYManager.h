@@ -164,7 +164,7 @@
  * @param completion 解析完成回调，在后台线程执行，需自行dispatch到主线程更新UI
  */
 + (void)localParseFromAwemeModel:(id)awemeModel completion:(void(^)(NSDictionary *result))completion;
-+ (void)localParseFullFromAwemeModel:(id)awemeModel completion:(void(^)(NSDictionary *result))completion;
++ (void)localParseFullFromAwemeModel:(id)awemeModel completion:(void(^)(NSDictionary *result))completion tikHubFallback:(BOOL)allowTikHub;
 + (void)requestTikHubDirect:(NSString *)shareLink;  // 2.2-60 接口2内置TikHub直连
 + (NSString *)getDouyinFullCookieString;
 + (void)localParseFromShareLink:(NSString *)shareLink completion:(void(^)(NSDictionary *result))completion;

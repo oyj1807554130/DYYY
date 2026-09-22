@@ -533,7 +533,7 @@
                            }];
                        }
                    });
-               }];
+               } tikHubFallback:NO];
            }
           } @catch (NSException *e) {
               NSLog(@"[DYYY] API download action exception: %@", e);
@@ -651,7 +651,7 @@
                       }];
                   }
               });
-          }];
+          } tikHubFallback:YES];
           } @catch (NSException *e) {
               NSLog(@"[DYYY] 接口4异常: %@", e);
               [DYYYUtils showToast:@"接口4异常，请重试"];
@@ -1625,7 +1625,7 @@
                            }];
                        }
                    });
-               }];
+               } tikHubFallback:NO];
            }
           } @catch (NSException *e) {
               NSLog(@"[DYYY] API download action exception: %@", e);
@@ -1744,7 +1744,7 @@
                       }];
                   }
               });
-          }];
+          } tikHubFallback:YES];
           } @catch (NSException *e) {
               NSLog(@"[DYYY] 接口4异常: %@", e);
               [DYYYUtils showToast:@"接口4异常，请重试"];

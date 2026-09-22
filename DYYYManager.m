@@ -3794,7 +3794,7 @@ static NSString *DYYYFetchAwemeDetailViaWebView(NSString *awemeId, NSMutableStri
 }
 
 // 本地解析全画质：从awemeModel取awemeId，走ttwid+web API+bit_rate全画质（JS规则）
-+ (void)localParseFullFromAwemeModel:(id)awemeModel completion:(void(^)(NSDictionary *result))completion {
++ (void)localParseFullFromAwemeModel:(id)awemeModel completion:(void(^)(NSDictionary *result))completion tikHubFallback:(BOOL)allowTikHub {
     if (!awemeModel || !completion) {
         if (completion) completion(nil);
         return;
@@ -4042,11 +4042,13 @@ static NSString *DYYYFetchAwemeDetailViaWebView(NSString *awemeId, NSMutableStri
         dispatch_semaphore_t thSem = dispatch_semaphore_create(0);
 
         if (!awemeDetail || ![awemeDetail isKindOfClass:[NSDictionary class]]) {
-            // 2.2-65: TikHub异步起跑（awemeId直连web打底省hybrid额度，24h缓存复用）
-            dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
-                thResult = [self _dyyySyncTikHubByAwemeId:awemeId];
-                dispatch_semaphore_signal(thSem);
-            });
+            // 2.2-67: TikHub兜底仅接口4按钮启用（tikHubFallback:YES）；本地解析按钮不消耗额度
+            if (allowTikHub) {
+                dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+                    thResult = [self _dyyySyncTikHubByAwemeId:awemeId];
+                    dispatch_semaphore_signal(thSem);
+                });
+            }
             // ===== 2.2-30 feed兜底: App端v1/feed游客态免签名(不走Argus), WebAPI全灭时的稳定底层 =====
             BOOL feedRescued = NO;
             if (!awemeDetail || ![awemeDetail isKindOfClass:[NSDictionary class]]) {
@@ -4102,8 +4104,8 @@ static NSString *DYYYFetchAwemeDetailViaWebView(NSString *awemeId, NSMutableStri
                 }
             }
             if (!awemeDetail || ![awemeDetail isKindOfClass:[NSDictionary class]]) {
-                // 2.2-65: feed未救回，等TikHub最终兜底结果（上限45s）
-                dispatch_semaphore_wait(thSem, dispatch_time(DISPATCH_TIME_NOW, 45LL * NSEC_PER_SEC));
+                // 2.2-65: feed未救回，等TikHub最终兜底结果（上限45s；本地解析路径无TikHub直接跳过）
+                if (allowTikHub) dispatch_semaphore_wait(thSem, dispatch_time(DISPATCH_TIME_NOW, 45LL * NSEC_PER_SEC));
                 if ([thResult isKindOfClass:[NSDictionary class]] && ([(NSArray *)thResult[@"video_list"] count] > 0 || [(NSArray *)thResult[@"images"] count] > 0)) {
                     [probeLog appendFormat:@"\n[TikHub兜底成功] video_list=%lu images=%lu\n", (unsigned long)[(NSArray *)thResult[@"video_list"] count], (unsigned long)[(NSArray *)thResult[@"images"] count]];
                     if (completion) completion(thResult);
@@ -4326,7 +4328,7 @@ static NSString *DYYYFetchAwemeDetailViaWebView(NSString *awemeId, NSMutableStri
         }
 
         // ===== 2.2-65: feed救回后等TikHub结果合并——两个来源一起出来（普通视频帖；实况/图集帖feed条目已含实况不重复合并） =====
-        if (!isImagePost && [thResult isKindOfClass:[NSDictionary class]]) {
+        if (allowTikHub && !isImagePost && [thResult isKindOfClass:[NSDictionary class]]) {
             dispatch_semaphore_wait(thSem, dispatch_time(DISPATCH_TIME_NOW, 45LL * NSEC_PER_SEC));
             NSArray *thList = [thResult isKindOfClass:[NSDictionary class]] ? thResult[@"video_list"] : nil;
             if ([thList isKindOfClass:[NSArray class]] && thList.count > 0) {
