@@ -779,7 +779,6 @@ typedef NS_ENUM(NSInteger, DYYYSettingItemType) { DYYYSettingItemTypeSwitch, DYY
         __block NSInteger checks = 0;
         __block NSInteger lastProf = -99;
         __block NSString *lastVerdict = @"";
-        __block NSInteger profTimeouts = 0; // 2.2-72 终审连续无响应计数
         __block dispatch_block_t checkBlock;
         checkBlock = ^{
             checks++;
@@ -865,10 +864,9 @@ typedef NS_ENUM(NSInteger, DYYYSettingItemType) { DYYYSettingItemTypeSwitch, DYY
                 };
                 profBlock = ^{
                     profPoll++;
-                    if (profPoll > 10) {
-                        profTimeouts++;
-                        // 2.2-72 登录态下profile/self被风控挂起(实测: 未登录秒回200无sec_uid, 登录后长时间无响应)——连续3次无响应且cookie双条件成立+已回落www, 按登录cookie保存(未激活预埋cookie在未登录时会被200无sec_uid拦住, 不会误存)
-                        if (profTimeouts >= 3 && cookieReady && onWww) {
+                    if (profPoll > 6) {
+                        // 2.2-73 挂起即保存: 未登录profile/self秒回有响应, 登录态被风控挂起无响应——挂起本身就是登录信号, cookie双条件成立+已回落www立即保存(全程≤15s)
+                        if (cookieReady && onWww) {
                             lastVerdict = @"终审挂起·按cookie保存";
                             dispatch_async(dispatch_get_main_queue(), saveBlock);
                             return;
@@ -891,7 +889,6 @@ typedef NS_ENUM(NSInteger, DYYYSettingItemType) { DYYYSettingItemTypeSwitch, DYY
                                 }
                             } @catch (NSException *pje) {}
                         }
-                        profTimeouts = 0; // 2.2-72 有响应即清零
                         if (!(pcode == 200 && pbody.length > 50 && [pbody containsString:@"sec_uid"])) {
                             lastVerdict = (pcode == 403) ? @"403风控拦" : ((pcode == 0) ? @"0跨域/网络" : ((pcode == 200) ? @"200无sec_uid" : @"待响应"));
                             [wv evaluateJavaScript:@"window.__DYYY_PROF=''" completionHandler:nil];
