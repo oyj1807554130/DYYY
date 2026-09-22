@@ -3692,6 +3692,30 @@ static NSString *DYYYFetchAwemeDetailViaWebView(NSString *awemeId, NSMutableStri
             sRescueWV = wv; // 静态持有防提前释放
             UIView *kw = [UIApplication sharedApplication].keyWindow;
             if (kw) [kw addSubview:wv];
+            // 2.2-77 注入存档登录Cookie: 登录WebView收割的全套cookie带入隐身WebView, 过登录墙
+            NSString *savedLogin77 = [[NSUserDefaults standardUserDefaults] stringForKey:@"DYYYLoginCookie"];
+            if (savedLogin77.length > 100) {
+                NSInteger n77 = 0;
+                for (NSString *pair in [savedLogin77 componentsSeparatedByString:@"; "]) {
+                    NSRange eq77 = [pair rangeOfString:@"="];
+                    if (eq77.location == NSNotFound || eq77.location == 0) continue;
+                    NSString *nm77 = [pair substringToIndex:eq77.location];
+                    NSString *vl77 = [pair substringFromIndex:eq77.location + 1];
+                    if (nm77.length == 0 || vl77.length == 0) continue;
+                    NSMutableDictionary *cp77 = [NSMutableDictionary dictionary];
+                    cp77[NSHTTPCookieName] = nm77;
+                    cp77[NSHTTPCookieValue] = vl77;
+                    cp77[NSHTTPCookieDomain] = @".douyin.com";
+                    cp77[NSHTTPCookiePath] = @"/";
+                    NSHTTPCookie *ck77 = [NSHTTPCookie cookieWithProperties:cp77];
+                    if (ck77) {
+                        [[NSHTTPCookieStorage sharedHTTPCookieStorage] setCookie:ck77];
+                        [cfg.websiteDataStore.httpCookieStore setCookie:ck77 completionHandler:nil];
+                        n77++;
+                    }
+                }
+                [probeLog appendFormat:@"[2.2-77] 已注入存档登录Cookie %ld个 到隐身WebView\n", (long)n77];
+            }
             [wv loadRequest:[NSURLRequest requestWithURL:[NSURL URLWithString:pageURL]]];
             __block NSInteger tries = 0;
             __block NSInteger maxTries = 15; // 自动阶段: 4s首查+15次x2s约30s
