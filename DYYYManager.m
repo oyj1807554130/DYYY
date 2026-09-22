@@ -4049,6 +4049,81 @@ static NSString *DYYYFetchAwemeDetailViaWebView(NSString *awemeId, NSMutableStri
                 [probeLog appendFormat:@"\n[失败] Step2+TikHub全失败\n"];
             } else {
                 [probeLog appendFormat:@"\n[失败] Step2全失败（本地模式不消耗TikHub额度）\n"];
+                // 2.2-76 图集帖WebView救援: 隐身WKWebView加载web页, 页面JS自带完整签名调detail, 截获响应提取web原图
+                BOOL isImgModel76 = NO;
+                @try {
+                    NSInteger at76 = [[awemeModel valueForKey:@"awemeType"] integerValue];
+                    NSArray *alb76 = [awemeModel valueForKey:@"albumImages"];
+                    isImgModel76 = (at76 == 68 || at76 == 150 || ([alb76 isKindOfClass:[NSArray class]] && alb76.count > 0));
+                } @catch (NSException *e76) {}
+                if (isImgModel76) {
+                    [probeLog appendFormat:@"\n[2.2-76 WebView救援] 图集帖启动隐身WebView截获detail\n"];
+                    NSString *wvJSON76 = DYYYFetchAwemeDetailViaWebView(awemeId, probeLog);
+                    NSDictionary *wvDict76 = nil;
+                    if (wvJSON76.length > 100) {
+                        NSData *wvData76 = [wvJSON76 dataUsingEncoding:NSUTF8StringEncoding];
+                        if (wvData76) wvDict76 = [NSJSONSerialization JSONObjectWithData:wvData76 options:0 error:nil];
+                    }
+                    NSDictionary *wd76 = nil;
+                    if ([wvDict76 isKindOfClass:[NSDictionary class]]) {
+                        id inner76 = wvDict76[@"aweme_detail"];
+                        if ([inner76 isKindOfClass:[NSDictionary class]]) wd76 = inner76; else wd76 = wvDict76;
+                    }
+                    NSArray *rawImgs76 = wd76[@"image_post_info"][@"images"];
+                    if (![rawImgs76 isKindOfClass:[NSArray class]]) rawImgs76 = wd76[@"images"];
+                    if ([rawImgs76 isKindOfClass:[NSArray class]] && rawImgs76.count > 0) {
+                        NSMutableArray *imgs76 = [NSMutableArray array];
+                        NSMutableArray *lvURLs76 = [NSMutableArray array];
+                        NSMutableArray *vList76 = [NSMutableArray array];
+                        for (NSDictionary *img76 in rawImgs76) {
+                            if (![img76 isKindOfClass:[NSDictionary class]]) continue;
+                            NSArray *uls76 = @[];
+                            id di76 = img76[@"origin_image"] ?: img76[@"display_image"];
+                            if ([di76 isKindOfClass:[NSDictionary class]]) { NSArray *t76 = di76[@"url_list"]; if ([t76 isKindOfClass:[NSArray class]]) uls76 = t76; }
+                            if (uls76.count == 0) { id th76 = img76[@"thumbnail"]; if ([th76 isKindOfClass:[NSDictionary class]]) { NSArray *t76 = th76[@"url_list"]; if ([t76 isKindOfClass:[NSArray class]]) uls76 = t76; } }
+                            if (uls76.count == 0) { NSArray *t76 = img76[@"url_list"]; if ([t76 isKindOfClass:[NSArray class]]) uls76 = t76; }
+                            NSString *iu76 = nil;
+                            for (NSString *u76 in uls76) { if ([u76 hasSuffix:@".jpeg"] || [u76 hasSuffix:@".jpg"] || [u76 hasSuffix:@".png"]) { iu76 = u76; break; } }
+                            if (!iu76 && uls76.count > 0) iu76 = uls76[0];
+                            NSString *lv76 = nil;
+                            NSDictionary *iv76 = img76[@"video"];
+                            if ([iv76 isKindOfClass:[NSDictionary class]]) {
+                                NSArray *lu76 = iv76[@"play_addr"][@"url_list"];
+                                if ([lu76 isKindOfClass:[NSArray class]] && lu76.count > 0) lv76 = lu76[0];
+                            }
+                            if (lv76.length > 0 && iu76.length > 0) {
+                                [vList76 addObject:@{@"level": @"实况", @"url": lv76}];
+                                [lvURLs76 addObject:lv76];
+                                [imgs76 addObject:iu76];
+                            } else if (iu76.length > 0) {
+                                [imgs76 addObject:iu76];
+                            }
+                        }
+                        if (imgs76.count > 0) {
+                            [probeLog appendFormat:@"\n[2.2-76 WebView救援] 图集提取成功 images=%lu 实况=%lu\n", (unsigned long)imgs76.count, (unsigned long)lvURLs76.count];
+                            NSMutableDictionary *res76 = [NSMutableDictionary dictionary];
+                            res76[@"images"] = imgs76;
+                            res76[@"video_list"] = vList76;
+                            res76[@"live_videos"] = lvURLs76;
+                            res76[@"image_count"] = @(imgs76.count);
+                            res76[@"batch_download"] = @(imgs76.count > 1);
+                            NSDictionary *mu76 = wd76[@"music"];
+                            NSString *mUrl76 = @"";
+                            if ([mu76 isKindOfClass:[NSDictionary class]]) {
+                                id p76 = mu76[@"play_url"];
+                                if ([p76 isKindOfClass:[NSDictionary class]]) {
+                                    id u76 = p76[@"uri"];
+                                    if (![u76 isKindOfClass:[NSString class]]) { NSArray *ul76 = p76[@"url_list"]; if ([ul76 isKindOfClass:[NSArray class]] && ul76.count > 0) u76 = ul76[0]; }
+                                    if ([u76 isKindOfClass:[NSString class]]) mUrl76 = u76;
+                                }
+                            }
+                            res76[@"music"] = mUrl76;
+                            if (completion) completion(res76);
+                            return;
+                        }
+                    }
+                    [probeLog appendFormat:@"\n[2.2-76 WebView救援] 未提取到图集数据\n"];
+                }
             }
             if (completion) completion(nil);
             return;
