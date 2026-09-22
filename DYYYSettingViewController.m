@@ -814,6 +814,7 @@ typedef NS_ENUM(NSInteger, DYYYSettingItemType) { DYYYSettingItemTypeSwitch, DYY
                     if (profPoll > 20) { lastVerdict = @"响应超时·重试"; dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), checkBlock); return; }
                     [wv evaluateJavaScript:@"(window.__DYYY_PROF||'')" completionHandler:^(id pr, NSError *pe) {
                         NSString *prof = [pr isKindOfClass:[NSString class]] ? pr : @"";
+                        if (prof.length <= 2) { dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.7 * NSEC_PER_SEC)), dispatch_get_main_queue(), profBlock); return; } // 2.2-71 终审XHR未返回, 0.7s轮询再读(最多20次≈14s), 修复注入后立即读取永远"待响应"的时机bug
                         NSInteger pcode = -99;
                         NSString *pbody = @"";
                         if (prof.length > 2) {
