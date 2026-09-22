@@ -22,8 +22,17 @@
 
 @interface DYYYManager (APIAdapter)
 + (void)requestTikHubDirect:(NSString *)shareLink;
++ (NSString *)_dyyyFormatSize:(long long)size;
++ (NSString *)_dyyyQLabel:(NSString *)gearName qt:(NSString *)qualityType width:(NSInteger)width live:(BOOL)isLive;
++ (NSMutableArray *)_dyyyDedupeVideos:(NSArray *)videoList;
++ (NSDictionary *)_dyyyTikHubMusicDetail:(NSString *)musicId;
++ (NSString *)_dyyyCanonicalAwemeId:(NSString *)shareLink;
++ (NSDictionary *)_dyyyTikHubCacheGet:(NSString *)awemeId;
++ (void)_dyyyTikHubCacheSet:(NSString *)awemeId result:(NSDictionary *)result;
++ (NSString *)_dyyyPickImageUrl:(NSDictionary *)img;
++ (NSArray *)_dyyyLiveVideosFromImg:(NSDictionary *)img;
 + (NSDictionary *)_dyyyTikHubSyncGet:(NSString *)apiUrl;
-+ (NSDictionary *)adaptTikHubDetailToDYYY:(NSDictionary *)awemeDetail webDetail:(NSDictionary *)webDetail originData:(NSDictionary *)originData playCount:(NSNumber *)playCount;
++ (NSDictionary *)adaptTikHubDetailToDYYY:(NSDictionary *)awemeDetail webDetail:(NSDictionary *)webDetail originData:(NSDictionary *)originData playCount:(NSNumber *)playCount musicFromDetail:(NSDictionary *)musicFromDetail;
 @end
 
 @interface DYYYManager () <NSURLSessionDownloadDelegate>
@@ -5007,14 +5016,463 @@ static NSString *DYYYFetchAwemeDetailViaWebView(NSString *awemeId, NSMutableStri
     return ([obj isKindOfClass:[NSDictionary class]]) ? obj : nil;
 }
 
+// ===== 2.2-64 TikHub 直连 v2：并行编排 + 24h本地缓存 + 实况/图集schema对齐v33 =====
+
++ (NSString *)_dyyyFormatSize:(long long)size {
+    if (size >= 1024 * 1024 * 1024) return [NSString stringWithFormat:@"%.2fGB", size / 1073741824.0];
+    if (size >= 1024 * 1024) return [NSString stringWithFormat:@"%.1fMB", size / 1048576.0];
+    if (size >= 1024) return [NSString stringWithFormat:@"%.0fKB", size / 1024.0];
+    return @"";
+}
+
++ (NSString *)_dyyyQualityLabelForSide:(NSInteger)longerSide {
+    if (longerSide >= 3840) return @"【极致】4K";
+    if (longerSide >= 2560) return @"【高清】2K";
+    if (longerSide >= 1920) return @"【清晰】1080P";
+    if (longerSide >= 1280) return @"【标清】720P";
+    if (longerSide >= 1024) return @"【流畅】540P";
+    return @"默认";
+}
+
++ (NSString *)_dyyyCanonicalAwemeId:(NSString *)shareLink {
+    // 跟随短链重定向拿最终URL提取视频/图集ID（不花TikHub额度）
+    if (shareLink.length == 0) return nil;
+    NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:shareLink]];
+    request.timeoutInterval = 10;
+    [request setValue:@"Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15" forHTTPHeaderField:@"User-Agent"];
+    __block NSURL *finalURL = nil;
+    dispatch_semaphore_t sem = dispatch_semaphore_create(0);
+    NSURLSessionDataTask *task = [[NSURLSession sharedSession] dataTaskWithRequest:request completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
+        finalURL = response.URL;
+        dispatch_semaphore_signal(sem);
+    }];
+    [task resume];
+    dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, 12LL * NSEC_PER_SEC));
+    if (!finalURL || !finalURL.absoluteString) return nil;
+    NSString *s = finalURL.absoluteString;
+    NSError *err = nil;
+    NSRegularExpression *re = [NSRegularExpression regularExpressionWithPattern:@"/(?:video|note|slides)/(\\d+)" options:0 error:&err];
+    if (!re) return nil;
+    NSTextCheckingResult *m = [re firstMatchInString:s options:0 range:NSMakeRange(0, s.length)];
+    if (m && [m numberOfRanges] > 1) return [s substringWithRange:[m rangeAtIndex:1]];
+    return nil;
+}
+
++ (NSDictionary *)_dyyyTikHubCacheGet:(NSString *)awemeId {
+    if (awemeId.length == 0) return nil;
+    NSDictionary *cache = [[NSUserDefaults standardUserDefaults] dictionaryForKey:[NSString stringWithFormat:@"DYYYTikHubAPICache_%@", awemeId]];
+    if (![cache isKindOfClass:[NSDictionary class]]) return nil;
+    NSDate *ts = cache[@"_ts"];
+    if (![ts isKindOfClass:[NSDate class]]) return nil;
+    if (-[ts timeIntervalSinceNow] > 24.0 * 3600.0) return nil;
+    NSDictionary *result = cache[@"result"];
+    return ([result isKindOfClass:[NSDictionary class]]) ? result : nil;
+}
+
++ (void)_dyyyTikHubCacheSet:(NSString *)awemeId result:(NSDictionary *)result {
+    if (awemeId.length == 0 || !result) return;
+    [[NSUserDefaults standardUserDefaults] setObject:@{@"_ts": [NSDate date], @"result": result} forKey:[NSString stringWithFormat:@"DYYYTikHubAPICache_%@", awemeId]];
+}
+
++ (NSString *)_dyyyPickImageUrl:(NSDictionary *)img {
+    // v33规则：url_list→download_url_list 两轮，URL含.jpeg/.jpg优先，其次webp，最后heic
+    if (![img isKindOfClass:[NSDictionary class]]) return nil;
+    NSMutableArray *pools = [NSMutableArray array];
+    id ul = img[@"url_list"]; if ([ul isKindOfClass:[NSArray class]]) [pools addObject:ul];
+    id dl = img[@"download_url_list"]; if ([dl isKindOfClass:[NSArray class]]) [pools addObject:dl];
+    for (NSArray *pool in pools) {
+        NSString *jpeg = nil, *webp = nil, *heic = nil;
+        for (NSString *u in pool) {
+            if (![u isKindOfClass:[NSString class]] || ![u hasPrefix:@"http"]) continue;
+            NSString *low = u.lowercaseString;
+            if ([low containsString:@".jpeg"] || [low containsString:@".jpg"]) { jpeg = u; break; }
+            else if (!webp && [low containsString:@".webp"]) webp = u;
+            else if (!heic && [low containsString:@".heic"]) heic = u;
+        }
+        NSString *pick = jpeg ?: webp ?: heic;
+        if (pick.length > 0) return pick;
+    }
+    // 兜底：origin_image/display_image/thumbnail 的 url_list
+    NSArray *candidates = @[img[@"origin_image"], img[@"display_image"], img[@"thumbnail"]];
+    for (id c in candidates) {
+        if (![c isKindOfClass:[NSDictionary class]]) continue;
+        NSArray *cl = ((NSDictionary *)c)[@"url_list"];
+        if (![cl isKindOfClass:[NSArray class]]) continue;
+        for (NSString *u in cl) {
+            if ([u isKindOfClass:[NSString class]] && [u hasPrefix:@"http"]) return u;
+        }
+    }
+    return nil;
+}
+
++ (NSArray *)_dyyyLiveVideosFromImg:(NSDictionary *)img {
+    // v33规则：bit_rate全档(HEVC 1080P iOS可用) + play_addr_h264(H.264兼容) + play_addr兜底
+    NSMutableArray *out = [NSMutableArray array];
+    NSDictionary *v = img[@"video"];
+    if (![v isKindOfClass:[NSDictionary class]]) return out;
+    NSArray *br = v[@"bit_rate"];
+    if ([br isKindOfClass:[NSArray class]]) {
+        NSArray *sorted = [br sortedArrayUsingComparator:^NSComparisonResult(id a, id b) {
+            NSInteger ra = [(NSDictionary *)a[@"bit_rate"] integerValue];
+            NSInteger rb = [(NSDictionary *)b[@"bit_rate"] integerValue];
+            return (ra > rb) ? NSOrderedAscending : ((ra < rb) ? NSOrderedDescending : NSOrderedSame);
+        }];
+        for (NSDictionary *b in sorted) {
+            if (![b isKindOfClass:[NSDictionary class]]) continue;
+            NSDictionary *pa = b[@"play_addr"];
+            if (![pa isKindOfClass:[NSDictionary class]]) continue;
+            NSArray *ul = pa[@"url_list"];
+            NSString *u = ([ul isKindOfClass:[NSArray class]] && ul.count > 0 && [ul[0] isKindOfClass:[NSString class]]) ? ul[0] : nil;
+            if (u.length == 0) continue;
+            NSInteger w = [pa[@"width"] integerValue], h = [pa[@"height"] integerValue];
+            NSInteger side = (w > h) ? w : h;
+            long long size = [pa[@"data_size"] longLongValue];
+            if (size == 0) size = [b[@"video_size"] longLongValue];
+            NSInteger fps = [b[@"FPS"] integerValue];
+            if (fps <= 0) fps = [b[@"frame_rate"] integerValue];
+            if (fps <= 0) fps = 30;
+            NSString *lbl = [self _dyyyQualityLabelForSide:side];
+            NSString *sizeStr = [self _dyyyFormatSize:size];
+            NSString *level = [NSString stringWithFormat:@"[实况%@]-[%ldFPS]", lbl, (long)fps];
+            if (sizeStr.length > 0) level = [level stringByAppendingFormat:@"-[%@]", sizeStr];
+            [out addObject:@{@"level": level, @"url": u, @"size": @(size)}];
+        }
+    }
+    NSDictionary *h264 = v[@"play_addr_h264"];
+    if ([h264 isKindOfClass:[NSDictionary class]]) {
+        NSArray *ul = h264[@"url_list"];
+        NSString *u = ([ul isKindOfClass:[NSArray class]] && ul.count > 0 && [ul[0] isKindOfClass:[NSString class]]) ? ul[0] : nil;
+        if (u.length > 0) {
+            NSInteger w = [h264[@"width"] integerValue], h = [h264[@"height"] integerValue];
+            NSInteger side = 0;
+            if (w > 0 && h > 0) side = (w < h) ? w : h;
+            NSString *lbl = (side > 0) ? [self _dyyyQualityLabelForSide:side] : @"";
+            long long size = [h264[@"data_size"] longLongValue];
+            NSString *sizeStr = [self _dyyyFormatSize:size];
+            NSString *level = [NSString stringWithFormat:@"[实况%@ H.264]-[30FPS]", lbl];
+            if (sizeStr.length > 0) level = [level stringByAppendingFormat:@"-[%@]", sizeStr];
+            [out addObject:@{@"level": level, @"url": u, @"size": @(size)}];
+        }
+    }
+    if (out.count == 0) {
+        NSDictionary *pa = v[@"play_addr"];
+        if ([pa isKindOfClass:[NSDictionary class]]) {
+            NSArray *ul = pa[@"url_list"];
+            NSString *u = ([ul isKindOfClass:[NSArray class]] && ul.count > 0 && [ul[0] isKindOfClass:[NSString class]]) ? ul[0] : nil;
+            if (u.length > 0) {
+                long long size = [pa[@"data_size"] longLongValue];
+                NSString *sizeStr = [self _dyyyFormatSize:size];
+                NSString *level = @"[实况]-[30FPS]";
+                if (sizeStr.length > 0) level = [level stringByAppendingFormat:@"-[%@]", sizeStr];
+                [out addObject:@{@"level": level, @"url": u, @"size": @(size)}];
+            }
+        }
+    }
+    return out;
+}
+
++ (NSDictionary *)_dyyyTikHubSyncGet:(NSString *)apiUrl {
+    if (apiUrl.length == 0) return nil;
+    NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:apiUrl]];
+    request.timeoutInterval = 20;
+    [request setValue:@"Bearer g80zOu8u/2yQl1PIGK6F2xPbCgmuaoE7xELcgR/ZVPW9127hKnuKVxGEGQ==" forHTTPHeaderField:@"Authorization"];
+    [request setValue:@"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36" forHTTPHeaderField:@"User-Agent"];
+    [request setValue:@"application/json" forHTTPHeaderField:@"Accept"];
+    __block NSData *respData = nil;
+    __block BOOL failed = NO;
+    dispatch_semaphore_t sem = dispatch_semaphore_create(0);
+    NSURLSessionDataTask *task = [[NSURLSession sharedSession] dataTaskWithRequest:request completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
+        if (error) { failed = YES; }
+        else {
+            NSHTTPURLResponse *http = (NSHTTPURLResponse *)response;
+            if ([http isKindOfClass:[NSHTTPURLResponse class]] && http.statusCode >= 400) failed = YES;
+            else respData = data;
+        }
+        dispatch_semaphore_signal(sem);
+    }];
+    [task resume];
+    dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, 25LL * NSEC_PER_SEC));
+    if (failed || respData.length == 0) return nil;
+    id obj = [NSJSONSerialization JSONObjectWithData:respData options:0 error:nil];
+    return ([obj isKindOfClass:[NSDictionary class]]) ? obj : nil;
+}
+
+// ===== 2.2-64 TikHub 直连 v2：并行编排 + 24h本地缓存 + transform_to_dyyy 1:1 对齐v33 =====
+
++ (NSString *)_dyyyFormatSize:(long long)size {
+    if (size >= 1024 * 1024 * 1024) return [NSString stringWithFormat:@"%.2fGB", size / 1073741824.0];
+    if (size >= 1024 * 1024) return [NSString stringWithFormat:@"%.1fMB", size / 1048576.0];
+    if (size >= 1024) return [NSString stringWithFormat:@"%.0fKB", size / 1024.0];
+    return @"";
+}
+
++ (NSString *)_dyyyQLabel:(NSString *)gearName qt:(NSString *)qualityType width:(NSInteger)width live:(BOOL)isLive {
+    // v33 _quality_label 1:1：width(短边)优先，gear_name清理后匹配，quality_type兜底
+    NSString *prefix = isLive ? @"实况" : @"";
+    if (width > 0) {
+        if (width >= 1920) return [prefix stringByAppendingString:@"【极致】4K"];
+        if (width >= 1440) return [prefix stringByAppendingString:@"【高清】2K"];
+        if (width >= 1080) return [prefix stringByAppendingString:@"【清晰】1080P"];
+        if (width >= 720) return [prefix stringByAppendingString:@"【标准】720P"];
+        if (width >= 540) return [prefix stringByAppendingString:@"【模糊】540P"];
+        if (width >= 480) return [prefix stringByAppendingString:@"【模糊】480P"];
+        if (width >= 360) return [prefix stringByAppendingString:@"【模糊】360P"];
+    }
+    NSString *gn = [(gearName ?: @"") lowercaseString];
+    NSArray *pre1 = @[@"adapt_lowest_", @"adapt_lower_", @"adapt_low_", @"adapt_"];
+    for (NSString *p in pre1) { if ([gn hasPrefix:p]) { gn = [gn substringFromIndex:p.length]; break; } }
+    NSArray *pre2 = @[@"normal_", @"additional_", @"lower_", @"low_"];
+    for (NSString *p in pre2) { if ([gn hasPrefix:p]) { gn = [gn substringFromIndex:p.length]; break; } }
+    if ([gn containsString:@"2k"] || [gn containsString:@"2048"] || [gn containsString:@"1440"]) return [prefix stringByAppendingString:@"【高清】2K"];
+    if ([gn containsString:@"1080"]) return [prefix stringByAppendingString:@"【清晰】1080P"];
+    if ([gn containsString:@"720"]) return [prefix stringByAppendingString:@"【标准】720P"];
+    if ([gn containsString:@"540"]) return [prefix stringByAppendingString:@"【模糊】540P"];
+    if ([gn containsString:@"480"]) return [prefix stringByAppendingString:@"【模糊】480P"];
+    if ([gn containsString:@"360"]) return [prefix stringByAppendingString:@"【模糊】360P"];
+    if (gearName.length > 0) return [NSString stringWithFormat:@"%@【模糊】%@", prefix, gearName];
+    if (qualityType.length > 0) return [NSString stringWithFormat:@"%@【模糊】%@p", prefix, qualityType];
+    return [prefix stringByAppendingString:@"默认"];
+}
+
++ (NSMutableArray *)_dyyyDedupeVideos:(NSArray *)videoList {
+    // v33 去重规则 1:1：按level第一段方括号映射清晰度key，同key保留size最大；实况N不互去重
+    NSMutableDictionary *seen = [NSMutableDictionary dictionary];
+    NSMutableArray *deduped = [NSMutableArray array];
+    NSRegularExpression *re = [NSRegularExpression regularExpressionWithPattern:@"\\[([^\\]]+)\\]" options:0 error:nil];
+    NSRegularExpression *lre = [NSRegularExpression regularExpressionWithPattern:@"实况(\\d+)" options:0 error:nil];
+    for (NSDictionary *v in videoList) {
+        if (![v isKindOfClass:[NSDictionary class]]) continue;
+        NSString *level = v[@"level"] ?: @"";
+        NSString *qualityPart = level;
+        if (re) {
+            NSTextCheckingResult *m = [re firstMatchInString:level options:0 range:NSMakeRange(0, level.length)];
+            if (m && [m numberOfRanges] > 1) qualityPart = [level substringWithRange:[m rangeAtIndex:1]];
+        }
+        NSString *key;
+        if ([qualityPart containsString:@"原画"] || [qualityPart containsString:@"最高画质"]) key = @"原画";
+        else if ([qualityPart containsString:@"2K"] || [qualityPart containsString:@"高清"]) key = @"2K";
+        else if ([qualityPart containsString:@"1080"] || [qualityPart containsString:@"清晰"]) key = @"1080P";
+        else if ([qualityPart containsString:@"720"] || [qualityPart containsString:@"标准"]) key = @"720P";
+        else if ([qualityPart containsString:@"540"]) key = @"540P";
+        else if ([qualityPart containsString:@"480"]) key = @"480P";
+        else if ([qualityPart containsString:@"360"]) key = @"360P";
+        else key = qualityPart;
+        if ([qualityPart containsString:@"实况"] && lre) {
+            NSTextCheckingResult *lm = [lre firstMatchInString:qualityPart options:0 range:NSMakeRange(0, qualityPart.length)];
+            if (lm && [lm numberOfRanges] > 1) key = [key stringByAppendingFormat:@"_live%@", [qualityPart substringWithRange:[lm rangeAtIndex:1]]];
+        }
+        long long newSize = [v[@"size"] longLongValue];
+        NSNumber *oldIdx = seen[key];
+        if (!oldIdx) {
+            seen[key] = @(deduped.count);
+            [deduped addObject:v];
+        } else {
+            NSDictionary *old = deduped[oldIdx.unsignedIntegerValue];
+            if (newSize > [old[@"size"] longLongValue]) deduped[oldIdx.unsignedIntegerValue] = v;
+        }
+    }
+    return deduped;
+}
+
++ (NSString *)_dyyyCanonicalAwemeId:(NSString *)shareLink {
+    // 跟随短链重定向拿最终URL提取视频/图集ID（不花TikHub额度）
+    if (shareLink.length == 0) return nil;
+    NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:shareLink]];
+    request.timeoutInterval = 10;
+    [request setValue:@"Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15" forHTTPHeaderField:@"User-Agent"];
+    __block NSURL *finalURL = nil;
+    dispatch_semaphore_t sem = dispatch_semaphore_create(0);
+    NSURLSessionDataTask *task = [[NSURLSession sharedSession] dataTaskWithRequest:request completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
+        finalURL = response.URL;
+        dispatch_semaphore_signal(sem);
+    }];
+    [task resume];
+    dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, 12LL * NSEC_PER_SEC));
+    if (!finalURL || !finalURL.absoluteString) return nil;
+    NSString *s = finalURL.absoluteString;
+    NSError *err = nil;
+    NSRegularExpression *re = [NSRegularExpression regularExpressionWithPattern:@"/(?:video|note|slides)/(\\d+)" options:0 error:&err];
+    if (!re) return nil;
+    NSTextCheckingResult *m = [re firstMatchInString:s options:0 range:NSMakeRange(0, s.length)];
+    if (m && [m numberOfRanges] > 1) return [s substringWithRange:[m rangeAtIndex:1]];
+    return nil;
+}
+
++ (NSDictionary *)_dyyyTikHubCacheGet:(NSString *)awemeId {
+    if (awemeId.length == 0) return nil;
+    NSDictionary *cache = [[NSUserDefaults standardUserDefaults] dictionaryForKey:[NSString stringWithFormat:@"DYYYTikHubAPICache_%@", awemeId]];
+    if (![cache isKindOfClass:[NSDictionary class]]) return nil;
+    NSDate *ts = cache[@"_ts"];
+    if (![ts isKindOfClass:[NSDate class]]) return nil;
+    if (-[ts timeIntervalSinceNow] > 24.0 * 3600.0) return nil;
+    NSDictionary *result = cache[@"result"];
+    return ([result isKindOfClass:[NSDictionary class]]) ? result : nil;
+}
+
++ (void)_dyyyTikHubCacheSet:(NSString *)awemeId result:(NSDictionary *)result {
+    if (awemeId.length == 0 || !result) return;
+    [[NSUserDefaults standardUserDefaults] setObject:@{@"_ts": [NSDate date], @"result": result} forKey:[NSString stringWithFormat:@"DYYYTikHubAPICache_%@", awemeId]];
+}
+
++ (NSString *)_dyyyPickImageUrl:(NSDictionary *)img {
+    // v33规则 1:1：url_list→download_url_list 两轮，URL含.jpeg/.jpg优先，其次webp，最后heic
+    if (![img isKindOfClass:[NSDictionary class]]) return nil;
+    NSMutableArray *pools = [NSMutableArray array];
+    id ul = img[@"url_list"]; if ([ul isKindOfClass:[NSArray class]]) [pools addObject:ul];
+    id dl = img[@"download_url_list"]; if ([dl isKindOfClass:[NSArray class]]) [pools addObject:dl];
+    for (NSArray *pool in pools) {
+        NSString *jpeg = nil, *webp = nil, *heic = nil;
+        for (NSString *u in pool) {
+            if (![u isKindOfClass:[NSString class]] || ![u hasPrefix:@"http"]) continue;
+            NSString *low = u.lowercaseString;
+            if ([low containsString:@".jpeg"] || [low containsString:@".jpg"]) { jpeg = u; break; }
+            else if (!webp && [low containsString:@".webp"]) webp = u;
+            else if (!heic && [low containsString:@".heic"]) heic = u;
+        }
+        NSString *pick = jpeg ?: webp ?: heic;
+        if (pick.length > 0) return pick;
+    }
+    return nil;
+}
+
++ (NSArray *)_dyyyLiveVideosFromImg:(NSDictionary *)img {
+    // v33 _extract_video_from_live_photo 1:1：bit_rate全档(降序) + play_addr_h264(H.264兼容) + play_addr兜底
+    NSMutableArray *out = [NSMutableArray array];
+    NSDictionary *v = img[@"video"];
+    if (![v isKindOfClass:[NSDictionary class]]) return out;
+    NSArray *br = v[@"bit_rate"];
+    if ([br isKindOfClass:[NSArray class]]) {
+        NSArray *sorted = [br sortedArrayUsingComparator:^NSComparisonResult(id a, id b) {
+            NSInteger ra = [a isKindOfClass:[NSDictionary class]] ? [((NSDictionary *)a)[@"bit_rate"] integerValue] : 0;
+            NSInteger rb = [b isKindOfClass:[NSDictionary class]] ? [((NSDictionary *)b)[@"bit_rate"] integerValue] : 0;
+            return (ra > rb) ? NSOrderedAscending : ((ra < rb) ? NSOrderedDescending : NSOrderedSame);
+        }];
+        for (NSDictionary *b in sorted) {
+            if (![b isKindOfClass:[NSDictionary class]]) continue;
+            NSDictionary *pa = b[@"play_addr"];
+            if (![pa isKindOfClass:[NSDictionary class]]) continue;
+            NSArray *ul = pa[@"url_list"];
+            NSString *u = ([ul isKindOfClass:[NSArray class]] && ul.count > 0 && [ul[0] isKindOfClass:[NSString class]]) ? ul[0] : nil;
+            if (u.length == 0) continue;
+            NSInteger w = [pa[@"width"] integerValue];
+            long long size = [pa[@"data_size"] longLongValue];
+            if (size == 0) size = [b[@"video_size"] longLongValue];
+            NSInteger fps = [b[@"FPS"] integerValue];
+            if (fps <= 0) fps = [b[@"frame_rate"] integerValue];
+            if (fps <= 0) fps = 30;
+            NSString *lbl = [self _dyyyQLabel:b[@"gear_name"] qt:b[@"quality_type"] width:w live:YES];
+            NSString *sizeStr = [self _dyyyFormatSize:size];
+            NSString *level = [NSString stringWithFormat:@"[%@]-[%ldFPS]", lbl, (long)fps];
+            if (sizeStr.length > 0) level = [level stringByAppendingFormat:@"-[%@]", sizeStr];
+            [out addObject:@{@"url": u, @"level": level, @"size": @(size)}];
+        }
+    }
+    NSDictionary *h264 = v[@"play_addr_h264"];
+    if ([h264 isKindOfClass:[NSDictionary class]]) {
+        NSArray *ul = h264[@"url_list"];
+        NSString *u = ([ul isKindOfClass:[NSArray class]] && ul.count > 0 && [ul[0] isKindOfClass:[NSString class]]) ? ul[0] : nil;
+        if (u.length > 0) {
+            NSInteger w = [h264[@"width"] integerValue], h = [h264[@"height"] integerValue];
+            NSInteger side = (w > 0 && h > 0) ? ((w < h) ? w : h) : 0;
+            long long size = [h264[@"data_size"] longLongValue];
+            NSString *lbl = (side > 0) ? [self _dyyyQLabel:[NSString stringWithFormat:@"normal_%ld_0", (long)side] qt:@"" width:side live:YES] : @"实况";
+            NSString *sizeStr = [self _dyyyFormatSize:size];
+            NSString *level = [NSString stringWithFormat:@"[%@ H.264]-[30FPS]", lbl];
+            if (sizeStr.length > 0) level = [level stringByAppendingFormat:@"-[%@]", sizeStr];
+            [out addObject:@{@"url": u, @"level": level, @"size": @(size)}];
+        }
+    }
+    if (out.count == 0) {
+        NSDictionary *pa = v[@"play_addr"];
+        if ([pa isKindOfClass:[NSDictionary class]]) {
+            NSArray *ul = pa[@"url_list"];
+            NSString *u = ([ul isKindOfClass:[NSArray class]] && ul.count > 0 && [ul[0] isKindOfClass:[NSString class]]) ? ul[0] : nil;
+            if (u.length > 0) {
+                long long size = [pa[@"data_size"] longLongValue];
+                NSString *sizeStr = [self _dyyyFormatSize:size];
+                NSString *level = @"[实况]-[30FPS]";
+                if (sizeStr.length > 0) level = [level stringByAppendingFormat:@"-[%@]", sizeStr];
+                [out addObject:@{@"url": u, @"level": level, @"size": @(size)}];
+            }
+        }
+    }
+    return out;
+}
+
++ (NSDictionary *)_dyyyTikHubMusicDetail:(NSString *)musicId {
+    // v33 fetch_music_detail 1:1
+    if (musicId.length == 0) return nil;
+    NSDictionary *resp = [self _dyyyTikHubSyncGet:[NSString stringWithFormat:@"https://api.tikhub.dev/api/v1/douyin/app/v3/fetch_music_detail?music_id=%@", musicId]];
+    NSDictionary *mi = resp[@"data"][@"music_info"];
+    if (![mi isKindOfClass:[NSDictionary class]]) return nil;
+    NSMutableArray *urls = [NSMutableArray array];
+    NSDictionary *pu = mi[@"play_url"];
+    if ([pu isKindOfClass:[NSDictionary class]]) {
+        NSArray *ul = pu[@"url_list"];
+        if ([ul isKindOfClass:[NSArray class]]) for (NSString *u in ul) { if ([u isKindOfClass:[NSString class]] && [u hasPrefix:@"http"] && ![urls containsObject:u]) [urls addObject:u]; }
+        NSString *uri = pu[@"uri"];
+        if ([uri isKindOfClass:[NSString class]] && [uri hasPrefix:@"http"] && ![urls containsObject:uri]) [urls addObject:uri];
+    }
+    if (urls.count == 0) {
+        id extra = mi[@"extra"];
+        if ([extra isKindOfClass:[NSString class]]) {
+            NSData *ed = [(NSString *)extra dataUsingEncoding:NSUTF8StringEncoding];
+            id eo = ed ? [NSJSONSerialization JSONObjectWithData:ed options:0 error:nil] : nil;
+            if ([eo isKindOfClass:[NSDictionary class]]) extra = eo;
+        }
+        if ([extra isKindOfClass:[NSDictionary class]]) {
+            NSString *orig = ((NSDictionary *)extra)[@"original_song_url"];
+            if ([orig isKindOfClass:[NSString class]] && [orig hasPrefix:@"http"]) [urls addObject:orig];
+        }
+    }
+    if (urls.count == 0) return nil;
+    return @{@"url": urls[0], @"url_list": urls, @"title": mi[@"title"] ?: @"", @"author": mi[@"author"] ?: @"", @"duration": mi[@"duration"] ?: @(0)};
+}
+
++ (NSDictionary *)_dyyyTikHubSyncGet:(NSString *)apiUrl {
+    if (apiUrl.length == 0) return nil;
+    NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:apiUrl]];
+    request.timeoutInterval = 20;
+    [request setValue:@"Bearer g80zOu8u/2yQl1PIGK6F2xPbCgmuaoE7xELcgR/ZVPW9127hKnuKVxGEGQ==" forHTTPHeaderField:@"Authorization"];
+    [request setValue:@"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36" forHTTPHeaderField:@"User-Agent"];
+    [request setValue:@"application/json" forHTTPHeaderField:@"Accept"];
+    __block NSData *respData = nil;
+    __block BOOL failed = NO;
+    dispatch_semaphore_t sem = dispatch_semaphore_create(0);
+    NSURLSessionDataTask *task = [[NSURLSession sharedSession] dataTaskWithRequest:request completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
+        if (error) { failed = YES; }
+        else {
+            NSHTTPURLResponse *http = (NSHTTPURLResponse *)response;
+            if ([http isKindOfClass:[NSHTTPURLResponse class]] && http.statusCode >= 400) failed = YES;
+            else respData = data;
+        }
+        dispatch_semaphore_signal(sem);
+    }];
+    [task resume];
+    dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, 25LL * NSEC_PER_SEC));
+    if (failed || respData.length == 0) return nil;
+    id obj = [NSJSONSerialization JSONObjectWithData:respData options:0 error:nil];
+    return ([obj isKindOfClass:[NSDictionary class]]) ? obj : nil;
+}
+
 + (void)requestTikHubDirect:(NSString *)shareLink {
     if (shareLink.length == 0) { [DYYYUtils showToast:@"无法获取分享链接"]; return; }
-    NSString *encoded = [shareLink stringByAddingPercentEncodingWithAllowedCharacters:[NSCharacterSet URLQueryAllowedCharacterSet]];
-    NSString *hybridUrl = [NSString stringWithFormat:@"https://api.tikhub.dev/api/v1/hybrid/video_data?url=%@&minimal=false", encoded];
     [DYYYUtils showToast:@"TikHub解析中..."];
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
         @try {
-            // Step1: hybrid 打底（基础数据/图片/音乐/作者）
+            // Step0: 缓存——短链跟随重定向拿aweme_id，命中24h内缓存秒出（零额度）
+            NSString *cachedId = [self _dyyyCanonicalAwemeId:shareLink];
+            NSDictionary *cached = [self _dyyyTikHubCacheGet:cachedId];
+            if (cached) {
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    [DYYYUtils showToast:@"缓存命中，秒出"];
+                    [self handleVideoData:cached];
+                });
+                return;
+            }
+            // Step1: hybrid 打底（基础数据/图片/音乐/作者/实况bit_rate）
+            NSString *encoded = [shareLink stringByAddingPercentEncodingWithAllowedCharacters:[NSCharacterSet URLQueryAllowedCharacterSet]];
+            NSString *hybridUrl = [NSString stringWithFormat:@"https://api.tikhub.dev/api/v1/hybrid/video_data?url=%@&minimal=false", encoded];
             NSDictionary *hybridResp = [self _dyyyTikHubSyncGet:hybridUrl];
             NSDictionary *detail = hybridResp[@"data"];
             if (![detail isKindOfClass:[NSDictionary class]]) {
@@ -5023,34 +5481,106 @@ static NSString *DYYYFetchAwemeDetailViaWebView(NSString *awemeId, NSMutableStri
             }
             NSString *awemeId = detail[@"aweme_id"];
             if (![awemeId isKindOfClass:[NSString class]]) awemeId = ([detail[@"aweme_id"] isKindOfClass:[NSNumber class]]) ? [(NSNumber *)detail[@"aweme_id"] stringValue] : @"";
-            // 图集判定（与适配器一致，图集不调视频补充接口）
-            BOOL isImagePost = NO;
-            NSInteger awemeType = [detail[@"aweme_type"] integerValue];
-            if (awemeType == 68 || awemeType == 150) isImagePost = YES;
+            if (awemeId.length == 0) awemeId = cachedId;
+            // 类型判定（v33 1:1）：is_live=首图有live_photo_type/clip_type(4,5)且有video；is_image=所有图无标记
             NSArray *rawImages = detail[@"image_post_info"][@"images"];
             if (![rawImages isKindOfClass:[NSArray class]]) rawImages = detail[@"images"];
-            if ([rawImages isKindOfClass:[NSArray class]] && rawImages.count > 0) isImagePost = YES;
-            NSDictionary *webDetail = nil;
-            NSDictionary *originData = nil;
-            NSNumber *playCount = nil;
-            if (!isImagePost && awemeId.length > 0) {
-                // Step2: web 接口完整画质（hybrid bit_rate 只有压缩版）
-                NSDictionary *webResp = [self _dyyyTikHubSyncGet:[NSString stringWithFormat:@"https://api.tikhub.dev/api/v1/douyin/web/fetch_one_video?aweme_id=%@", awemeId]];
-                id wd = webResp[@"data"][@"aweme_detail"];
-                if ([wd isKindOfClass:[NSDictionary class]]) webDetail = wd;
-                // Step3: 原画（最高画质）
-                NSDictionary *originResp = [self _dyyyTikHubSyncGet:[NSString stringWithFormat:@"https://api.tikhub.dev/api/v1/douyin/app/v3/fetch_video_high_quality_play_url?aweme_id=%@", awemeId]];
-                id od = originResp[@"data"];
-                if ([od isKindOfClass:[NSDictionary class]] && [(NSString *)od[@"original_video_url"] length] > 0) originData = od;
-                // Step4: 播放量（hybrid 的 play_count 恒为 0）
-                NSDictionary *statsResp = [self _dyyyTikHubSyncGet:[NSString stringWithFormat:@"https://api.tikhub.dev/api/v1/douyin/app/v3/fetch_video_statistics?aweme_ids=%@", awemeId]];
-                id slist = statsResp[@"data"][@"statistics_list"];
-                if ([slist isKindOfClass:[NSArray class]] && [(NSArray *)slist count] > 0 && [slist[0] isKindOfClass:[NSDictionary class]]) {
-                    id pc = ((NSDictionary *)slist[0])[@"play_count"];
-                    if ([pc isKindOfClass:[NSNumber class]]) playCount = pc;
+            if (![rawImages isKindOfClass:[NSArray class]]) rawImages = @[];
+            BOOL hasImages = rawImages.count > 0;
+            BOOL isLivePost = NO;
+            BOOL isImagePost = NO;
+            if (hasImages) {
+                NSDictionary *img0 = rawImages[0];
+                if ([img0 isKindOfClass:[NSDictionary class]]) {
+                    id lpt = img0[@"live_photo_type"];
+                    BOOL lptTruthy = NO;
+                    if ([lpt respondsToSelector:@selector(boolValue)]) lptTruthy = [(NSNumber *)lpt boolValue];
+                    else if ([lpt isKindOfClass:[NSString class]]) lptTruthy = [(NSString *)lpt length] > 0;
+                    NSInteger ct = [img0[@"clip_type"] integerValue];
+                    isLivePost = (lptTruthy || ct == 4 || ct == 5) && ([img0[@"video"] isKindOfClass:[NSDictionary class]]);
+                }
+                BOOL anyMark = NO;
+                for (NSDictionary *img in rawImages) {
+                    if (![img isKindOfClass:[NSDictionary class]]) continue;
+                    id lp = img[@"live_photo_type"];
+                    BOOL lpT = NO;
+                    if ([lp respondsToSelector:@selector(boolValue)]) lpT = [(NSNumber *)lp boolValue];
+                    else if ([lp isKindOfClass:[NSString class]]) lpT = [(NSString *)lp length] > 0;
+                    NSInteger c = [img[@"clip_type"] integerValue];
+                    if (lpT || c == 4 || c == 5) { anyMark = YES; break; }
+                }
+                isImagePost = hasImages && !anyMark;
+            }
+            // 音乐ID与有无URL（决定是否调music_detail接口，v33同条件）
+            NSDictionary *hMusic = detail[@"music"];
+            NSString *musicId = @"";
+            BOOL hasMusicUrl = NO;
+            if ([hMusic isKindOfClass:[NSDictionary class]]) {
+                id mid = ((NSDictionary *)hMusic)[@"id_str"];
+                if (![mid isKindOfClass:[NSString class]]) mid = ((NSDictionary *)hMusic)[@"id"];
+                if ([mid isKindOfClass:[NSString class]]) musicId = mid;
+                else if ([mid isKindOfClass:[NSNumber class]]) musicId = [(NSNumber *)mid stringValue];
+                NSDictionary *hpu = ((NSDictionary *)hMusic)[@"play_url"];
+                if ([hpu isKindOfClass:[NSDictionary class]]) {
+                    NSArray *hul = ((NSDictionary *)hpu)[@"url_list"];
+                    if ([hul isKindOfClass:[NSArray class]]) for (NSString *u in hul) { if ([u isKindOfClass:[NSString class]] && [u hasPrefix:@"http"]) { hasMusicUrl = YES; break; } }
+                    if (!hasMusicUrl) { NSString *hu = ((NSDictionary *)hpu)[@"uri"]; if ([hu isKindOfClass:[NSString class]] && [hu hasPrefix:@"http"]) hasMusicUrl = YES; }
+                }
+                if (!hasMusicUrl) {
+                    id hex = ((NSDictionary *)hMusic)[@"extra"];
+                    if ([hex isKindOfClass:[NSString class]]) {
+                        NSData *ed = [(NSString *)hex dataUsingEncoding:NSUTF8StringEncoding];
+                        id eo = ed ? [NSJSONSerialization JSONObjectWithData:ed options:0 error:nil] : nil;
+                        if ([eo isKindOfClass:[NSDictionary class]]) hex = eo;
+                    }
+                    if ([hex isKindOfClass:[NSDictionary class]]) {
+                        NSString *os = ((NSDictionary *)hex)[@"original_song_url"];
+                        if ([os isKindOfClass:[NSString class]] && [os hasPrefix:@"http"]) hasMusicUrl = YES;
+                    }
                 }
             }
-            NSDictionary *result = [self adaptTikHubDetailToDYYY:detail webDetail:webDetail originData:originData playCount:playCount];
+            // Step2/3/4(+music) 并行（v33调用条件 1:1：web=非实况非图集；origin/stats=非图集；music=无音频且有music_id）
+            __block NSDictionary *webDetail = nil;
+            __block NSDictionary *originData = nil;
+            __block NSNumber *playCount = nil;
+            __block NSDictionary *musicFromDetail = nil;
+            if (awemeId.length > 0 && !isImagePost) {
+                dispatch_group_t grp = dispatch_group_create();
+                if (!isLivePost) {
+                    dispatch_group_enter(grp);
+                    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+                        NSDictionary *webResp = [self _dyyyTikHubSyncGet:[NSString stringWithFormat:@"https://api.tikhub.dev/api/v1/douyin/web/fetch_one_video?aweme_id=%@", awemeId]];
+                        id wd = webResp[@"data"][@"aweme_detail"];
+                        if ([wd isKindOfClass:[NSDictionary class]]) webDetail = wd;
+                        dispatch_group_leave(grp);
+                    });
+                }
+                dispatch_group_enter(grp);
+                dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+                    NSDictionary *originResp = [self _dyyyTikHubSyncGet:[NSString stringWithFormat:@"https://api.tikhub.dev/api/v1/douyin/app/v3/fetch_video_high_quality_play_url?aweme_id=%@", awemeId]];
+                    id od = originResp[@"data"];
+                    if ([od isKindOfClass:[NSDictionary class]] && [(NSString *)od[@"original_video_url"] length] > 0) originData = od;
+                    dispatch_group_leave(grp);
+                });
+                dispatch_group_enter(grp);
+                dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+                    NSDictionary *statsResp = [self _dyyyTikHubSyncGet:[NSString stringWithFormat:@"https://api.tikhub.dev/api/v1/douyin/app/v3/fetch_video_statistics?aweme_ids=%@", awemeId]];
+                    id slist = statsResp[@"data"][@"statistics_list"];
+                    if ([slist isKindOfClass:[NSArray class]] && [(NSArray *)slist count] > 0 && [slist[0] isKindOfClass:[NSDictionary class]]) {
+                        id pc = ((NSDictionary *)slist[0])[@"play_count"];
+                        if ([pc isKindOfClass:[NSNumber class]]) playCount = pc;
+                    }
+                    dispatch_group_leave(grp);
+                });
+                dispatch_group_enter(grp);
+                dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+                    if (!hasMusicUrl && musicId.length > 0) musicFromDetail = [self _dyyyTikHubMusicDetail:musicId];
+                    dispatch_group_leave(grp);
+                });
+                dispatch_group_wait(grp, DISPATCH_TIME_FOREVER);
+            }
+            NSDictionary *result = [self adaptTikHubDetailToDYYY:detail webDetail:webDetail originData:originData playCount:playCount musicFromDetail:musicFromDetail];
+            if (result) [self _dyyyTikHubCacheSet:awemeId result:result];
             dispatch_async(dispatch_get_main_queue(), ^{
                 if (!result) { [DYYYUtils showToast:@"TikHub未返回可用视频数据"]; return; }
                 [self handleVideoData:result];
@@ -5062,182 +5592,296 @@ static NSString *DYYYFetchAwemeDetailViaWebView(NSString *awemeId, NSMutableStri
     });
 }
 
-// ===== 2.2-63 TikHub aweme_detail → DYYY result 适配（v33规则：web完整画质优先 + 原画插头 + 播放量） =====
+// ===== 2.2-64 transform_to_dyyy 1:1 适配（v33 schema：video_list/cover/music/music_detail/images/livePhotos/url/vid） =====
 
-+ (NSDictionary *)adaptTikHubDetailToDYYY:(NSDictionary *)awemeDetail webDetail:(NSDictionary *)webDetail originData:(NSDictionary *)originData playCount:(NSNumber *)playCount {
++ (NSDictionary *)adaptTikHubDetailToDYYY:(NSDictionary *)awemeDetail webDetail:(NSDictionary *)webDetail originData:(NSDictionary *)originData playCount:(NSNumber *)playCount musicFromDetail:(NSDictionary *)musicFromDetail {
     @try {
         if (!awemeDetail || ![awemeDetail isKindOfClass:[NSDictionary class]]) return nil;
-        // 视频数据源：优先 web 接口完整画质（normal_1080_0 等完整版），hybrid 压缩版兼底
-        NSDictionary *videoObj = nil;
-        id wv = webDetail[@"video"];
-        if ([wv isKindOfClass:[NSDictionary class]]) {
-            NSArray *wb = ((NSDictionary *)wv)[@"bit_rate"];
-            if ([wb isKindOfClass:[NSArray class]] && wb.count > 0) videoObj = wv;
-        }
-        if (!videoObj) videoObj = awemeDetail[@"video"] ?: @{};
-        NSDictionary *author = awemeDetail[@"author"] ?: @{};
-        NSDictionary *music = awemeDetail[@"music"] ?: @{};
-        NSMutableArray *videoList = [NSMutableArray array];
-        NSMutableArray *images = [NSMutableArray array];
-        NSMutableArray *liveVideoURLs = [NSMutableArray array];
-        NSMutableDictionary *result = [NSMutableDictionary dictionary];
-        BOOL isImagePost = NO;
-        NSInteger awemeType = [awemeDetail[@"aweme_type"] integerValue];
-        if (awemeType == 68 || awemeType == 150) isImagePost = YES;
         NSArray *rawImages = awemeDetail[@"image_post_info"][@"images"];
-        if (!rawImages || ![rawImages isKindOfClass:[NSArray class]]) rawImages = awemeDetail[@"images"];
-        if (!rawImages || ![rawImages isKindOfClass:[NSArray class]]) rawImages = @[];
-        if (rawImages.count > 0) isImagePost = YES;
+        if (![rawImages isKindOfClass:[NSArray class]]) rawImages = awemeDetail[@"images"];
+        if (![rawImages isKindOfClass:[NSArray class]]) rawImages = @[];
+        BOOL hasImages = rawImages.count > 0;
+        BOOL isLivePost = NO;
+        BOOL isImagePost = NO;
+        if (hasImages) {
+            NSDictionary *img0 = rawImages[0];
+            if ([img0 isKindOfClass:[NSDictionary class]]) {
+                id lpt = img0[@"live_photo_type"];
+                BOOL lptTruthy = NO;
+                if ([lpt respondsToSelector:@selector(boolValue)]) lptTruthy = [(NSNumber *)lpt boolValue];
+                else if ([lpt isKindOfClass:[NSString class]]) lptTruthy = [(NSString *)lpt length] > 0;
+                NSInteger ct = [img0[@"clip_type"] integerValue];
+                isLivePost = (lptTruthy || ct == 4 || ct == 5) && ([img0[@"video"] isKindOfClass:[NSDictionary class]]);
+            }
+            BOOL anyMark = NO;
+            for (NSDictionary *img in rawImages) {
+                if (![img isKindOfClass:[NSDictionary class]]) continue;
+                id lp = img[@"live_photo_type"];
+                BOOL lpT = NO;
+                if ([lp respondsToSelector:@selector(boolValue)]) lpT = [(NSNumber *)lp boolValue];
+                else if ([lp isKindOfClass:[NSString class]]) lpT = [(NSString *)lp length] > 0;
+                NSInteger c = [img[@"clip_type"] integerValue];
+                if (lpT || c == 4 || c == 5) { anyMark = YES; break; }
+            }
+            isImagePost = hasImages && !anyMark;
+        }
+        // 普通视频：web完整画质优先，hybrid兜底（v33：web_detail.video存在即用）
+        NSDictionary *videoInfo = nil;
+        id wv = webDetail[@"video"];
+        if ([wv isKindOfClass:[NSDictionary class]]) videoInfo = wv;
+        if (!videoInfo) {
+            id hv = awemeDetail[@"video"];
+            if ([hv isKindOfClass:[NSDictionary class]]) videoInfo = hv;
+        }
+        NSMutableArray *videoList = [NSMutableArray array];
+        NSMutableArray *imageList = [NSMutableArray array];
 
-        // bit_rate 分档取URL（TikHub url_list直接是CDN完整地址，无需换链）
-        NSArray *bitRateList = videoObj[@"bit_rate"];
-        if (!bitRateList || ![bitRateList isKindOfClass:[NSArray class]]) bitRateList = @[];
-        NSMutableDictionary *byQuality = [NSMutableDictionary dictionary];
-        for (NSDictionary *b in bitRateList) {
-            if (![b isKindOfClass:[NSDictionary class]]) continue;
-            NSDictionary *playAddr = b[@"play_addr"] ?: @{};
-            NSInteger width = [playAddr[@"width"] integerValue];
-            NSInteger height = [playAddr[@"height"] integerValue];
-            NSInteger longerSide = (width > height) ? width : height;
-            NSString *qCode = nil;
-            if (longerSide >= 3840) qCode = @"2160p";
-            else if (longerSide >= 2560) qCode = @"1440p";
-            else if (longerSide >= 1920) qCode = @"1080p";
-            else if (longerSide >= 1280) qCode = @"720p";
-            else if (longerSide >= 1024) qCode = @"540p";
-            if (!qCode) continue;
-            NSArray *urlList = playAddr[@"url_list"];
-            NSString *url = (urlList && urlList.count > 0 && [urlList[0] isKindOfClass:[NSString class]]) ? urlList[0] : nil;
-            if (!url || url.length == 0) continue;
-            NSInteger bitRate = [b[@"bit_rate"] integerValue];
-            NSDictionary *existing = byQuality[qCode];
-            if (!existing || bitRate > [existing[@"bitRate"] integerValue]) {
-                byQuality[qCode] = @{@"url": url, @"size": playAddr[@"data_size"] ?: @(0), @"bitRate": @(bitRate), @"fps": b[@"FPS"] ?: b[@"frame_rate"] ?: @(30)};
+        // ---------- 视频 ----------
+        if (isLivePost) {
+            // 实况：每张image的.video提取；多张只留最高画质并加序号
+            BOOL multi = rawImages.count > 1;
+            NSInteger liveSeq = 1;
+            for (NSDictionary *img in rawImages) {
+                if (![img isKindOfClass:[NSDictionary class]]) continue;
+                NSArray *lv = [self _dyyyLiveVideosFromImg:img];
+                if (lv.count == 0) continue;
+                if (multi) {
+                    NSDictionary *best = nil;
+                    long long bestSize = -1;
+                    for (NSDictionary *it in lv) {
+                        long long sz = [it[@"size"] longLongValue];
+                        if (sz > bestSize) { bestSize = sz; best = it; }
+                    }
+                    if (best) {
+                        NSString *nl = best[@"level"] ?: @"";
+                        NSRange r = [nl rangeOfString:@"[实况"];
+                        if (r.location != NSNotFound) nl = [nl stringByReplacingCharactersInRange:NSMakeRange(r.location + 3, 0) withString:[NSString stringWithFormat:@"%ld", (long)liveSeq]];
+                        [videoList addObject:@{@"url": best[@"url"], @"level": nl, @"size": best[@"size"] ?: @(0)}];
+                        liveSeq++;
+                    }
+                } else {
+                    for (NSDictionary *it in lv) [videoList addObject:it];
+                }
+            }
+        } else if (isImagePost) {
+            // 纯图集：不提取视频，video_list保持空（v33同款）
+        } else {
+            // 普通视频：bit_rate全列（降序），原画插头，去重，播放量插头
+            NSArray *bitRates = videoInfo[@"bit_rate"];
+            if ([bitRates isKindOfClass:[NSArray class]]) {
+                NSArray *sorted = [bitRates sortedArrayUsingComparator:^NSComparisonResult(id a, id b) {
+                    NSInteger ra = [a isKindOfClass:[NSDictionary class]] ? [((NSDictionary *)a)[@"bit_rate"] integerValue] : 0;
+                    NSInteger rb = [b isKindOfClass:[NSDictionary class]] ? [((NSDictionary *)b)[@"bit_rate"] integerValue] : 0;
+                    return (ra > rb) ? NSOrderedAscending : ((ra < rb) ? NSOrderedDescending : NSOrderedSame);
+                }];
+                for (NSDictionary *b in sorted) {
+                    if (![b isKindOfClass:[NSDictionary class]]) continue;
+                    NSDictionary *pa = b[@"play_addr"];
+                    if (![pa isKindOfClass:[NSDictionary class]]) continue;
+                    NSArray *ul = pa[@"url_list"];
+                    NSString *u = ([ul isKindOfClass:[NSArray class]] && ul.count > 0 && [ul[0] isKindOfClass:[NSString class]]) ? ul[0] : nil;
+                    if (u.length == 0) continue;
+                    NSInteger w = [pa[@"width"] integerValue];
+                    long long size = [pa[@"data_size"] longLongValue];
+                    if (size == 0) size = [b[@"video_size"] longLongValue];
+                    NSInteger fps = [b[@"FPS"] integerValue];
+                    if (fps <= 0) fps = [b[@"frame_rate"] integerValue];
+                    if (fps <= 0) fps = [videoInfo[@"frame_rate"] integerValue];
+                    if (fps <= 0) fps = 30;
+                    NSString *lbl = [self _dyyyQLabel:b[@"gear_name"] qt:b[@"quality_type"] width:w live:NO];
+                    NSString *sizeStr = [self _dyyyFormatSize:size];
+                    NSString *level = [NSString stringWithFormat:@"[%@]-[%ldFPS]", lbl, (long)fps];
+                    if (sizeStr.length > 0) level = [level stringByAppendingFormat:@"-[%@]", sizeStr];
+                    [videoList addObject:@{@"url": u, @"level": level, @"size": @(size)}];
+                }
+            }
+            if (videoList.count == 0) {
+                NSDictionary *pa = videoInfo[@"play_addr"];
+                if ([pa isKindOfClass:[NSDictionary class]]) {
+                    NSArray *ul = pa[@"url_list"];
+                    NSString *u = ([ul isKindOfClass:[NSArray class]] && ul.count > 0 && [ul[0] isKindOfClass:[NSString class]]) ? ul[0] : nil;
+                    if (u.length > 0) {
+                        long long size = [pa[@"data_size"] longLongValue];
+                        NSString *sizeStr = [self _dyyyFormatSize:size];
+                        NSString *level = @"[默认]-[30FPS]";
+                        if (sizeStr.length > 0) level = [level stringByAppendingFormat:@"-[%@]", sizeStr];
+                        [videoList addObject:@{@"url": u, @"level": level, @"size": @(size)}];
+                    }
+                }
+            }
+            // 原画插头（v33：非图集都调，插video_list首位）
+            if (originData && [(NSString *)originData[@"original_video_url"] length] > 0) {
+                long long oSize = [originData[@"file_size"] longLongValue];
+                NSString *oSizeStr = [self _dyyyFormatSize:oSize];
+                NSString *oLevel = @"[原画【最高画质】]-[60FPS]";
+                if (oSizeStr.length > 0) oLevel = [oLevel stringByAppendingFormat:@"-[%@]", oSizeStr];
+                [videoList insertObject:@{@"url": originData[@"original_video_url"], @"level": oLevel, @"size": @(oSize)} atIndex:0];
             }
         }
-        NSArray *qualities = @[@[@"2160p", @"【极致】4K"], @[@"1440p", @"【高清】2K"], @[@"1080p", @"【清晰】1080P"], @[@"720p", @"【标清】720P"], @[@"540p", @"【流畅】540P"]];
-        NSMutableSet *seen = [NSMutableSet set];
-        for (NSArray *q in qualities) {
-            NSDictionary *qi = byQuality[q[0]];
-            if (!qi) continue;
-            NSString *url = qi[@"url"];
-            if (!url.length || [seen containsObject:url]) continue;
-            [seen addObject:url];
-            long long size = [qi[@"size"] longLongValue];
-            NSInteger fps = [qi[@"fps"] integerValue]; if (fps <= 0) fps = 30;
-            NSString *sizeStr = @"";
-            if (size >= 1024 * 1024 * 1024) sizeStr = [NSString stringWithFormat:@"%.2fGB", (double)size / (1024.0 * 1024.0 * 1024.0)];
-            else if (size >= 1024 * 1024) sizeStr = [NSString stringWithFormat:@"%.1fMB", (double)size / (1024.0 * 1024.0)];
-            else if (size >= 1024) sizeStr = [NSString stringWithFormat:@"%.0fKB", (double)size / 1024.0];
-            NSString *level = [NSString stringWithFormat:@"[%@]-[%ldFPS]", q[1], (long)fps];
-            if (sizeStr.length > 0) level = [level stringByAppendingFormat:@"-[%@]", sizeStr];
-            [videoList addObject:@{@"level": level, @"url": url}];
-        }
-        if (videoList.count == 0 && !isImagePost) {
-            NSArray *fallbackList = videoObj[@"play_addr"][@"url_list"];
-            if ([fallbackList isKindOfClass:[NSArray class]] && fallbackList.count > 0)
-                [videoList addObject:@{@"level": @"[默认]-[30FPS]", @"url": fallbackList[0]}];
+
+        // ---------- 图片（实况+图集都提取，v33同款） ----------
+        for (NSDictionary *img in rawImages) {
+            if (![img isKindOfClass:[NSDictionary class]]) continue;
+            NSString *imgUrl = [self _dyyyPickImageUrl:img];
+            if (imgUrl.length > 0) [imageList addObject:imgUrl];
         }
 
-        // 2.2-63 原画插头（非图集）：web画质之上的最高档
-        if (!isImagePost && originData && [(NSString *)originData[@"original_video_url"] length] > 0) {
-            long long oSize = [originData[@"file_size"] longLongValue];
-            NSString *oSizeStr = @"";
-            if (oSize >= 1024 * 1024 * 1024) oSizeStr = [NSString stringWithFormat:@"%.2fGB", (double)oSize / (1024.0 * 1024.0 * 1024.0)];
-            else if (oSize >= 1024 * 1024) oSizeStr = [NSString stringWithFormat:@"%.1fMB", (double)oSize / (1024.0 * 1024.0)];
-            else if (oSize > 0) oSizeStr = [NSString stringWithFormat:@"%.0fKB", (double)oSize / 1024.0];
-            NSString *oLevel = @"[原画【最高画质】]-[60FPS]";
-            if (oSizeStr.length > 0) oLevel = [oLevel stringByAppendingFormat:@"-[%@]", oSizeStr];
-            [videoList insertObject:@{@"level": oLevel, @"url": originData[@"original_video_url"]} atIndex:0];
+        // ---------- 音乐（v33四级降级 1:1） ----------
+        NSDictionary *hMusic = awemeDetail[@"music"];
+        if (![hMusic isKindOfClass:[NSDictionary class]]) hMusic = @{};
+        NSString *musicId = @"";
+        id mid = hMusic[@"id_str"];
+        if (![mid isKindOfClass:[NSString class]]) mid = hMusic[@"id"];
+        if ([mid isKindOfClass:[NSString class]]) musicId = mid;
+        else if ([mid isKindOfClass:[NSNumber class]]) musicId = [(NSNumber *)mid stringValue];
+        NSDictionary *hpu = hMusic[@"play_url"];
+        if (![hpu isKindOfClass:[NSDictionary class]]) hpu = @{};
+        NSString *music = @"";
+        NSArray *mul = hpu[@"url_list"];
+        if ([mul isKindOfClass:[NSArray class]] && mul.count > 0 && [mul[0] isKindOfClass:[NSString class]]) music = mul[0];
+        if (music.length == 0) {
+            NSString *uri = hpu[@"uri"];
+            if ([uri isKindOfClass:[NSString class]] && [uri hasPrefix:@"http"]) music = uri;
         }
-        // 2.2-63 播放量插头（非图集且已有视频条目）：置顶展示，v33同款
-        if (!isImagePost && videoList.count > 0 && playCount.longLongValue > 0) {
+        NSString *originalSong = @"";
+        if (music.length == 0) {
+            id extra = hMusic[@"extra"];
+            if ([extra isKindOfClass:[NSString class]]) {
+                NSData *ed = [(NSString *)extra dataUsingEncoding:NSUTF8StringEncoding];
+                id eo = ed ? [NSJSONSerialization JSONObjectWithData:ed options:0 error:nil] : nil;
+                if ([eo isKindOfClass:[NSDictionary class]]) extra = eo;
+            }
+            if ([extra isKindOfClass:[NSDictionary class]]) {
+                NSString *os = ((NSDictionary *)extra)[@"original_song_url"];
+                if ([os isKindOfClass:[NSString class]] && [os hasPrefix:@"http"]) { originalSong = os; music = os; }
+            }
+        }
+        // music_detail（v33结构：hybrid数据或music_detail接口）
+        NSMutableDictionary *musicDetail = [NSMutableDictionary dictionary];
+        if (music.length > 0) {
+            if (musicFromDetail && [musicFromDetail isKindOfClass:[NSDictionary class]]) {
+                [musicDetail addEntriesFromDictionary:musicFromDetail];
+            } else {
+                id mAuthor = hMusic[@"author"];
+                NSString *authorStr = @"";
+                if ([mAuthor isKindOfClass:[NSDictionary class]]) {
+                    id nk = ((NSDictionary *)mAuthor)[@"nickname"];
+                    authorStr = ([nk isKindOfClass:[NSString class]]) ? nk : @"";
+                } else if ([mAuthor isKindOfClass:[NSString class]]) {
+                    authorStr = mAuthor;
+                } else if (mAuthor) {
+                    authorStr = [NSString stringWithFormat:@"%@", mAuthor];
+                }
+                NSMutableArray *allUrls = [NSMutableArray array];
+                if ([mul isKindOfClass:[NSArray class]]) for (NSString *u in mul) { if ([u isKindOfClass:[NSString class]] && [u hasPrefix:@"http"] && ![allUrls containsObject:u]) [allUrls addObject:u]; }
+                if (originalSong.length > 0 && ![allUrls containsObject:originalSong]) [allUrls addObject:originalSong];
+                if (![allUrls containsObject:music]) [allUrls insertObject:music atIndex:0];
+                musicDetail[@"url"] = music;
+                musicDetail[@"title"] = hMusic[@"title"] ?: @"";
+                musicDetail[@"author"] = authorStr;
+                if (allUrls.count > 0) musicDetail[@"url_list"] = allUrls;
+            }
+        }
+
+        // ---------- 去重 → 播放量插头（v33顺序 1:1） ----------
+        videoList = [self _dyyyDedupeVideos:videoList];
+        if (videoList.count > 0 && playCount.longLongValue > 0) {
             long long pc = playCount.longLongValue;
             NSString *pcStr;
             if (pc >= 100000000) pcStr = [NSString stringWithFormat:@"%lld亿", pc / 100000000];
             else if (pc >= 10000) pcStr = [NSString stringWithFormat:@"%lld万", pc / 10000];
             else pcStr = [NSString stringWithFormat:@"%lld", pc];
             NSString *firstUrl = ((NSDictionary *)videoList[0])[@"url"] ?: @"";
-            [videoList insertObject:@{@"level": [NSString stringWithFormat:@"当前作品播放量：%@播放", pcStr], @"url": firstUrl} atIndex:0];
+            [videoList insertObject:@{@"url": firstUrl, @"level": [NSString stringWithFormat:@"当前作品播放量：%@播放", pcStr], @"size": @(0)} atIndex:0];
         }
 
-        // 图集/实况照片提取
-        if (isImagePost) {
+        // ---------- livePhotos（实况帖：imageURL+最高画质videoURL） ----------
+        NSMutableArray *livePhotos = [NSMutableArray array];
+        if (isLivePost) {
             for (NSDictionary *img in rawImages) {
                 if (![img isKindOfClass:[NSDictionary class]]) continue;
-                NSArray *urlLists = @[];
-                id displayImage = img[@"origin_image"] ?: img[@"display_image"];
-                if (displayImage && [displayImage isKindOfClass:[NSDictionary class]]) { NSArray *ul = displayImage[@"url_list"]; if ([ul isKindOfClass:[NSArray class]]) urlLists = ul; }
-                if (urlLists.count == 0) { id thumb = img[@"thumbnail"] ?: img; if ([thumb isKindOfClass:[NSDictionary class]]) { NSArray *ul = thumb[@"url_list"]; if ([ul isKindOfClass:[NSArray class]]) urlLists = ul; } }
-                if (urlLists.count == 0) { NSArray *ul = img[@"url_list"]; if ([ul isKindOfClass:[NSArray class]]) urlLists = ul; }
-                NSString *imgUrl = nil;
-                for (NSString *u in urlLists) { if ([u hasSuffix:@".jpeg"] || [u hasSuffix:@".jpg"] || [u hasSuffix:@".png"]) { imgUrl = u; break; } }
-                if (!imgUrl && urlLists.count > 0) imgUrl = urlLists[0];
-                NSDictionary *imgVideo = img[@"video"];
-                NSString *liveVideoUrl = nil;
-                if (imgVideo && [imgVideo isKindOfClass:[NSDictionary class]]) {
-                    NSDictionary *playAddr = imgVideo[@"play_addr"];
-                    if (playAddr && [playAddr isKindOfClass:[NSDictionary class]]) {
-                        NSArray *lvUrls = playAddr[@"url_list"];
-                        if ([lvUrls isKindOfClass:[NSArray class]] && lvUrls.count > 0) liveVideoUrl = lvUrls[0];
-                    }
+                NSString *imgUrl = [self _dyyyPickImageUrl:img];
+                NSArray *lv = [self _dyyyLiveVideosFromImg:img];
+                if (lv.count == 0) continue;
+                NSDictionary *best = nil;
+                long long bestSize = -1;
+                for (NSDictionary *it in lv) {
+                    long long sz = [it[@"size"] longLongValue];
+                    if (sz > bestSize) { bestSize = sz; best = it; }
                 }
-                if (liveVideoUrl.length > 0 && imgUrl.length > 0) {
-                    [videoList addObject:@{@"level": @"实况", @"url": liveVideoUrl}];
-                    [liveVideoURLs addObject:liveVideoUrl];
-                    [images addObject:imgUrl];
-                } else if (imgUrl.length > 0) {
-                    [images addObject:imgUrl];
+                if (imgUrl.length > 0 && best) [livePhotos addObject:@{@"imageURL": imgUrl, @"videoURL": best[@"url"]}];
+
+            }
+        }
+
+        // ---------- 封面（v33规则 1:1） ----------
+        NSString *cover = @"";
+        if (isLivePost) {
+            NSDictionary *liveImg = (rawImages.count > 0 && [rawImages[0] isKindOfClass:[NSDictionary class]]) ? rawImages[0] : @{};
+            NSDictionary *liveV = liveImg[@"video"];
+            if ([liveV isKindOfClass:[NSDictionary class]]) {
+                NSArray *cul = ((NSDictionary *)liveV)[@"cover"][@"url_list"];
+                if ([cul isKindOfClass:[NSArray class]] && cul.count > 0 && [cul[0] isKindOfClass:[NSString class]]) cover = cul[0];
+            }
+            if (cover.length == 0) {
+                NSArray *cul2 = awemeDetail[@"video"][@"cover"][@"url_list"];
+                if ([cul2 isKindOfClass:[NSArray class]] && cul2.count > 0 && [cul2[0] isKindOfClass:[NSString class]]) cover = cul2[0];
+            }
+        } else if (isImagePost) {
+            NSArray *cul = awemeDetail[@"video"][@"cover"][@"url_list"];
+            if ([cul isKindOfClass:[NSArray class]] && cul.count > 0 && [cul[0] isKindOfClass:[NSString class]]) cover = cul[0];
+            if (cover.length == 0 && imageList.count > 0) cover = imageList[0];
+        } else {
+            if (videoInfo) {
+                NSArray *cul = videoInfo[@"cover"][@"url_list"];
+                if ([cul isKindOfClass:[NSArray class]] && cul.count > 0 && [cul[0] isKindOfClass:[NSString class]]) cover = cul[0];
+            }
+            if (cover.length == 0 && imageList.count > 0) cover = imageList[0];
+        }
+
+        // ---------- images 字段（v33条件 1:1） ----------
+        NSArray *imagesOut = @[];
+        if (isImagePost && videoList.count == 0) imagesOut = imageList;
+        else if (isLivePost) imagesOut = imageList;
+
+        // ---------- url/vid（v33规则 1:1） ----------
+        NSString *firstVideoUrl = @"";
+        for (NSDictionary *v in videoList) {
+            NSString *u = v[@"url"];
+            NSString *lv = v[@"level"] ?: @"";
+            if ([u isKindOfClass:[NSString class]] && u.length > 0 && ![lv containsString:@"播放量"]) { firstVideoUrl = u; break; }
+        }
+        if (firstVideoUrl.length == 0 && videoList.count > 0) firstVideoUrl = videoList[0][@"url"] ?: @"";
+        NSString *vid = @"";
+        NSDictionary *topVideo = awemeDetail[@"video"];
+        if ([topVideo isKindOfClass:[NSDictionary class]]) {
+            NSDictionary *tpa = topVideo[@"play_addr"];
+            if ([tpa isKindOfClass:[NSDictionary class]]) {
+                id tu = tpa[@"uri"];
+                if ([tu isKindOfClass:[NSString class]]) vid = tu;
+            }
+            if (vid.length == 0) {
+                NSArray *tbr = topVideo[@"bit_rate"];
+                if ([tbr isKindOfClass:[NSArray class]] && tbr.count > 0 && [tbr[0] isKindOfClass:[NSDictionary class]]) {
+                    NSDictionary *pa0 = ((NSDictionary *)tbr[0])[@"play_addr"];
+                    if ([pa0 isKindOfClass:[NSDictionary class]]) {
+                        id tu0 = pa0[@"uri"];
+                        if ([tu0 isKindOfClass:[NSString class]]) vid = tu0;
+                    }
                 }
             }
         }
 
-        // 封面：优先 hybrid 的 p3-sign 域名（手机可用），web 的 pc-sign 域名仅兼底
-        NSArray *coverUrls = nil;
-        id hcv = awemeDetail[@"video"][@"cover"];
-        if ([hcv isKindOfClass:[NSDictionary class]]) coverUrls = ((NSDictionary *)hcv)[@"url_list"];
-        if (![coverUrls isKindOfClass:[NSArray class]] || ((NSArray *)coverUrls).count == 0) {
-            id wcv = videoObj[@"cover"];
-            if ([wcv isKindOfClass:[NSDictionary class]]) coverUrls = ((NSDictionary *)wcv)[@"url_list"];
-        }
-        if (![coverUrls isKindOfClass:[NSArray class]] || ((NSArray *)coverUrls).count == 0) {
-            id ocv = videoObj[@"origin_cover"];
-            if ([ocv isKindOfClass:[NSDictionary class]]) coverUrls = ((NSDictionary *)ocv)[@"url_list"];
-        }
-        NSString *coverUrl = ([coverUrls isKindOfClass:[NSArray class]] && ((NSArray *)coverUrls).count > 0 && [coverUrls[0] isKindOfClass:[NSString class]]) ? coverUrls[0] : nil;
-        NSString *musicUrl = music[@"play_url"][@"uri"];
-        if (!musicUrl || ![musicUrl isKindOfClass:[NSString class]] || musicUrl.length == 0) { NSArray *mul = music[@"play_url"][@"url_list"]; if ([mul isKindOfClass:[NSArray class]] && mul.count > 0) musicUrl = mul[0]; }
-        // 版权受限歌曲降级：music.extra.original_song_url
-        if (!musicUrl || musicUrl.length == 0) {
-            id extra = music[@"extra"];
-            if ([extra isKindOfClass:[NSDictionary class]]) {
-                NSString *osu = ((NSDictionary *)extra)[@"original_song_url"];
-                if ([osu isKindOfClass:[NSString class]] && [osu hasPrefix:@"http"]) musicUrl = osu;
-            }
-        }
-        NSString *primaryUrl = videoList.count > 0 ? videoList[0][@"url"] : @"";
-        if (!isImagePost) { result[@"cover"] = coverUrl ?: @""; result[@"pics"] = coverUrl ?: @""; }
-        result[@"music"] = musicUrl ?: @"";
-        result[@"music_url"] = musicUrl ?: @"";
-        result[@"url"] = isImagePost ? @"" : primaryUrl;
-        result[@"video"] = isImagePost ? @"" : primaryUrl;
-        result[@"video_url"] = isImagePost ? @"" : primaryUrl;
-        result[@"images"] = isImagePost ? images : @[];
-        result[@"img"] = @[];
-        result[@"live_videos"] = isImagePost ? liveVideoURLs : @[];
-        result[@"image_count"] = @(isImagePost ? images.count : 0);
-        result[@"batch_download"] = @(isImagePost && images.count > 1);
-        if (isImagePost) {
-            NSMutableArray *liveOnlyList = [NSMutableArray array];
-            for (id item in videoList) {
-                if ([item isKindOfClass:[NSDictionary class]] && [((NSDictionary *)item)[@"level"] containsString:@"实况"]) [liveOnlyList addObject:item];
-            }
-            result[@"video_list"] = liveOnlyList;
-        } else {
-            result[@"video_list"] = videoList;
-        }
-        result[@"title"] = awemeDetail[@"desc"] ?: @"";
-        result[@"author"] = author[@"nickname"] ?: @"";
+        // ---------- 组装（v33 schema 一字不差） ----------
+        NSMutableDictionary *result = [NSMutableDictionary dictionary];
+        result[@"video_list"] = videoList;
+        result[@"cover"] = cover ?: @"";
+        result[@"music"] = music ?: @"";
+        result[@"music_detail"] = musicDetail;
+        result[@"images"] = imagesOut;
+        result[@"livePhotos"] = livePhotos;
+        if (firstVideoUrl.length > 0) result[@"url"] = firstVideoUrl;
+        if (vid.length > 0) result[@"vid"] = vid;
         if (((NSArray *)result[@"video_list"]).count == 0 && ((NSArray *)result[@"images"]).count == 0) return nil;
         return result;
     } @catch (NSException *e) {
