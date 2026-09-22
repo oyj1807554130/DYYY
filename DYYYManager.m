@@ -4057,6 +4057,8 @@ static NSString *DYYYFetchAwemeDetailViaWebView(NSString *awemeId, NSMutableStri
                 NSMutableURLRequest *feedReq = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:feedURL]];
                 feedReq.timeoutInterval = 8;
                 [feedReq setValue:@"Aweme/260400 CFNetwork/1498 Darwin/23.0.0" forHTTPHeaderField:@"User-Agent"];
+                // 2.2-68: feed兜底去游客态，改用登录态Cookie（Step1构建：存档登录Cookie优先+ttwid白名单）
+                [feedReq setValue:fullCookieStr forHTTPHeaderField:@"Cookie"];
                 __block NSData *feedData = nil;
                 __block NSInteger feedStatus = 0;
                 dispatch_semaphore_t feedSem = dispatch_semaphore_create(0);
