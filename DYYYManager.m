@@ -4046,7 +4046,16 @@ static NSString *DYYYFetchAwemeDetailViaWebView(NSString *awemeId, NSMutableStri
         [apiTask resume];
         dispatch_semaphore_wait(apiSem, dispatch_time(DISPATCH_TIME_NOW, 15 * NSEC_PER_SEC));
 
+        // ===== 2.2-65 TikHub 最终兜底（仅主链全失败后启用，与feed游客态并行，结果合并一起出来） =====
+        __block NSDictionary *thResult = nil;
+        dispatch_semaphore_t thSem = dispatch_semaphore_create(0);
+
         if (!awemeDetail || ![awemeDetail isKindOfClass:[NSDictionary class]]) {
+            // 2.2-65: TikHub异步起跑（awemeId直连web打底省hybrid额度，24h缓存复用）
+            dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+                thResult = [self _dyyySyncTikHubByAwemeId:awemeId];
+                dispatch_semaphore_signal(thSem);
+            });
             // ===== 2.2-30 feed兜底: App端v1/feed游客态免签名(不走Argus), WebAPI全灭时的稳定底层 =====
             BOOL feedRescued = NO;
             if (!awemeDetail || ![awemeDetail isKindOfClass:[NSDictionary class]]) {
@@ -4102,7 +4111,14 @@ static NSString *DYYYFetchAwemeDetailViaWebView(NSString *awemeId, NSMutableStri
                 }
             }
             if (!awemeDetail || ![awemeDetail isKindOfClass:[NSDictionary class]]) {
-                [probeLog appendFormat:@"\n[失败] Step2+自愈+feed兜底全失败\n"];
+                // 2.2-65: feed未救回，等TikHub最终兜底结果（上限45s）
+                dispatch_semaphore_wait(thSem, dispatch_time(DISPATCH_TIME_NOW, 45LL * NSEC_PER_SEC));
+                if ([thResult isKindOfClass:[NSDictionary class]] && ([(NSArray *)thResult[@"video_list"] count] > 0 || [(NSArray *)thResult[@"images"] count] > 0)) {
+                    [probeLog appendFormat:@"\n[TikHub兜底成功] video_list=%lu images=%lu\n", (unsigned long)[(NSArray *)thResult[@"video_list"] count], (unsigned long)[(NSArray *)thResult[@"images"] count]];
+                    if (completion) completion(thResult);
+                    return;
+                }
+                [probeLog appendFormat:@"\n[失败] Step2+自愈+feed+TikHub全失败\n"];
                 if (completion) completion(nil);
                 return;
             }
@@ -4318,6 +4334,20 @@ static NSString *DYYYFetchAwemeDetailViaWebView(NSString *awemeId, NSMutableStri
             NSString *probeText = [probeLog copy];
         }
 
+        // ===== 2.2-65: feed救回后等TikHub结果合并——两个来源一起出来（普通视频帖；实况/图集帖feed条目已含实况不重复合并） =====
+        if (!isImagePost && [thResult isKindOfClass:[NSDictionary class]]) {
+            dispatch_semaphore_wait(thSem, dispatch_time(DISPATCH_TIME_NOW, 45LL * NSEC_PER_SEC));
+            NSArray *thList = [thResult isKindOfClass:[NSDictionary class]] ? thResult[@"video_list"] : nil;
+            if ([thList isKindOfClass:[NSArray class]] && thList.count > 0) {
+                NSArray *feedList = [result[@"video_list"] isKindOfClass:[NSArray class]] ? result[@"video_list"] : @[];
+                NSUInteger thN = thList.count, feedN = feedList.count;
+                NSMutableArray *merged = [NSMutableArray array];
+                [merged addObjectsFromArray:thList];
+                [merged addObjectsFromArray:feedList];
+                result[@"video_list"] = [self _dyyyDedupeVideos:merged];
+                [probeLog appendFormat:@"\n[合并展示] TikHub %lu条 + feed %lu条 → 去重后 %lu条\n", (unsigned long)thN, (unsigned long)feedN, (unsigned long)((NSArray *)result[@"video_list"]).count];
+            }
+        }
         if (completion) completion(result.count > 0 ? result : nil);
     });
 }
@@ -5381,6 +5411,107 @@ static NSString *DYYYFetchAwemeDetailViaWebView(NSString *awemeId, NSMutableStri
             dispatch_async(dispatch_get_main_queue(), ^{ [DYYYUtils showToast:@"TikHub解析异常，请重试"]; });
         }
     });
+}
+
+// ===== 2.2-65 TikHub 同步编排（接口4最终兜底专用）：awemeId直连，web打底省hybrid额度，结果与接口2共用24h缓存 =====
+
++ (NSDictionary *)_dyyySyncTikHubByAwemeId:(NSString *)awemeId {
+    if (awemeId.length == 0) return nil;
+    NSDictionary *cached = [self _dyyyTikHubCacheGet:awemeId];
+    if (cached) return cached;
+    NSDictionary *webResp = [self _dyyyTikHubSyncGet:[NSString stringWithFormat:@"https://api.tikhub.dev/api/v1/douyin/web/fetch_one_video?aweme_id=%@", awemeId]];
+    NSDictionary *detail = webResp[@"data"][@"aweme_detail"];
+    if (![detail isKindOfClass:[NSDictionary class]]) return nil;
+    // 类型判定（v33 1:1）：is_live=首图有live_photo_type/clip_type(4,5)且有video；is_image=所有图无标记
+    NSArray *rawImages = detail[@"image_post_info"][@"images"];
+    if (![rawImages isKindOfClass:[NSArray class]]) rawImages = detail[@"images"];
+    if (![rawImages isKindOfClass:[NSArray class]]) rawImages = @[];
+    BOOL hasImages = rawImages.count > 0;
+    BOOL isLivePost = NO;
+    BOOL isImagePost = NO;
+    if (hasImages) {
+        NSDictionary *img0 = rawImages[0];
+        if ([img0 isKindOfClass:[NSDictionary class]]) {
+            id lpt = img0[@"live_photo_type"];
+            BOOL lptTruthy = NO;
+            if ([lpt respondsToSelector:@selector(boolValue)]) lptTruthy = [(NSNumber *)lpt boolValue];
+            else if ([lpt isKindOfClass:[NSString class]]) lptTruthy = [(NSString *)lpt length] > 0;
+            NSInteger ct = [img0[@"clip_type"] integerValue];
+            isLivePost = (lptTruthy || ct == 4 || ct == 5) && ([img0[@"video"] isKindOfClass:[NSDictionary class]]);
+        }
+        BOOL anyMark = NO;
+        for (NSDictionary *img in rawImages) {
+            if (![img isKindOfClass:[NSDictionary class]]) continue;
+            id lp = img[@"live_photo_type"];
+            BOOL lpT = NO;
+            if ([lp respondsToSelector:@selector(boolValue)]) lpT = [(NSNumber *)lp boolValue];
+            else if ([lp isKindOfClass:[NSString class]]) lpT = [(NSString *)lp length] > 0;
+            NSInteger c = [img[@"clip_type"] integerValue];
+            if (lpT || c == 4 || c == 5) { anyMark = YES; break; }
+        }
+        isImagePost = hasImages && !anyMark;
+    }
+    // 音乐ID与有无URL（决定是否调music_detail，v33同条件）
+    NSDictionary *hMusic = detail[@"music"];
+    NSString *musicId = @"";
+    BOOL hasMusicUrl = NO;
+    if ([hMusic isKindOfClass:[NSDictionary class]]) {
+        id mid = ((NSDictionary *)hMusic)[@"id_str"];
+        if (![mid isKindOfClass:[NSString class]]) mid = ((NSDictionary *)hMusic)[@"id"];
+        if ([mid isKindOfClass:[NSString class]]) musicId = mid;
+        else if ([mid isKindOfClass:[NSNumber class]]) musicId = [(NSNumber *)mid stringValue];
+        NSDictionary *hpu = ((NSDictionary *)hMusic)[@"play_url"];
+        if ([hpu isKindOfClass:[NSDictionary class]]) {
+            NSArray *hul = ((NSDictionary *)hpu)[@"url_list"];
+            if ([hul isKindOfClass:[NSArray class]]) for (NSString *u in hul) { if ([u isKindOfClass:[NSString class]] && [u hasPrefix:@"http"]) { hasMusicUrl = YES; break; } }
+            if (!hasMusicUrl) { NSString *hu = ((NSDictionary *)hpu)[@"uri"]; if ([hu isKindOfClass:[NSString class]] && [hu hasPrefix:@"http"]) hasMusicUrl = YES; }
+        }
+        if (!hasMusicUrl) {
+            id hex = ((NSDictionary *)hMusic)[@"extra"];
+            if ([hex isKindOfClass:[NSString class]]) {
+                NSData *ed = [(NSString *)hex dataUsingEncoding:NSUTF8StringEncoding];
+                id eo = ed ? [NSJSONSerialization JSONObjectWithData:ed options:0 error:nil] : nil;
+                if ([eo isKindOfClass:[NSDictionary class]]) hex = eo;
+            }
+            if ([hex isKindOfClass:[NSDictionary class]]) {
+                NSString *os = ((NSDictionary *)hex)[@"original_song_url"];
+                if ([os isKindOfClass:[NSString class]] && [os hasPrefix:@"http"]) hasMusicUrl = YES;
+            }
+        }
+    }
+    // 并行：原画 + 播放量 + 音乐（v33调用条件1:1：origin/stats=非图集；music=无音频且有music_id；web已有detail不再重复调）
+    __block NSDictionary *originData = nil;
+    __block NSNumber *playCount = nil;
+    __block NSDictionary *musicFromDetail = nil;
+    if (!isImagePost) {
+        dispatch_group_t grp = dispatch_group_create();
+        dispatch_group_enter(grp);
+        dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+            NSDictionary *originResp = [self _dyyyTikHubSyncGet:[NSString stringWithFormat:@"https://api.tikhub.dev/api/v1/douyin/app/v3/fetch_video_high_quality_play_url?aweme_id=%@", awemeId]];
+            id od = originResp[@"data"];
+            if ([od isKindOfClass:[NSDictionary class]] && [(NSString *)od[@"original_video_url"] length] > 0) originData = od;
+            dispatch_group_leave(grp);
+        });
+        dispatch_group_enter(grp);
+        dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+            NSDictionary *statsResp = [self _dyyyTikHubSyncGet:[NSString stringWithFormat:@"https://api.tikhub.dev/api/v1/douyin/app/v3/fetch_video_statistics?aweme_ids=%@", awemeId]];
+            id slist = statsResp[@"data"][@"statistics_list"];
+            if ([slist isKindOfClass:[NSArray class]] && [(NSArray *)slist count] > 0 && [slist[0] isKindOfClass:[NSDictionary class]]) {
+                id pc = ((NSDictionary *)slist[0])[@"play_count"];
+                if ([pc isKindOfClass:[NSNumber class]]) playCount = pc;
+            }
+            dispatch_group_leave(grp);
+        });
+        dispatch_group_enter(grp);
+        dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+            if (!hasMusicUrl && musicId.length > 0) musicFromDetail = [self _dyyyTikHubMusicDetail:musicId];
+            dispatch_group_leave(grp);
+        });
+        dispatch_group_wait(grp, DISPATCH_TIME_FOREVER);
+    }
+    NSDictionary *result = [self adaptTikHubDetailToDYYY:detail webDetail:detail originData:originData playCount:playCount musicFromDetail:musicFromDetail];
+    if (result) [self _dyyyTikHubCacheSet:awemeId result:result];
+    return result;
 }
 
 // ===== 2.2-64 transform_to_dyyy 1:1 适配（v33 schema：video_list/cover/music/music_detail/images/livePhotos/url/vid） =====
