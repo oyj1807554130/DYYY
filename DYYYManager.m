@@ -4988,34 +4988,6 @@ static NSString *DYYYFetchAwemeDetailViaWebView(NSString *awemeId, NSMutableStri
 }
 
 // ===== 2.2-60 接口2内置TikHub直连（hybrid端点，手动点击才调用） =====
-// ===== 2.2-63 TikHub 直连完整编排：hybrid打底 + web完整画质 + 原画 + 播放量（复刻v33服务器规则） =====
-
-+ (NSDictionary *)_dyyyTikHubSyncGet:(NSString *)apiUrl {
-    if (apiUrl.length == 0) return nil;
-    NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:apiUrl]];
-    request.timeoutInterval = 20;
-    [request setValue:@"Bearer g80zOu8u/2yQl1PIGK6F2xPbCgmuaoE7xELcgR/ZVPW9127hKnuKVxGEGQ==" forHTTPHeaderField:@"Authorization"];
-    [request setValue:@"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36" forHTTPHeaderField:@"User-Agent"];
-    [request setValue:@"application/json" forHTTPHeaderField:@"Accept"];
-    __block NSData *respData = nil;
-    __block BOOL failed = NO;
-    dispatch_semaphore_t sem = dispatch_semaphore_create(0);
-    NSURLSessionDataTask *task = [[NSURLSession sharedSession] dataTaskWithRequest:request completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
-        if (error) { failed = YES; }
-        else {
-            NSHTTPURLResponse *http = (NSHTTPURLResponse *)response;
-            if ([http isKindOfClass:[NSHTTPURLResponse class]] && http.statusCode >= 400) failed = YES;
-            else respData = data;
-        }
-        dispatch_semaphore_signal(sem);
-    }];
-    [task resume];
-    dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, 25LL * NSEC_PER_SEC));
-    if (failed || respData.length == 0) return nil;
-    id obj = [NSJSONSerialization JSONObjectWithData:respData options:0 error:nil];
-    return ([obj isKindOfClass:[NSDictionary class]]) ? obj : nil;
-}
-
 // ===== 2.2-64 TikHub 直连 v2：并行编排 + 24h本地缓存 + 实况/图集schema对齐v33 =====
 
 + (NSString *)_dyyyFormatSize:(long long)size {
