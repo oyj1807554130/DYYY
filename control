@@ -1,6 +1,6 @@
 Package: com.omega.dy4k
 Name: DY4K
-Version: 1.0-17
+Version: 1.0-18
 Description: 独立抖音4K解析悬浮球 - Monitor截获+swizzle+APP内主动请求三路获取全档bit_rate, 直连下载, 不依赖DYYY。仅供学习交流。
 Section: Tweaks
 Depends: firmware (>= 13.0), mobilesubstrate

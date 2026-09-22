@@ -178,6 +178,14 @@ static long dy4kStreamHit = 0;   // v2.4: 拉流反查映射命中计数
 static long dy4kFeedHit = 0;     // v2.5: feed兜底成功计数
 static long dy4kWebHit = 0;      // v2.7: Step2 Web detail首发成功计数
 static long dy4kHealHit = 0;     // v2.7: 自愈重打成功计数
+// v2.9: 播放页交互VC viewDidAppear锚定(DYYY同款权威信号: AWEPlayInteractionViewController.awemeModel就是当前视频)
+static NSString *dy4kPageAid = nil;
+static NSString *dy4kPageDesc = nil;
+static NSString *dy4kPageAuthor = nil;
+static double dy4kPageTime = 0;
+static long dy4kPageHit = 0;     // v2.9: 页面锚定成功计数
+static long dy4kPageHooked = 0;  // v2.9: viewDidAppear swizzle是否挂上
+static void DY4KOnPageAppear(id vc);
 static void DY4KMarkStreamURL(NSString *u);
 static void DY4KOnBitrateModels(id self, id models) {
     @try {
@@ -1008,7 +1016,7 @@ static void DY4KShowDiag(void) {
     [msg appendFormat:@"\n大响应入库:%ld", dy4kBigHit];
     [msg appendFormat:@"\n码率模型:%ld", dy4kBRHit];
     [msg appendFormat:@"\nswizzle:%d", dy4kSwizzled];
-    [msg appendFormat:@"\n挖aid:%ld", dy4kDigHit];
+    [msg appendFormat:@"\n挖aid:%ld 页面:%ld(hook:%ld)", dy4kDigHit, dy4kPageHit, dy4kPageHooked];
     [msg appendFormat:@"\nfeed兜底:%ld", dy4kFeedHit];
     [msg appendFormat:@"\nStep2:%ld 自愈:%ld", dy4kWebHit, dy4kHealHit];
     NSString *lastErr = nil;
@@ -1018,6 +1026,7 @@ static void DY4KShowDiag(void) {
     @synchronized (dy4kMonNames) {
         [msg appendFormat:@"\n拉流URL:%ld 反查命中:%ld 映射:%lu", dy4kStreamSeen, dy4kStreamHit, (unsigned long)dy4kUriMap.count];
         [msg appendFormat:@"\n最近拉流aid:%@", dy4kLastStreamAid ?: @"无"];
+        [msg appendFormat:@"\n页面锚定:%@ %@", dy4kPageAid ?: @"无", dy4kPageAuthor ?: @""];
     }
     NSString *upLst = nil;
     @synchronized (dy4kURLPaths) {
@@ -1156,7 +1165,7 @@ static void DY4KShowMenuLegacy(void) {
         NSMutableString *dg = [NSMutableString string];
         [dg appendString:@"DY4K v1.5 已运行\n"];
         [dg appendFormat:@"通知:%ld Monitor:%ld 大响应:%ld\n", dy4kNotifCount, dy4kMonitorHit, dy4kBigHit];
-        [dg appendFormat:@"挖aid:%ld Step2:%ld 自愈:%ld feed:%ld swizzle:%d\n", dy4kDigHit, dy4kWebHit, dy4kHealHit, dy4kFeedHit, dy4kSwizzled];
+        [dg appendFormat:@"挖aid:%ld 页面:%ld Step2:%ld 自愈:%ld feed:%ld swizzle:%d\n", dy4kDigHit, dy4kPageHit, dy4kWebHit, dy4kHealHit, dy4kFeedHit, dy4kSwizzled];
         NSString *err = nil;
         @synchronized (dy4kMonNames) { err = dy4kLastErr; }
         if (err.length > 0) [dg appendFormat:@"错误:%@\n", err];
@@ -1196,20 +1205,30 @@ static void DY4KShowMenu(void) {
     NSString *dgDesc = nil, *dgAuthor = nil;
     NSString *srcTag = nil; // v2.4: 识别路径标记
     NSString *aid = nil;
-    // v2.8修复"下载成其他视频": ①码率回调最优先(setBitrateModels只有真实在播才触发, 预加载页不会回调; 窗口60→150秒覆盖暂停看评论)
-    NSString *pa = nil, *pd = nil, *pau = nil;
-    double pt = 0;
-    @synchronized (dy4kMonNames) { pa = dy4kPlayingAid; pd = dy4kPlayingDesc; pau = dy4kPlayingAuthor; pt = dy4kPlayingTime; }
-    if (pa.length >= 10 && ![pa hasPrefix:@"__"] && [[NSDate date] timeIntervalSince1970] - pt < 150) {
-        aid = pa;
-        dgDesc = pd;
-        dgAuthor = pau;
-        srcTag = @"码率";
+    // v2.9修复"三层全灭落Legacy": ①播放页viewDidAppear锚定最优先(DYYY同款权威信号: 交互VC.awemeModel=当前视频; 预加载页绝不触发appear; 暂停多久都不失效)
+    NSString *pg = nil, *pgd = nil, *pgau = nil;
+    double pgt = 0;
+    @synchronized (dy4kMonNames) { pg = dy4kPageAid; pgd = dy4kPageDesc; pgau = dy4kPageAuthor; pgt = dy4kPageTime; }
+    if (pg.length >= 10 && [[NSDate date] timeIntervalSince1970] - pgt < 1800) {
+        aid = pg;
+        dgDesc = pgd;
+        dgAuthor = pgau;
+        srcTag = @"页面";
     }
     // v2.8: ②可见VC挖当前model(DY4KDigCurrentAid两轮BFS: 第一轮只挖可见页, 预加载页view.window为nil被排除)
     if (aid.length == 0) {
         aid = DY4KDigCurrentAid(&dgDesc, &dgAuthor, NO);
         if (aid.length > 0) srcTag = @"界面";
+    }
+    // v2.9: ③码率回调(150秒窗口, 真实在播才触发)——页面锚定与BFS都失效时的备选
+    NSString *pa = nil, *pd = nil, *pau = nil;
+    double pt = 0;
+    @synchronized (dy4kMonNames) { pa = dy4kPlayingAid; pd = dy4kPlayingDesc; pau = dy4kPlayingAuthor; pt = dy4kPlayingTime; }
+    if (aid.length == 0 && pa.length >= 10 && ![pa hasPrefix:@"__"] && [[NSDate date] timeIntervalSince1970] - pt < 150) {
+        aid = pa;
+        dgDesc = pd;
+        dgAuthor = pau;
+        srcTag = @"码率";
     }
     // v2.8: ③拉流降为兜底(根因: 预加载下个视频也拉流且时间戳反超当前视频, v2.3把拉流放最优先导致"下载成其他视频")
     if (aid.length == 0) {
@@ -1427,6 +1446,58 @@ static void dy4kWideHookIMP(id self, SEL _cmd, id models) {
     if (old) ((void (*)(id, SEL, id))old)(self, _cmd, models);
 }
 
+// ===== v2.9: 播放页交互VC viewDidAppear锚定 =====
+// 根因(v2.8三层全灭落Legacy): 抖音feed是cell翻页, AWEPlayInteractionViewController的view直接attach到cell上,
+// 不在childViewControllers/presentedViewController链上——BFS沿VC树展开永远遇不到它。
+// DYYY长按面板直接hook此VC用self.awemeModel, 从不失手; v2.9同款: viewDidAppear时锚定当前视频。
+static void DY4KOnPageAppear(id vc) {
+    @try {
+        if (![vc respondsToSelector:@selector(awemeModel)]) return;
+        id m = nil;
+        @try { m = [vc valueForKey:@"awemeModel"]; } @catch (NSException *e) { return; }
+        if (!m || [m isKindOfClass:[NSNull class]] || [m isKindOfClass:[UIViewController class]] || [m isKindOfClass:[UIView class]]) return;
+        id aidObj = DY4KTryKVC(m, @"itemID");
+        if (![aidObj isKindOfClass:[NSString class]] || [(NSString *)aidObj length] < 10) return;
+        NSString *dgDesc = nil, *dgAuthor = nil;
+        id d = DY4KTryKVC(m, @"descriptionString");
+        if (![d isKindOfClass:[NSString class]] || [(NSString *)d length] == 0) d = DY4KTryKVC(m, @"itemTitle");
+        dgDesc = [d isKindOfClass:[NSString class]] ? d : nil;
+        id au0 = DY4KTryKVC(m, @"author");
+        id au = (au0 && ![au0 isKindOfClass:[NSString class]]) ? DY4KTryKVC(au0, @"nickname") : au0;
+        dgAuthor = [au isKindOfClass:[NSString class]] ? au : nil;
+        @synchronized (dy4kMonNames) {
+            dy4kPageAid = aidObj;
+            dy4kPageDesc = dgDesc;
+            dy4kPageAuthor = dgAuthor;
+            dy4kPageTime = [[NSDate date] timeIntervalSince1970];
+            dy4kPageHit++;
+        }
+        @synchronized (dy4kCache) {
+            DY4KVideo *v = dy4kCache[aidObj];
+            if (!v) { v = [DY4KVideo new]; v.aid = aidObj; dy4kCache[aidObj] = v; }
+            if (dgDesc.length > 0) v.desc = dgDesc;
+            if (dgAuthor.length > 0) v.author = dgAuthor;
+            v.time = [[NSDate date] timeIntervalSince1970];
+        }
+    } @catch (NSException *e) {}
+}
+
+// v2.9: viewDidAppear统一IMP——先调原实现再锚定(addMethod兜底, 不动父类实现)
+static void dy4kAppearHookIMP(id self, SEL _cmd, BOOL animated) {
+    IMP old = NULL;
+    @synchronized (dy4kOldImps) {
+        Class c = object_getClass(self);
+        while (c) {
+            NSString *k = [NSStringFromClass(c) stringByAppendingString:NSStringFromSelector(_cmd)];
+            NSValue *v = dy4kOldImps[k];
+            if (v) { old = (IMP)[v pointerValue]; break; }
+            c = [c superclass];
+        }
+    }
+    if (old) ((void (*)(id, SEL, BOOL))old)(self, _cmd, animated);
+    DY4KOnPageAppear(self);
+}
+
 // v1.5: 运行时全量扫描真实类名(新版抖音类名可能全变, 不再赌精确名)
 static void DY4KScanClasses(void) {
     @synchronized (dy4kFoundCls) { [dy4kFoundCls removeAllObjects]; }
@@ -1478,6 +1549,35 @@ static void DY4KSwizzleWide(void) {
     }
     free(classes);
     dy4kWideHooked = hooked;
+    // v2.9: 锚定播放页交互VC——AWEPlayInteractionViewController.awemeModel是当前视频权威来源(DYYY同款)
+    @try {
+        Class pic = NSClassFromString(@"AWEPlayInteractionViewController");
+        if (pic) {
+            SEL apSel = NSSelectorFromString(@"viewDidAppear:");
+            Method am = class_getInstanceMethod(pic, apSel);
+            if (am) {
+                // 确认实现属于该类自身(防止改到UIViewController全局实现)
+                BOOL mine = NO;
+                unsigned int mc = 0;
+                Method *ml = class_copyMethodList(pic, &mc);
+                for (unsigned int j = 0; j < mc; j++) { if (ml[j] == am) { mine = YES; break; } }
+                if (ml) free(ml);
+                NSString *k = [NSStringFromClass(pic) stringByAppendingString:NSStringFromSelector(apSel)];
+                @synchronized (dy4kOldImps) {
+                    if (!dy4kOldImps[k]) {
+                        IMP old = method_getImplementation(am);
+                        if (mine) {
+                            method_setImplementation(am, (IMP)dy4kAppearHookIMP);
+                        } else {
+                            class_addMethod(pic, apSel, (IMP)dy4kAppearHookIMP, method_getTypeEncoding(am));
+                        }
+                        dy4kOldImps[k] = [NSValue valueWithPointer:old];
+                        dy4kPageHooked = 1;
+                    }
+                }
+            }
+        }
+    } @catch (NSException *e) {}
     if (hitNames.count > 0) {
         @synchronized (dy4kMonNames) {
             for (NSString *hn in hitNames) {
