@@ -5045,7 +5045,7 @@ static NSString *DYYYFetchAwemeDetailViaWebView(NSString *awemeId, NSMutableStri
                 // Step4: 播放量（hybrid 的 play_count 恒为 0）
                 NSDictionary *statsResp = [self _dyyyTikHubSyncGet:[NSString stringWithFormat:@"https://api.tikhub.dev/api/v1/douyin/app/v3/fetch_video_statistics?aweme_ids=%@", awemeId]];
                 id slist = statsResp[@"data"][@"statistics_list"];
-                if ([slist isKindOfClass:[NSArray class]] && slist.count > 0 && [slist[0] isKindOfClass:[NSDictionary class]]) {
+                if ([slist isKindOfClass:[NSArray class]] && [(NSArray *)slist count] > 0 && [slist[0] isKindOfClass:[NSDictionary class]]) {
                     id pc = ((NSDictionary *)slist[0])[@"play_count"];
                     if ([pc isKindOfClass:[NSNumber class]]) playCount = pc;
                 }
