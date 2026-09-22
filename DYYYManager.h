@@ -11,8 +11,6 @@
  * 处理UI、媒体下载、保存和视频合成等功能
  */
 @interface DYYYManager : NSObject
-+ (void)DYYYStoreSniffedUifid:(NSString *)v;
-+ (NSString *)DYYYSniffedUifid;
 
 #pragma mark - 属性和基础方法
 // 存储文件类型

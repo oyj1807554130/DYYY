@@ -63,13 +63,6 @@
 
 @implementation DYYYManager
 
-// ===== 2.2-37 App现役指纹截流存储 =====
-static NSString *_dyyySniffedUifid = nil;
-+ (void)DYYYStoreSniffedUifid:(NSString *)v {
-    if (v.length > 10 && v.length < 300 && ![v isEqualToString:_dyyySniffedUifid]) _dyyySniffedUifid = [v copy];
-}
-+ (NSString *)DYYYSniffedUifid { return _dyyySniffedUifid; }
-
 #pragma mark - API 适配器实现
 
 #pragma mark - 作者元数据 Caption 功能
@@ -4002,8 +3995,6 @@ static NSString *DYYYFetchAwemeDetailViaWebView(NSString *awemeId, NSMutableStri
                                     if (her.location != NSNotFound) hmt = [hmt substringToIndex:her.location];
                                     if (hmt.length > 20) [[NSUserDefaults standardUserDefaults] setObject:hmt forKey:@"DYYYLastGoodMsToken"];
                                 }
-                                NSString *hsu = [DYYYManager DYYYSniffedUifid];
-                                if (hsu.length > 10) [[NSUserDefaults standardUserDefaults] setObject:hsu forKey:@"DYYYLastGoodUifid"];
                             }
                             NSDictionary *vObj = awemeDetail[@"video"];
                             NSArray *brList = vObj[@"bit_rate"];
