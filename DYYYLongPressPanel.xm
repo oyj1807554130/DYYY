@@ -594,10 +594,22 @@
                                                __block long long sz81 = 0;
                                                dispatch_semaphore_t sem81 = dispatch_semaphore_create(0);
                                                NSMutableURLRequest *hr81 = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:playUrl81]];
-                                               hr81.HTTPMethod = @"HEAD";
+                                               hr81.HTTPMethod = @"GET";
+                                               [hr81 setValue:@"bytes=0-0" forHTTPHeaderField:@"Range"];
                                                hr81.timeoutInterval = 5;
                                                [[NSURLSession.sharedSession dataTaskWithRequest:hr81 completionHandler:^(NSData *d81, NSURLResponse *r81, NSError *e81) {
-                                                   if ([r81 isKindOfClass:[NSHTTPURLResponse class]]) sz81 = ((NSHTTPURLResponse *)r81).expectedContentLength;
+                                                   if ([r81 isKindOfClass:[NSHTTPURLResponse class]]) {
+                                                       NSHTTPURLResponse *h81 = (NSHTTPURLResponse *)r81;
+                                                       if (h81.statusCode == 206) {
+                                                           NSString *cr81 = [h81.allHeaderFields objectForKey:@"Content-Range"];
+                                                           if ([cr81 isKindOfClass:[NSString class]]) {
+                                                               NSRange slash81 = [cr81 rangeOfString:@"/"];
+                                                               if (slash81.location != NSNotFound && slash81.location + 1 < cr81.length) sz81 = [[cr81 substringFromIndex:slash81.location + 1] longLongValue];
+                                                           }
+                                                       } else {
+                                                           sz81 = h81.expectedContentLength;
+                                                       }
+                                                   }
                                                    dispatch_semaphore_signal(sem81);
                                                }] resume];
                                                dispatch_semaphore_wait(sem81, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC));
@@ -607,6 +619,10 @@
                                                id st81 = [capturedAwemeModel valueForKey:@"statistics"];
                                                id pc81 = st81 ? [st81 valueForKey:@"playCount"] : nil;
                                                long long pcV81 = [pc81 respondsToSelector:@selector(longLongValue)] ? [pc81 longLongValue] : 0;
+                                               if (pcV81 <= 0) {
+                                                   id pc81b = st81 ? [st81 valueForKey:@"play_count"] : nil;
+                                                   if (pc81b && [pc81b respondsToSelector:@selector(longLongValue)]) pcV81 = [pc81b longLongValue];
+                                               }
                                                if (pcV81 > 0 && vl81.count > 1) {
                                                    NSString *fu81 = vl81[1][@"url"];
                                                    [vl81 insertObject:@{@"url": fu81 ?: @"", @"level": [NSString stringWithFormat:@"当前作品播放量：%lld播放", pcV81], @"size": @(0)} atIndex:1];
@@ -1787,10 +1803,22 @@
                                                __block long long sz81 = 0;
                                                dispatch_semaphore_t sem81 = dispatch_semaphore_create(0);
                                                NSMutableURLRequest *hr81 = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:playUrl81]];
-                                               hr81.HTTPMethod = @"HEAD";
+                                               hr81.HTTPMethod = @"GET";
+                                               [hr81 setValue:@"bytes=0-0" forHTTPHeaderField:@"Range"];
                                                hr81.timeoutInterval = 5;
                                                [[NSURLSession.sharedSession dataTaskWithRequest:hr81 completionHandler:^(NSData *d81, NSURLResponse *r81, NSError *e81) {
-                                                   if ([r81 isKindOfClass:[NSHTTPURLResponse class]]) sz81 = ((NSHTTPURLResponse *)r81).expectedContentLength;
+                                                   if ([r81 isKindOfClass:[NSHTTPURLResponse class]]) {
+                                                       NSHTTPURLResponse *h81 = (NSHTTPURLResponse *)r81;
+                                                       if (h81.statusCode == 206) {
+                                                           NSString *cr81 = [h81.allHeaderFields objectForKey:@"Content-Range"];
+                                                           if ([cr81 isKindOfClass:[NSString class]]) {
+                                                               NSRange slash81 = [cr81 rangeOfString:@"/"];
+                                                               if (slash81.location != NSNotFound && slash81.location + 1 < cr81.length) sz81 = [[cr81 substringFromIndex:slash81.location + 1] longLongValue];
+                                                           }
+                                                       } else {
+                                                           sz81 = h81.expectedContentLength;
+                                                       }
+                                                   }
                                                    dispatch_semaphore_signal(sem81);
                                                }] resume];
                                                dispatch_semaphore_wait(sem81, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC));
@@ -1800,6 +1828,10 @@
                                                id st81 = [capturedAwemeModel valueForKey:@"statistics"];
                                                id pc81 = st81 ? [st81 valueForKey:@"playCount"] : nil;
                                                long long pcV81 = [pc81 respondsToSelector:@selector(longLongValue)] ? [pc81 longLongValue] : 0;
+                                               if (pcV81 <= 0) {
+                                                   id pc81b = st81 ? [st81 valueForKey:@"play_count"] : nil;
+                                                   if (pc81b && [pc81b respondsToSelector:@selector(longLongValue)]) pcV81 = [pc81b longLongValue];
+                                               }
                                                if (pcV81 > 0 && vl81.count > 1) {
                                                    NSString *fu81 = vl81[1][@"url"];
                                                    [vl81 insertObject:@{@"url": fu81 ?: @"", @"level": [NSString stringWithFormat:@"当前作品播放量：%lld播放", pcV81], @"size": @(0)} atIndex:1];
