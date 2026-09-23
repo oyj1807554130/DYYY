@@ -3827,7 +3827,7 @@ static NSString *DYYYFetchAwemeDetailViaWebView(NSString *awemeId, NSMutableStri
                 dispatch_semaphore_signal(warmupSem);
             }];
             [warmupTask resume];
-            dispatch_semaphore_wait(warmupSem, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC));
+            dispatch_semaphore_wait(warmupSem, dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC));
             NSInteger warmupCookieCountAfter = [[NSHTTPCookieStorage sharedHTTPCookieStorage] cookiesForURL:[NSURL URLWithString:@"https://www.douyin.com/"]].count;
             [probeLog appendFormat:@"\n[Step0 预热]\nGET www.douyin.com → HTTP %ld\nCookie: %ld→%ld\n", (long)warmupStatus, (long)warmupCookieCountBefore, (long)warmupCookieCountAfter];
         }
@@ -3910,7 +3910,7 @@ static NSString *DYYYFetchAwemeDetailViaWebView(NSString *awemeId, NSMutableStri
                 dispatch_semaphore_signal(ttwidSem);
             }];
             [ttwidTask resume];
-            dispatch_semaphore_wait(ttwidSem, dispatch_time(DISPATCH_TIME_NOW, 10 * NSEC_PER_SEC));
+            dispatch_semaphore_wait(ttwidSem, dispatch_time(DISPATCH_TIME_NOW, 4 * NSEC_PER_SEC));
             // 断网重连后网络可能未就绪，首次失败等2秒重试一次
             if (!ttwidStr || ttwidStr.length == 0) {
                 [ttwidTask cancel];
@@ -3933,7 +3933,7 @@ static NSString *DYYYFetchAwemeDetailViaWebView(NSString *awemeId, NSMutableStri
                     dispatch_semaphore_signal(ttwidSem);
                 }];
                 [rtTask resume];
-                dispatch_semaphore_wait(ttwidSem, dispatch_time(DISPATCH_TIME_NOW, 10 * NSEC_PER_SEC));
+                dispatch_semaphore_wait(ttwidSem, dispatch_time(DISPATCH_TIME_NOW, 4 * NSEC_PER_SEC));
             }
             [probeLog appendFormat:@"\n[Step1.5 ttwid注册]\nPOST ttwid.bytedance.com → HTTP %ld\nSet-Cookie ttwid=%@ (len=%lu)\nJSON body ttwid=%@\n最终ttwid=%@\n", (long)ttwidHttpStatus, ttwidFromHeader ? [[ttwidFromHeader substringToIndex:MIN(20, ttwidFromHeader.length)] stringByAppendingString:@"..."] : @"无", (unsigned long)(ttwidFromHeader ? ttwidFromHeader.length : 0), ttwidFromBody ? @"有" : @"无", ttwidStr.length > 0 ? @"有" : @"无"];
             if (ttwidStr && ttwidStr.length > 0) {
@@ -4035,7 +4035,7 @@ static NSString *DYYYFetchAwemeDetailViaWebView(NSString *awemeId, NSMutableStri
             dispatch_semaphore_signal(apiSem);
         }];
         [apiTask resume];
-        dispatch_semaphore_wait(apiSem, dispatch_time(DISPATCH_TIME_NOW, 15 * NSEC_PER_SEC));
+        dispatch_semaphore_wait(apiSem, dispatch_time(DISPATCH_TIME_NOW, 6 * NSEC_PER_SEC));
 
         if (!awemeDetail || ![awemeDetail isKindOfClass:[NSDictionary class]]) {
             // 2.2-69: feed兜底已移除（App端档位封顶1080P无4K）；接口4走TikHub最终兜底（完整画质），本地接口1直接本地降级零额度
