@@ -558,6 +558,7 @@
                                    NSArray *srvVids80 = srvResult80[@"video_list"];
                                    if (srvResult80 && [srvVids80 isKindOfClass:[NSArray class]] && srvVids80.count > 0) {
                                        // 2.2-81 本地原画插头：内存播放流(App源)标原画插首位，后接服务器bit_rate全档
+                                       NSDictionary *final81 = srvResult80;
                                        @try {
                                            id vm81 = [capturedAwemeModel valueForKey:@"video"];
                                            NSString *origUrl81 = nil;
@@ -582,11 +583,11 @@
                                                [vl81 insertObject:@{@"url": origUrl81, @"level": @"[原画【本地源】]-[60FPS]", @"size": @(0)} atIndex:0];
                                                NSMutableDictionary *res81 = [NSMutableDictionary dictionaryWithDictionary:srvResult80];
                                                res81[@"video_list"] = vl81;
-                                               srvResult80 = res81;
+                                               final81 = res81;
                                            }
                                        } @catch (NSException *e81c) {}
                                        [DYYYUtils showToast:@"已获取服务器画质"];
-                                       [DYYYManager handleVideoData:srvResult80];
+                                       [DYYYManager handleVideoData:final81];
                                    } else {
                                        // 服务器失败→降级本地解析
                                        [DYYYManager localParseFromAwemeModel:capturedAwemeModel completion:^(NSDictionary *fallbackData) {
@@ -1720,6 +1721,7 @@
                                    NSArray *srvVids80 = srvResult80[@"video_list"];
                                    if (srvResult80 && [srvVids80 isKindOfClass:[NSArray class]] && srvVids80.count > 0) {
                                        // 2.2-81 本地原画插头：内存播放流(App源)标原画插首位，后接服务器bit_rate全档
+                                       NSDictionary *final81 = srvResult80;
                                        @try {
                                            id vm81 = [capturedAwemeModel valueForKey:@"video"];
                                            NSString *origUrl81 = nil;
@@ -1744,11 +1746,11 @@
                                                [vl81 insertObject:@{@"url": origUrl81, @"level": @"[原画【本地源】]-[60FPS]", @"size": @(0)} atIndex:0];
                                                NSMutableDictionary *res81 = [NSMutableDictionary dictionaryWithDictionary:srvResult80];
                                                res81[@"video_list"] = vl81;
-                                               srvResult80 = res81;
+                                               final81 = res81;
                                            }
                                        } @catch (NSException *e81c) {}
                                        [DYYYUtils showToast:@"已获取服务器画质"];
-                                       [DYYYManager handleVideoData:srvResult80];
+                                       [DYYYManager handleVideoData:final81];
                                    } else {
                                        // 服务器失败→降级本地解析
                                        [DYYYManager localParseFromAwemeModel:capturedAwemeModel completion:^(NSDictionary *fallbackData) {

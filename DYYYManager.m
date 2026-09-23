@@ -5363,7 +5363,12 @@ static NSString *DYYYFetchAwemeDetailViaWebView(NSString *awemeId, NSMutableStri
                 if ([json79 isKindOfClass:[NSDictionary class]] && [json79[@"ok"] integerValue] == 1) {
                     NSDictionary *detail79 = json79[@"detail"];
                     if ([detail79 isKindOfClass:[NSDictionary class]]) {
-                        NSDictionary *adapted79 = [self adaptTikHubDetailToDYYY:detail79 webDetail:detail79 originData:nil playCount:nil musicFromDetail:nil];
+                        // 2.2-82 播放量插头：web detail statistics.play_count → v33播放量档
+                        NSNumber *pc79 = nil;
+                        id pcv79 = detail79[@"statistics"][@"play_count"];
+                        if ([pcv79 isKindOfClass:[NSNumber class]]) pc79 = pcv79;
+                        else if ([pcv79 isKindOfClass:[NSString class]] && [(NSString *)pcv79 longLongValue] > 0) pc79 = @([(NSString *)pcv79 longLongValue]);
+                        NSDictionary *adapted79 = [self adaptTikHubDetailToDYYY:detail79 webDetail:detail79 originData:nil playCount:pc79 musicFromDetail:nil];
                         if ([adapted79 isKindOfClass:[NSDictionary class]]) result79 = adapted79;
                     }
                 }
