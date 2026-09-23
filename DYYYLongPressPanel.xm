@@ -548,13 +548,28 @@
                        if (localData) {
                            [DYYYManager handleVideoData:localData];
                        } else {
-                           // Full版失败→降级本地解析
-                           [DYYYManager localParseFromAwemeModel:capturedAwemeModel completion:^(NSDictionary *fallbackData) {
+                           // 2.2-80 Full版失败→服务器Chrome抓detail(零额度全档位)→失败才降级内存解析
+                           [DYYYUtils showToast:@"正在通过服务器解析..."];
+                           NSString *sid80 = nil;
+                           @try { sid80 = [capturedAwemeModel valueForKey:@"awemeID"]; } @catch (NSException *e80a) {}
+                           if (!sid80 || sid80.length == 0) { @try { sid80 = [capturedAwemeModel valueForKey:@"awemeId"]; } @catch (NSException *e80b) {} }
+                           [DYYYManager selfParseViaServer:sid80 completion:^(NSDictionary *srvResult80) {
                                dispatch_async(dispatch_get_main_queue(), ^{
-                                   if (fallbackData) {
-                                       [DYYYManager handleVideoData:fallbackData];
+                                   NSArray *srvVids80 = srvResult80[@"video_list"];
+                                   if (srvResult80 && [srvVids80 isKindOfClass:[NSArray class]] && srvVids80.count > 0) {
+                                       [DYYYUtils showToast:@"已获取服务器画质"];
+                                       [DYYYManager handleVideoData:srvResult80];
                                    } else {
-                                       [DYYYUtils showToast:@"本地解析失败"];
+                                       // 服务器失败→降级本地解析
+                                       [DYYYManager localParseFromAwemeModel:capturedAwemeModel completion:^(NSDictionary *fallbackData) {
+                                           dispatch_async(dispatch_get_main_queue(), ^{
+                                               if (fallbackData) {
+                                                   [DYYYManager handleVideoData:fallbackData];
+                                               } else {
+                                                   [DYYYUtils showToast:@"本地解析失败"];
+                                               }
+                                           });
+                                       }];
                                    }
                                });
                            }];
@@ -1667,13 +1682,28 @@
                        if (localData) {
                            [DYYYManager handleVideoData:localData];
                        } else {
-                           // Full版失败→降级本地解析
-                           [DYYYManager localParseFromAwemeModel:capturedAwemeModel completion:^(NSDictionary *fallbackData) {
+                           // 2.2-80 Full版失败→服务器Chrome抓detail(零额度全档位)→失败才降级内存解析
+                           [DYYYUtils showToast:@"正在通过服务器解析..."];
+                           NSString *sid80 = nil;
+                           @try { sid80 = [capturedAwemeModel valueForKey:@"awemeID"]; } @catch (NSException *e80a) {}
+                           if (!sid80 || sid80.length == 0) { @try { sid80 = [capturedAwemeModel valueForKey:@"awemeId"]; } @catch (NSException *e80b) {} }
+                           [DYYYManager selfParseViaServer:sid80 completion:^(NSDictionary *srvResult80) {
                                dispatch_async(dispatch_get_main_queue(), ^{
-                                   if (fallbackData) {
-                                       [DYYYManager handleVideoData:fallbackData];
+                                   NSArray *srvVids80 = srvResult80[@"video_list"];
+                                   if (srvResult80 && [srvVids80 isKindOfClass:[NSArray class]] && srvVids80.count > 0) {
+                                       [DYYYUtils showToast:@"已获取服务器画质"];
+                                       [DYYYManager handleVideoData:srvResult80];
                                    } else {
-                                       [DYYYUtils showToast:@"本地解析失败"];
+                                       // 服务器失败→降级本地解析
+                                       [DYYYManager localParseFromAwemeModel:capturedAwemeModel completion:^(NSDictionary *fallbackData) {
+                                           dispatch_async(dispatch_get_main_queue(), ^{
+                                               if (fallbackData) {
+                                                   [DYYYManager handleVideoData:fallbackData];
+                                               } else {
+                                                   [DYYYUtils showToast:@"本地解析失败"];
+                                               }
+                                           });
+                                       }];
                                    }
                                });
                            }];
