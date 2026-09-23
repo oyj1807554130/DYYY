@@ -557,6 +557,34 @@
                                dispatch_async(dispatch_get_main_queue(), ^{
                                    NSArray *srvVids80 = srvResult80[@"video_list"];
                                    if (srvResult80 && [srvVids80 isKindOfClass:[NSArray class]] && srvVids80.count > 0) {
+                                       // 2.2-81 本地原画插头：内存播放流(App源)标原画插首位，后接服务器bit_rate全档
+                                       @try {
+                                           id vm81 = [capturedAwemeModel valueForKey:@"video"];
+                                           NSString *origUrl81 = nil;
+                                           if (vm81) {
+                                               id pa81 = [vm81 valueForKey:@"playAddr"];
+                                               if (!pa81) pa81 = [vm81 valueForKey:@"playURL"];
+                                               if (pa81) {
+                                                   NSArray *ul81 = [pa81 valueForKey:@"originURLList"];
+                                                   if (![ul81 isKindOfClass:[NSArray class]] || ul81.count == 0) ul81 = [pa81 valueForKey:@"urlList"];
+                                                   if ([ul81 isKindOfClass:[NSArray class]] && ul81.count > 0 && [ul81[0] isKindOfClass:[NSString class]]) origUrl81 = ul81[0];
+                                               }
+                                               if (!origUrl81 || origUrl81.length == 0) {
+                                                   id h264x81 = [vm81 valueForKey:@"h264URL"];
+                                                   if (h264x81) {
+                                                       NSArray *ul81b = [h264x81 valueForKey:@"originURLList"];
+                                                       if ([ul81b isKindOfClass:[NSArray class]] && ul81b.count > 0 && [ul81b[0] isKindOfClass:[NSString class]]) origUrl81 = ul81b[0];
+                                                   }
+                                               }
+                                           }
+                                           if (origUrl81 && origUrl81.length > 0) {
+                                               NSMutableArray *vl81 = [NSMutableArray arrayWithArray:srvVids80];
+                                               [vl81 insertObject:@{@"url": origUrl81, @"level": @"[原画【本地源】]-[60FPS]", @"size": @(0)} atIndex:0];
+                                               NSMutableDictionary *res81 = [NSMutableDictionary dictionaryWithDictionary:srvResult80];
+                                               res81[@"video_list"] = vl81;
+                                               srvResult80 = res81;
+                                           }
+                                       } @catch (NSException *e81c) {}
                                        [DYYYUtils showToast:@"已获取服务器画质"];
                                        [DYYYManager handleVideoData:srvResult80];
                                    } else {
@@ -1691,6 +1719,34 @@
                                dispatch_async(dispatch_get_main_queue(), ^{
                                    NSArray *srvVids80 = srvResult80[@"video_list"];
                                    if (srvResult80 && [srvVids80 isKindOfClass:[NSArray class]] && srvVids80.count > 0) {
+                                       // 2.2-81 本地原画插头：内存播放流(App源)标原画插首位，后接服务器bit_rate全档
+                                       @try {
+                                           id vm81 = [capturedAwemeModel valueForKey:@"video"];
+                                           NSString *origUrl81 = nil;
+                                           if (vm81) {
+                                               id pa81 = [vm81 valueForKey:@"playAddr"];
+                                               if (!pa81) pa81 = [vm81 valueForKey:@"playURL"];
+                                               if (pa81) {
+                                                   NSArray *ul81 = [pa81 valueForKey:@"originURLList"];
+                                                   if (![ul81 isKindOfClass:[NSArray class]] || ul81.count == 0) ul81 = [pa81 valueForKey:@"urlList"];
+                                                   if ([ul81 isKindOfClass:[NSArray class]] && ul81.count > 0 && [ul81[0] isKindOfClass:[NSString class]]) origUrl81 = ul81[0];
+                                               }
+                                               if (!origUrl81 || origUrl81.length == 0) {
+                                                   id h264x81 = [vm81 valueForKey:@"h264URL"];
+                                                   if (h264x81) {
+                                                       NSArray *ul81b = [h264x81 valueForKey:@"originURLList"];
+                                                       if ([ul81b isKindOfClass:[NSArray class]] && ul81b.count > 0 && [ul81b[0] isKindOfClass:[NSString class]]) origUrl81 = ul81b[0];
+                                                   }
+                                               }
+                                           }
+                                           if (origUrl81 && origUrl81.length > 0) {
+                                               NSMutableArray *vl81 = [NSMutableArray arrayWithArray:srvVids80];
+                                               [vl81 insertObject:@{@"url": origUrl81, @"level": @"[原画【本地源】]-[60FPS]", @"size": @(0)} atIndex:0];
+                                               NSMutableDictionary *res81 = [NSMutableDictionary dictionaryWithDictionary:srvResult80];
+                                               res81[@"video_list"] = vl81;
+                                               srvResult80 = res81;
+                                           }
+                                       } @catch (NSException *e81c) {}
                                        [DYYYUtils showToast:@"已获取服务器画质"];
                                        [DYYYManager handleVideoData:srvResult80];
                                    } else {
