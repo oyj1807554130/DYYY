@@ -567,12 +567,12 @@
                                                if (!pa81) pa81 = [vm81 valueForKey:@"playURL"];
                                                if (pa81) {
                                                    id uv81 = [pa81 valueForKey:@"URI"];
-                                                   if ([uv81 isKindOfClass:[NSString class]] && uv81.length > 0) uri81 = uv81;
+                                                   if ([uv81 isKindOfClass:[NSString class]] && [uv81 length] > 0) uri81 = uv81;
                                                }
                                                if (!uri81 || uri81.length == 0) {
                                                    id h264x81 = [vm81 valueForKey:@"h264URL"];
                                                    id uv81b = h264x81 ? [h264x81 valueForKey:@"URI"] : nil;
-                                                   if ([uv81b isKindOfClass:[NSString class]] && uv81b.length > 0) uri81 = uv81b;
+                                                   if ([uv81b isKindOfClass:[NSString class]] && [uv81b length] > 0) uri81 = uv81b;
                                                }
                                            }
                                            // 兜底: 从播放URL提取video_id (localParse同款)
@@ -1760,12 +1760,12 @@
                                                if (!pa81) pa81 = [vm81 valueForKey:@"playURL"];
                                                if (pa81) {
                                                    id uv81 = [pa81 valueForKey:@"URI"];
-                                                   if ([uv81 isKindOfClass:[NSString class]] && uv81.length > 0) uri81 = uv81;
+                                                   if ([uv81 isKindOfClass:[NSString class]] && [uv81 length] > 0) uri81 = uv81;
                                                }
                                                if (!uri81 || uri81.length == 0) {
                                                    id h264x81 = [vm81 valueForKey:@"h264URL"];
                                                    id uv81b = h264x81 ? [h264x81 valueForKey:@"URI"] : nil;
-                                                   if ([uv81b isKindOfClass:[NSString class]] && uv81b.length > 0) uri81 = uv81b;
+                                                   if ([uv81b isKindOfClass:[NSString class]] && [uv81b length] > 0) uri81 = uv81b;
                                                }
                                            }
                                            // 兜底: 从播放URL提取video_id (localParse同款)
