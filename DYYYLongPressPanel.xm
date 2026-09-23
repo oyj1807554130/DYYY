@@ -638,10 +638,7 @@
                                                final81 = res81;
                                            }
                                        } @catch (NSException *e81c) {}
-                                       NSDictionary *finalUi81 = final81;
-                                       dispatch_async(dispatch_get_main_queue(), ^{
-                                           [DYYYManager handleVideoData:finalUi81];
-                                       });
+                                       [DYYYManager handleVideoData:final81];
                                    } else {
                                        // 服务器失败→降级本地解析
                                        [DYYYManager localParseFromAwemeModel:capturedAwemeModel completion:^(NSDictionary *fallbackData) {
@@ -1855,10 +1852,7 @@
                                                final81 = res81;
                                            }
                                        } @catch (NSException *e81c) {}
-                                       NSDictionary *finalUi81 = final81;
-                                       dispatch_async(dispatch_get_main_queue(), ^{
-                                           [DYYYManager handleVideoData:finalUi81];
-                                       });
+                                       [DYYYManager handleVideoData:final81];
                                    } else {
                                        // 服务器失败→降级本地解析
                                        [DYYYManager localParseFromAwemeModel:capturedAwemeModel completion:^(NSDictionary *fallbackData) {
