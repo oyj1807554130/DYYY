@@ -638,7 +638,6 @@
                                                final81 = res81;
                                            }
                                        } @catch (NSException *e81c) {}
-                                       [DYYYUtils showToast:@"已获取服务器画质"];
                                        [DYYYManager handleVideoData:final81];
                                    } else {
                                        // 服务器失败→降级本地解析
@@ -1853,7 +1852,6 @@
                                                final81 = res81;
                                            }
                                        } @catch (NSException *e81c) {}
-                                       [DYYYUtils showToast:@"已获取服务器画质"];
                                        [DYYYManager handleVideoData:final81];
                                    } else {
                                        // 服务器失败→降级本地解析
