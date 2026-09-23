@@ -557,30 +557,60 @@
                                dispatch_async(dispatch_get_main_queue(), ^{
                                    NSArray *srvVids80 = srvResult80[@"video_list"];
                                    if (srvResult80 && [srvVids80 isKindOfClass:[NSArray class]] && srvVids80.count > 0) {
-                                       // 2.2-81 本地原画插头：内存播放流(App源)标原画插首位，后接服务器bit_rate全档
+                                       // 2.2-83 原画改play接口方式(videoURI拼URL+HEAD大小)+播放量档(内存statistics)
                                        NSDictionary *final81 = srvResult80;
                                        @try {
                                            id vm81 = [capturedAwemeModel valueForKey:@"video"];
-                                           NSString *origUrl81 = nil;
+                                           NSString *uri81 = nil;
                                            if (vm81) {
                                                id pa81 = [vm81 valueForKey:@"playAddr"];
                                                if (!pa81) pa81 = [vm81 valueForKey:@"playURL"];
                                                if (pa81) {
-                                                   NSArray *ul81 = [pa81 valueForKey:@"originURLList"];
-                                                   if (![ul81 isKindOfClass:[NSArray class]] || ul81.count == 0) ul81 = [pa81 valueForKey:@"urlList"];
-                                                   if ([ul81 isKindOfClass:[NSArray class]] && ul81.count > 0 && [ul81[0] isKindOfClass:[NSString class]]) origUrl81 = ul81[0];
+                                                   id uv81 = [pa81 valueForKey:@"URI"];
+                                                   if ([uv81 isKindOfClass:[NSString class]] && uv81.length > 0) uri81 = uv81;
                                                }
-                                               if (!origUrl81 || origUrl81.length == 0) {
+                                               if (!uri81 || uri81.length == 0) {
                                                    id h264x81 = [vm81 valueForKey:@"h264URL"];
-                                                   if (h264x81) {
-                                                       NSArray *ul81b = [h264x81 valueForKey:@"originURLList"];
-                                                       if ([ul81b isKindOfClass:[NSArray class]] && ul81b.count > 0 && [ul81b[0] isKindOfClass:[NSString class]]) origUrl81 = ul81b[0];
+                                                   id uv81b = h264x81 ? [h264x81 valueForKey:@"URI"] : nil;
+                                                   if ([uv81b isKindOfClass:[NSString class]] && uv81b.length > 0) uri81 = uv81b;
+                                               }
+                                           }
+                                           // 兜底: 从播放URL提取video_id (localParse同款)
+                                           if ((!uri81 || uri81.length == 0) && srvVids80.count > 0) {
+                                               NSString *seed81 = srvVids80[0][@"url"];
+                                               if ([seed81 isKindOfClass:[NSString class]]) {
+                                                   NSRange vr81 = [seed81 rangeOfString:@"/video_id/" options:NSBackwardsSearch];
+                                                   if (vr81.location != NSNotFound && vr81.location + vr81.length < seed81.length) {
+                                                       NSString *after81 = [seed81 substringFromIndex:vr81.location + vr81.length];
+                                                       NSRange cut81 = [after81 rangeOfString:@"?"].location != NSNotFound ? [after81 rangeOfString:@"?"] : NSMakeRange(after81.length, 0);
+                                                       NSRange sl81 = [after81 rangeOfString:@"/"];
+                                                       if (sl81.location != NSNotFound && sl81.location < cut81.location) cut81 = sl81;
+                                                       if (cut81.location < after81.length) uri81 = [after81 substringToIndex:cut81.location];
                                                    }
                                                }
                                            }
-                                           if (origUrl81 && origUrl81.length > 0) {
+                                           if (uri81 && uri81.length > 0) {
+                                               NSString *playUrl81 = [NSString stringWithFormat:@"https://www.douyin.com/aweme/v1/play/?video_id=%@&ratio=default&line=1&device_platform=webapp&aid=6383&channel=channel_pc_web", uri81];
+                                               __block long long sz81 = 0;
+                                               dispatch_semaphore_t sem81 = dispatch_semaphore_create(0);
+                                               NSMutableURLRequest *hr81 = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:playUrl81]];
+                                               hr81.HTTPMethod = @"HEAD";
+                                               hr81.timeoutInterval = 5;
+                                               [[NSURLSession.sharedSession dataTaskWithRequest:hr81 completionHandler:^(NSData *d81, NSURLResponse *r81, NSError *e81) {
+                                                   if ([r81 isKindOfClass:[NSHTTPURLResponse class]]) sz81 = ((NSHTTPURLResponse *)r81).expectedContentLength;
+                                                   dispatch_semaphore_signal(sem81);
+                                               }] resume];
+                                               dispatch_semaphore_wait(sem81, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC));
                                                NSMutableArray *vl81 = [NSMutableArray arrayWithArray:srvVids80];
-                                               [vl81 insertObject:@{@"url": origUrl81, @"level": @"[原画【本地源】]-[60FPS]", @"size": @(0)} atIndex:0];
+                                               [vl81 insertObject:@{@"url": playUrl81, @"level": @"[原画【本地源】]-[60FPS]", @"size": @(sz81 > 0 ? sz81 : 0)} atIndex:0];
+                                               // 播放量档(内存statistics.playCount, v33样式插原画后)
+                                               id st81 = [capturedAwemeModel valueForKey:@"statistics"];
+                                               id pc81 = st81 ? [st81 valueForKey:@"playCount"] : nil;
+                                               long long pcV81 = [pc81 respondsToSelector:@selector(longLongValue)] ? [pc81 longLongValue] : 0;
+                                               if (pcV81 > 0 && vl81.count > 1) {
+                                                   NSString *fu81 = vl81[1][@"url"];
+                                                   [vl81 insertObject:@{@"url": fu81 ?: @"", @"level": [NSString stringWithFormat:@"当前作品播放量：%lld播放", pcV81], @"size": @(0)} atIndex:1];
+                                               }
                                                NSMutableDictionary *res81 = [NSMutableDictionary dictionaryWithDictionary:srvResult80];
                                                res81[@"video_list"] = vl81;
                                                final81 = res81;
@@ -1720,30 +1750,60 @@
                                dispatch_async(dispatch_get_main_queue(), ^{
                                    NSArray *srvVids80 = srvResult80[@"video_list"];
                                    if (srvResult80 && [srvVids80 isKindOfClass:[NSArray class]] && srvVids80.count > 0) {
-                                       // 2.2-81 本地原画插头：内存播放流(App源)标原画插首位，后接服务器bit_rate全档
+                                       // 2.2-83 原画改play接口方式(videoURI拼URL+HEAD大小)+播放量档(内存statistics)
                                        NSDictionary *final81 = srvResult80;
                                        @try {
                                            id vm81 = [capturedAwemeModel valueForKey:@"video"];
-                                           NSString *origUrl81 = nil;
+                                           NSString *uri81 = nil;
                                            if (vm81) {
                                                id pa81 = [vm81 valueForKey:@"playAddr"];
                                                if (!pa81) pa81 = [vm81 valueForKey:@"playURL"];
                                                if (pa81) {
-                                                   NSArray *ul81 = [pa81 valueForKey:@"originURLList"];
-                                                   if (![ul81 isKindOfClass:[NSArray class]] || ul81.count == 0) ul81 = [pa81 valueForKey:@"urlList"];
-                                                   if ([ul81 isKindOfClass:[NSArray class]] && ul81.count > 0 && [ul81[0] isKindOfClass:[NSString class]]) origUrl81 = ul81[0];
+                                                   id uv81 = [pa81 valueForKey:@"URI"];
+                                                   if ([uv81 isKindOfClass:[NSString class]] && uv81.length > 0) uri81 = uv81;
                                                }
-                                               if (!origUrl81 || origUrl81.length == 0) {
+                                               if (!uri81 || uri81.length == 0) {
                                                    id h264x81 = [vm81 valueForKey:@"h264URL"];
-                                                   if (h264x81) {
-                                                       NSArray *ul81b = [h264x81 valueForKey:@"originURLList"];
-                                                       if ([ul81b isKindOfClass:[NSArray class]] && ul81b.count > 0 && [ul81b[0] isKindOfClass:[NSString class]]) origUrl81 = ul81b[0];
+                                                   id uv81b = h264x81 ? [h264x81 valueForKey:@"URI"] : nil;
+                                                   if ([uv81b isKindOfClass:[NSString class]] && uv81b.length > 0) uri81 = uv81b;
+                                               }
+                                           }
+                                           // 兜底: 从播放URL提取video_id (localParse同款)
+                                           if ((!uri81 || uri81.length == 0) && srvVids80.count > 0) {
+                                               NSString *seed81 = srvVids80[0][@"url"];
+                                               if ([seed81 isKindOfClass:[NSString class]]) {
+                                                   NSRange vr81 = [seed81 rangeOfString:@"/video_id/" options:NSBackwardsSearch];
+                                                   if (vr81.location != NSNotFound && vr81.location + vr81.length < seed81.length) {
+                                                       NSString *after81 = [seed81 substringFromIndex:vr81.location + vr81.length];
+                                                       NSRange cut81 = [after81 rangeOfString:@"?"].location != NSNotFound ? [after81 rangeOfString:@"?"] : NSMakeRange(after81.length, 0);
+                                                       NSRange sl81 = [after81 rangeOfString:@"/"];
+                                                       if (sl81.location != NSNotFound && sl81.location < cut81.location) cut81 = sl81;
+                                                       if (cut81.location < after81.length) uri81 = [after81 substringToIndex:cut81.location];
                                                    }
                                                }
                                            }
-                                           if (origUrl81 && origUrl81.length > 0) {
+                                           if (uri81 && uri81.length > 0) {
+                                               NSString *playUrl81 = [NSString stringWithFormat:@"https://www.douyin.com/aweme/v1/play/?video_id=%@&ratio=default&line=1&device_platform=webapp&aid=6383&channel=channel_pc_web", uri81];
+                                               __block long long sz81 = 0;
+                                               dispatch_semaphore_t sem81 = dispatch_semaphore_create(0);
+                                               NSMutableURLRequest *hr81 = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:playUrl81]];
+                                               hr81.HTTPMethod = @"HEAD";
+                                               hr81.timeoutInterval = 5;
+                                               [[NSURLSession.sharedSession dataTaskWithRequest:hr81 completionHandler:^(NSData *d81, NSURLResponse *r81, NSError *e81) {
+                                                   if ([r81 isKindOfClass:[NSHTTPURLResponse class]]) sz81 = ((NSHTTPURLResponse *)r81).expectedContentLength;
+                                                   dispatch_semaphore_signal(sem81);
+                                               }] resume];
+                                               dispatch_semaphore_wait(sem81, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC));
                                                NSMutableArray *vl81 = [NSMutableArray arrayWithArray:srvVids80];
-                                               [vl81 insertObject:@{@"url": origUrl81, @"level": @"[原画【本地源】]-[60FPS]", @"size": @(0)} atIndex:0];
+                                               [vl81 insertObject:@{@"url": playUrl81, @"level": @"[原画【本地源】]-[60FPS]", @"size": @(sz81 > 0 ? sz81 : 0)} atIndex:0];
+                                               // 播放量档(内存statistics.playCount, v33样式插原画后)
+                                               id st81 = [capturedAwemeModel valueForKey:@"statistics"];
+                                               id pc81 = st81 ? [st81 valueForKey:@"playCount"] : nil;
+                                               long long pcV81 = [pc81 respondsToSelector:@selector(longLongValue)] ? [pc81 longLongValue] : 0;
+                                               if (pcV81 > 0 && vl81.count > 1) {
+                                                   NSString *fu81 = vl81[1][@"url"];
+                                                   [vl81 insertObject:@{@"url": fu81 ?: @"", @"level": [NSString stringWithFormat:@"当前作品播放量：%lld播放", pcV81], @"size": @(0)} atIndex:1];
+                                               }
                                                NSMutableDictionary *res81 = [NSMutableDictionary dictionaryWithDictionary:srvResult80];
                                                res81[@"video_list"] = vl81;
                                                final81 = res81;
