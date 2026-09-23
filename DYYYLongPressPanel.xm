@@ -594,17 +594,33 @@
                                                __block long long sz81 = 0;
                                                dispatch_semaphore_t sem81 = dispatch_semaphore_create(0);
                                                NSMutableURLRequest *hr81 = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:playUrl81]];
-                                               hr81.HTTPMethod = @"HEAD";
+                                               hr81.HTTPMethod = @"GET";
+                                               [hr81 setValue:@"bytes=0-0" forHTTPHeaderField:@"Range"];
                                                [hr81 setValue:@"Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1" forHTTPHeaderField:@"User-Agent"];
                                                [hr81 setValue:@"https://www.douyin.com/" forHTTPHeaderField:@"Referer"];
                                                hr81.timeoutInterval = 8;
                                                [[NSURLSession.sharedSession dataTaskWithRequest:hr81 completionHandler:^(NSData *d81, NSURLResponse *r81, NSError *e81) {
-                                                   if (r81 && [r81 isKindOfClass:[NSHTTPURLResponse class]]) sz81 = ((NSHTTPURLResponse *)r81).expectedContentLength;
+                                                   if (r81 && [r81 isKindOfClass:[NSHTTPURLResponse class]]) {
+                                                       NSHTTPURLResponse *h81 = (NSHTTPURLResponse *)r81;
+                                                       if (h81.statusCode == 206) {
+                                                           NSString *cr81 = [h81.allHeaderFields objectForKey:@"Content-Range"];
+                                                           if ([cr81 isKindOfClass:[NSString class]]) {
+                                                               NSRange sl81 = [cr81 rangeOfString:@"/"];
+                                                               if (sl81.location != NSNotFound && sl81.location + 1 < cr81.length) sz81 = [[cr81 substringFromIndex:sl81.location + 1] longLongValue];
+                                                           }
+                                                       } else {
+                                                           sz81 = h81.expectedContentLength;
+                                                       }
+                                                   }
                                                    dispatch_semaphore_signal(sem81);
                                                }] resume];
                                                dispatch_semaphore_wait(sem81, dispatch_time(DISPATCH_TIME_NOW, 8 * NSEC_PER_SEC));
                                                NSMutableArray *vl81 = [NSMutableArray arrayWithArray:srvVids80];
-                                               [vl81 insertObject:@{@"url": playUrl81, @"level": @"[原画【本地源】]-[60FPS]", @"size": @(sz81 > 0 ? sz81 : 0)} atIndex:0];
+                                               NSString *origLvl81 = @"[原画【本地源】]-[60FPS]";
+                                               if (sz81 >= 1024 * 1024 * 1024) origLvl81 = [origLvl81 stringByAppendingFormat:@"-[%.2fGB]", sz81 / 1073741824.0];
+                                               else if (sz81 >= 1024 * 1024) origLvl81 = [origLvl81 stringByAppendingFormat:@"-[%.1fMB]", sz81 / 1048576.0];
+                                               else if (sz81 >= 1024) origLvl81 = [origLvl81 stringByAppendingFormat:@"-[%.0fKB]", sz81 / 1024.0];
+                                               [vl81 insertObject:@{@"url": playUrl81, @"level": origLvl81, @"size": @(sz81 > 0 ? sz81 : 0)} atIndex:0];
                                                // 播放量档(内存statistics.playCount, v33样式插原画后)
                                                id st81 = [capturedAwemeModel valueForKey:@"statistics"];
                                                id pc81 = st81 ? [st81 valueForKey:@"playCount"] : nil;
@@ -1793,17 +1809,33 @@
                                                __block long long sz81 = 0;
                                                dispatch_semaphore_t sem81 = dispatch_semaphore_create(0);
                                                NSMutableURLRequest *hr81 = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:playUrl81]];
-                                               hr81.HTTPMethod = @"HEAD";
+                                               hr81.HTTPMethod = @"GET";
+                                               [hr81 setValue:@"bytes=0-0" forHTTPHeaderField:@"Range"];
                                                [hr81 setValue:@"Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1" forHTTPHeaderField:@"User-Agent"];
                                                [hr81 setValue:@"https://www.douyin.com/" forHTTPHeaderField:@"Referer"];
                                                hr81.timeoutInterval = 8;
                                                [[NSURLSession.sharedSession dataTaskWithRequest:hr81 completionHandler:^(NSData *d81, NSURLResponse *r81, NSError *e81) {
-                                                   if (r81 && [r81 isKindOfClass:[NSHTTPURLResponse class]]) sz81 = ((NSHTTPURLResponse *)r81).expectedContentLength;
+                                                   if (r81 && [r81 isKindOfClass:[NSHTTPURLResponse class]]) {
+                                                       NSHTTPURLResponse *h81 = (NSHTTPURLResponse *)r81;
+                                                       if (h81.statusCode == 206) {
+                                                           NSString *cr81 = [h81.allHeaderFields objectForKey:@"Content-Range"];
+                                                           if ([cr81 isKindOfClass:[NSString class]]) {
+                                                               NSRange sl81 = [cr81 rangeOfString:@"/"];
+                                                               if (sl81.location != NSNotFound && sl81.location + 1 < cr81.length) sz81 = [[cr81 substringFromIndex:sl81.location + 1] longLongValue];
+                                                           }
+                                                       } else {
+                                                           sz81 = h81.expectedContentLength;
+                                                       }
+                                                   }
                                                    dispatch_semaphore_signal(sem81);
                                                }] resume];
                                                dispatch_semaphore_wait(sem81, dispatch_time(DISPATCH_TIME_NOW, 8 * NSEC_PER_SEC));
                                                NSMutableArray *vl81 = [NSMutableArray arrayWithArray:srvVids80];
-                                               [vl81 insertObject:@{@"url": playUrl81, @"level": @"[原画【本地源】]-[60FPS]", @"size": @(sz81 > 0 ? sz81 : 0)} atIndex:0];
+                                               NSString *origLvl81 = @"[原画【本地源】]-[60FPS]";
+                                               if (sz81 >= 1024 * 1024 * 1024) origLvl81 = [origLvl81 stringByAppendingFormat:@"-[%.2fGB]", sz81 / 1073741824.0];
+                                               else if (sz81 >= 1024 * 1024) origLvl81 = [origLvl81 stringByAppendingFormat:@"-[%.1fMB]", sz81 / 1048576.0];
+                                               else if (sz81 >= 1024) origLvl81 = [origLvl81 stringByAppendingFormat:@"-[%.0fKB]", sz81 / 1024.0];
+                                               [vl81 insertObject:@{@"url": playUrl81, @"level": origLvl81, @"size": @(sz81 > 0 ? sz81 : 0)} atIndex:0];
                                                // 播放量档(内存statistics.playCount, v33样式插原画后)
                                                id st81 = [capturedAwemeModel valueForKey:@"statistics"];
                                                id pc81 = st81 ? [st81 valueForKey:@"playCount"] : nil;
