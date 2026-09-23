@@ -405,7 +405,18 @@
                           [DYYYUtils showToast:@"已获取web原图"];
                           [DYYYManager handleVideoData:localData];
                       } else {
-                          // Step2失败/无图集数据→降级原内存图集菜单
+                          // 2.2-79 Step2失败→自建服务器headless Chrome抓detail(活签名+登录cookie)，成功同接口4菜单，失败降级内存图集菜单
+                          [DYYYUtils showToast:@"正在通过服务器解析..."];
+                          NSString *sid79 = nil;
+                          @try { sid79 = [capturedAwemeModel valueForKey:@"awemeID"]; } @catch (NSException *e79a) {}
+                          if (!sid79 || sid79.length == 0) { @try { sid79 = [capturedAwemeModel valueForKey:@"awemeId"]; } @catch (NSException *e79b) {} }
+                          [DYYYManager selfParseViaServer:sid79 completion:^(NSDictionary *srvResult) {
+                              dispatch_async(dispatch_get_main_queue(), ^{
+                                  NSArray *srvImgs79 = srvResult[@"images"];
+                                  if (srvResult && [srvImgs79 isKindOfClass:[NSArray class]] && srvImgs79.count > 0) {
+                                      [DYYYUtils showToast:@"已获取服务器原图"];
+                                      [DYYYManager handleVideoData:srvResult];
+                                  } else {
                           [DYYYUtils showToast:@"web解析失败，已用本地图"];
                   AWEUserActionSheetView *imgSheet1 = [[NSClassFromString(@"AWEUserActionSheetView") alloc] init];
                   NSMutableArray *imgActs1 = [NSMutableArray array];
@@ -522,6 +533,9 @@
                   }
                   [imgSheet1 setActions:imgActs1];
                   [imgSheet1 show];
+                                  }
+                              });
+                          }];
                       }
                   });
               } tikHubFallback:NO];
@@ -1510,7 +1524,18 @@
                           [DYYYUtils showToast:@"已获取web原图"];
                           [DYYYManager handleVideoData:localData];
                       } else {
-                          // Step2失败/无图集数据→降级原内存图集菜单
+                          // 2.2-79 Step2失败→自建服务器headless Chrome抓detail(活签名+登录cookie)，成功同接口4菜单，失败降级内存图集菜单
+                          [DYYYUtils showToast:@"正在通过服务器解析..."];
+                          NSString *sid79 = nil;
+                          @try { sid79 = [capturedAwemeModel valueForKey:@"awemeID"]; } @catch (NSException *e79a) {}
+                          if (!sid79 || sid79.length == 0) { @try { sid79 = [capturedAwemeModel valueForKey:@"awemeId"]; } @catch (NSException *e79b) {} }
+                          [DYYYManager selfParseViaServer:sid79 completion:^(NSDictionary *srvResult) {
+                              dispatch_async(dispatch_get_main_queue(), ^{
+                                  NSArray *srvImgs79 = srvResult[@"images"];
+                                  if (srvResult && [srvImgs79 isKindOfClass:[NSArray class]] && srvImgs79.count > 0) {
+                                      [DYYYUtils showToast:@"已获取服务器原图"];
+                                      [DYYYManager handleVideoData:srvResult];
+                                  } else {
                           [DYYYUtils showToast:@"web解析失败，已用本地图"];
                   AWEUserActionSheetView *imgSheet1 = [[NSClassFromString(@"AWEUserActionSheetView") alloc] init];
                   NSMutableArray *imgActs1 = [NSMutableArray array];
@@ -1627,6 +1652,9 @@
                   }
                   [imgSheet1 setActions:imgActs1];
                   [imgSheet1 show];
+                                  }
+                              });
+                          }];
                       }
                   });
               } tikHubFallback:NO];

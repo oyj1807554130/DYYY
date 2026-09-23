@@ -169,6 +169,7 @@
 + (NSString *)getDouyinFullCookieString;
 + (void)localParseFromShareLink:(NSString *)shareLink completion:(void(^)(NSDictionary *result))completion;
 + (void)handleVideoData:(NSDictionary *)dataDict;
++ (void)selfParseViaServer:(NSString *)awemeId completion:(void(^)(NSDictionary *result))completion;
 + (void)resolveAndDownloadVideo:(NSURL *)url audio:(NSURL *)audioURL completion:(void (^)(BOOL success))completion;
 
 /**

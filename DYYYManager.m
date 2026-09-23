@@ -5329,6 +5329,50 @@ static NSString *DYYYFetchAwemeDetailViaWebView(NSString *awemeId, NSMutableStri
 
 // ===== 2.2-65 TikHub 同步编排（接口4最终兜底专用）：awemeId直连，web打底省hybrid额度，结果与接口2共用24h缓存 =====
 
+// 2.2-79 自建服务器headless Chrome抓detail（活签名+登录cookie绕Argus，零TikHub额度）
++ (void)selfParseViaServer:(NSString *)awemeId completion:(void(^)(NSDictionary *result))completion {
+    if (!awemeId || awemeId.length == 0 || !completion) {
+        if (completion) completion(nil);
+        return;
+    }
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+        NSDictionary *result79 = nil;
+        @try {
+            NSString *cookie79 = [[NSUserDefaults standardUserDefaults] stringForKey:@"DYYYLoginCookie"];
+            if (!cookie79) cookie79 = @"";
+            NSDictionary *body79 = @{@"aweme_id": awemeId, @"cookie": cookie79};
+            NSData *bodyData79 = [NSJSONSerialization dataWithJSONObject:body79 options:0 error:nil];
+            NSMutableURLRequest *req79 = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:@"http://1.15.172.174:8000/selfparse"]];
+            [req79 setHTTPMethod:@"POST"];
+            [req79 setHTTPBody:bodyData79];
+            [req79 setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
+            [req79 setValue:@"180755oyj" forHTTPHeaderField:@"X-Key"];
+            [req79 setTimeoutInterval:75];
+            dispatch_semaphore_t sem79 = dispatch_semaphore_create(0);
+            __block NSData *data79 = nil;
+            __block NSInteger code79 = 0;
+            NSURLSessionDataTask *task79 = [[NSURLSession sharedSession] dataTaskWithRequest:req79 completionHandler:^(NSData *d79, NSURLResponse *r79, NSError *e79) {
+                if (d79) data79 = d79;
+                if ([r79 isKindOfClass:[NSHTTPURLResponse class]]) code79 = [(NSHTTPURLResponse *)r79 statusCode];
+                dispatch_semaphore_signal(sem79);
+            }];
+            [task79 resume];
+            dispatch_semaphore_wait(sem79, dispatch_time(DISPATCH_TIME_NOW, 80 * NSEC_PER_SEC));
+            if (data79 && code79 == 200) {
+                NSDictionary *json79 = [NSJSONSerialization JSONObjectWithData:data79 options:0 error:nil];
+                if ([json79 isKindOfClass:[NSDictionary class]] && [json79[@"ok"] integerValue] == 1) {
+                    NSDictionary *detail79 = json79[@"detail"];
+                    if ([detail79 isKindOfClass:[NSDictionary class]]) {
+                        NSDictionary *adapted79 = [self adaptTikHubDetailToDYYY:detail79 webDetail:detail79 originData:nil playCount:nil musicFromDetail:nil];
+                        if ([adapted79 isKindOfClass:[NSDictionary class]]) result79 = adapted79;
+                    }
+                }
+            }
+        } @catch (NSException *e) {}
+        if (completion) completion(result79);
+    });
+}
+
 + (NSDictionary *)_dyyySyncTikHubByAwemeId:(NSString *)awemeId {
     if (awemeId.length == 0) return nil;
     NSDictionary *cached = [self _dyyyTikHubCacheGet:awemeId];
