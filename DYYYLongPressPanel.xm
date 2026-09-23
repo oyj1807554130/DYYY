@@ -594,25 +594,15 @@
                                                __block long long sz81 = 0;
                                                dispatch_semaphore_t sem81 = dispatch_semaphore_create(0);
                                                NSMutableURLRequest *hr81 = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:playUrl81]];
-                                               hr81.HTTPMethod = @"GET";
-                                               [hr81 setValue:@"bytes=0-0" forHTTPHeaderField:@"Range"];
-                                               hr81.timeoutInterval = 5;
+                                               hr81.HTTPMethod = @"HEAD";
+                                               [hr81 setValue:@"Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1" forHTTPHeaderField:@"User-Agent"];
+                                               [hr81 setValue:@"https://www.douyin.com/" forHTTPHeaderField:@"Referer"];
+                                               hr81.timeoutInterval = 8;
                                                [[NSURLSession.sharedSession dataTaskWithRequest:hr81 completionHandler:^(NSData *d81, NSURLResponse *r81, NSError *e81) {
-                                                   if ([r81 isKindOfClass:[NSHTTPURLResponse class]]) {
-                                                       NSHTTPURLResponse *h81 = (NSHTTPURLResponse *)r81;
-                                                       if (h81.statusCode == 206) {
-                                                           NSString *cr81 = [h81.allHeaderFields objectForKey:@"Content-Range"];
-                                                           if ([cr81 isKindOfClass:[NSString class]]) {
-                                                               NSRange slash81 = [cr81 rangeOfString:@"/"];
-                                                               if (slash81.location != NSNotFound && slash81.location + 1 < cr81.length) sz81 = [[cr81 substringFromIndex:slash81.location + 1] longLongValue];
-                                                           }
-                                                       } else {
-                                                           sz81 = h81.expectedContentLength;
-                                                       }
-                                                   }
+                                                   if (r81 && [r81 isKindOfClass:[NSHTTPURLResponse class]]) sz81 = ((NSHTTPURLResponse *)r81).expectedContentLength;
                                                    dispatch_semaphore_signal(sem81);
                                                }] resume];
-                                               dispatch_semaphore_wait(sem81, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC));
+                                               dispatch_semaphore_wait(sem81, dispatch_time(DISPATCH_TIME_NOW, 8 * NSEC_PER_SEC));
                                                NSMutableArray *vl81 = [NSMutableArray arrayWithArray:srvVids80];
                                                [vl81 insertObject:@{@"url": playUrl81, @"level": @"[原画【本地源】]-[60FPS]", @"size": @(sz81 > 0 ? sz81 : 0)} atIndex:0];
                                                // 播放量档(内存statistics.playCount, v33样式插原画后)
@@ -1803,25 +1793,15 @@
                                                __block long long sz81 = 0;
                                                dispatch_semaphore_t sem81 = dispatch_semaphore_create(0);
                                                NSMutableURLRequest *hr81 = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:playUrl81]];
-                                               hr81.HTTPMethod = @"GET";
-                                               [hr81 setValue:@"bytes=0-0" forHTTPHeaderField:@"Range"];
-                                               hr81.timeoutInterval = 5;
+                                               hr81.HTTPMethod = @"HEAD";
+                                               [hr81 setValue:@"Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1" forHTTPHeaderField:@"User-Agent"];
+                                               [hr81 setValue:@"https://www.douyin.com/" forHTTPHeaderField:@"Referer"];
+                                               hr81.timeoutInterval = 8;
                                                [[NSURLSession.sharedSession dataTaskWithRequest:hr81 completionHandler:^(NSData *d81, NSURLResponse *r81, NSError *e81) {
-                                                   if ([r81 isKindOfClass:[NSHTTPURLResponse class]]) {
-                                                       NSHTTPURLResponse *h81 = (NSHTTPURLResponse *)r81;
-                                                       if (h81.statusCode == 206) {
-                                                           NSString *cr81 = [h81.allHeaderFields objectForKey:@"Content-Range"];
-                                                           if ([cr81 isKindOfClass:[NSString class]]) {
-                                                               NSRange slash81 = [cr81 rangeOfString:@"/"];
-                                                               if (slash81.location != NSNotFound && slash81.location + 1 < cr81.length) sz81 = [[cr81 substringFromIndex:slash81.location + 1] longLongValue];
-                                                           }
-                                                       } else {
-                                                           sz81 = h81.expectedContentLength;
-                                                       }
-                                                   }
+                                                   if (r81 && [r81 isKindOfClass:[NSHTTPURLResponse class]]) sz81 = ((NSHTTPURLResponse *)r81).expectedContentLength;
                                                    dispatch_semaphore_signal(sem81);
                                                }] resume];
-                                               dispatch_semaphore_wait(sem81, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC));
+                                               dispatch_semaphore_wait(sem81, dispatch_time(DISPATCH_TIME_NOW, 8 * NSEC_PER_SEC));
                                                NSMutableArray *vl81 = [NSMutableArray arrayWithArray:srvVids80];
                                                [vl81 insertObject:@{@"url": playUrl81, @"level": @"[原画【本地源】]-[60FPS]", @"size": @(sz81 > 0 ? sz81 : 0)} atIndex:0];
                                                // 播放量档(内存statistics.playCount, v33样式插原画后)
