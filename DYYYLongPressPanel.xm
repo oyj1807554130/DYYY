@@ -543,30 +543,17 @@
                AWELongPressPanelManager *panelManager = [%c(AWELongPressPanelManager) shareInstance];
                [panelManager dismissWithAnimation:YES completion:nil];
                [DYYYUtils showToast:@"正在解析画质..."];
-               // 2.2-87 并行提速：Full跑的同时服务器请求已在路上，Full失败直接收结果不用再等
-               NSString *sidPre87 = nil;
-               @try { sidPre87 = [capturedAwemeModel valueForKey:@"awemeID"]; } @catch (NSException *e87p) {}
-               if (!sidPre87 || sidPre87.length == 0) { @try { sidPre87 = [capturedAwemeModel valueForKey:@"awemeId"]; } @catch (NSException *e87q) {} }
-               dispatch_semaphore_t srvSem87 = dispatch_semaphore_create(0);
-               __block NSDictionary *srvPre87 = nil;
-               if (sidPre87 && sidPre87.length > 0) {
-                   dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-                       [DYYYManager selfParseViaServer:sidPre87 completion:^(NSDictionary *r87) {
-                           srvPre87 = r87;
-                           dispatch_semaphore_signal(srvSem87);
-                       }];
-                   });
-               }
                [DYYYManager localParseFullFromAwemeModel:capturedAwemeModel completion:^(NSDictionary *localData) {
                    dispatch_async(dispatch_get_main_queue(), ^{
                        if (localData) {
                            [DYYYManager handleVideoData:localData];
                        } else {
-                           // 2.2-87 失败分支：直接收并行服务器结果（Full跑时已提前发起）
+                           // 2.2-80 Full版失败→服务器Chrome抓detail(零额度全档位)→失败才降级内存解析
                            [DYYYUtils showToast:@"正在通过服务器解析..."];
-                           if (srvSem87) dispatch_semaphore_wait(srvSem87, dispatch_time(DISPATCH_TIME_NOW, 78 * NSEC_PER_SEC));
-                           NSDictionary *srvResult80 = srvPre87;
-                           do {
+                           NSString *sid80 = nil;
+                           @try { sid80 = [capturedAwemeModel valueForKey:@"awemeID"]; } @catch (NSException *e80a) {}
+                           if (!sid80 || sid80.length == 0) { @try { sid80 = [capturedAwemeModel valueForKey:@"awemeId"]; } @catch (NSException *e80b) {} }
+                           [DYYYManager selfParseViaServer:sid80 completion:^(NSDictionary *srvResult80) {
                                dispatch_async(dispatch_get_main_queue(), ^{
                                    NSArray *srvVids80 = srvResult80[@"video_list"];
                                    if (srvResult80 && [srvVids80 isKindOfClass:[NSArray class]] && srvVids80.count > 0) {
@@ -666,7 +653,7 @@
                                        }];
                                    }
                                });
-                           } while(0);
+                           }];
                        }
                    });
                } tikHubFallback:NO];
@@ -1771,30 +1758,17 @@
                AWELongPressPanelManager *panelManager = [%c(AWELongPressPanelManager) shareInstance];
                [panelManager dismissWithAnimation:YES completion:nil];
                [DYYYUtils showToast:@"正在解析画质..."];
-               // 2.2-87 并行提速：Full跑的同时服务器请求已在路上，Full失败直接收结果不用再等
-               NSString *sidPre87 = nil;
-               @try { sidPre87 = [capturedAwemeModel valueForKey:@"awemeID"]; } @catch (NSException *e87p) {}
-               if (!sidPre87 || sidPre87.length == 0) { @try { sidPre87 = [capturedAwemeModel valueForKey:@"awemeId"]; } @catch (NSException *e87q) {} }
-               dispatch_semaphore_t srvSem87 = dispatch_semaphore_create(0);
-               __block NSDictionary *srvPre87 = nil;
-               if (sidPre87 && sidPre87.length > 0) {
-                   dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-                       [DYYYManager selfParseViaServer:sidPre87 completion:^(NSDictionary *r87) {
-                           srvPre87 = r87;
-                           dispatch_semaphore_signal(srvSem87);
-                       }];
-                   });
-               }
                [DYYYManager localParseFullFromAwemeModel:capturedAwemeModel completion:^(NSDictionary *localData) {
                    dispatch_async(dispatch_get_main_queue(), ^{
                        if (localData) {
                            [DYYYManager handleVideoData:localData];
                        } else {
-                           // 2.2-87 失败分支：直接收并行服务器结果（Full跑时已提前发起）
+                           // 2.2-80 Full版失败→服务器Chrome抓detail(零额度全档位)→失败才降级内存解析
                            [DYYYUtils showToast:@"正在通过服务器解析..."];
-                           if (srvSem87) dispatch_semaphore_wait(srvSem87, dispatch_time(DISPATCH_TIME_NOW, 78 * NSEC_PER_SEC));
-                           NSDictionary *srvResult80 = srvPre87;
-                           do {
+                           NSString *sid80 = nil;
+                           @try { sid80 = [capturedAwemeModel valueForKey:@"awemeID"]; } @catch (NSException *e80a) {}
+                           if (!sid80 || sid80.length == 0) { @try { sid80 = [capturedAwemeModel valueForKey:@"awemeId"]; } @catch (NSException *e80b) {} }
+                           [DYYYManager selfParseViaServer:sid80 completion:^(NSDictionary *srvResult80) {
                                dispatch_async(dispatch_get_main_queue(), ^{
                                    NSArray *srvVids80 = srvResult80[@"video_list"];
                                    if (srvResult80 && [srvVids80 isKindOfClass:[NSArray class]] && srvVids80.count > 0) {
@@ -1894,7 +1868,7 @@
                                        }];
                                    }
                                });
-                           } while(0);
+                           }];
                        }
                    });
                } tikHubFallback:NO];
