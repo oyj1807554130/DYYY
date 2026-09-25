@@ -554,7 +554,7 @@
                            @try { sid80 = [capturedAwemeModel valueForKey:@"awemeID"]; } @catch (NSException *e80a) {}
                            if (!sid80 || sid80.length == 0) { @try { sid80 = [capturedAwemeModel valueForKey:@"awemeId"]; } @catch (NSException *e80b) {} }
                            [DYYYManager selfParseViaServer:sid80 completion:^(NSDictionary *srvResult80) {
-                               dispatch_async(dispatch_get_main_queue(), ^{
+                               // 2.2-94 修弹画质卡顿:原画大小探测(Range请求+semaphore_wait最长8s)原在主线程执行冻结界面,挪回completion后台线程,仅弹窗回main
                                    NSArray *srvVids80 = srvResult80[@"video_list"];
                                    if (srvResult80 && [srvVids80 isKindOfClass:[NSArray class]] && srvVids80.count > 0) {
                                        // 2.2-83 原画改play接口方式(videoURI拼URL+HEAD大小)+播放量档(内存statistics)
@@ -638,7 +638,9 @@
                                                final81 = res81;
                                            }
                                        } @catch (NSException *e81c) {}
-                                       [DYYYManager handleVideoData:final81];
+                                       dispatch_async(dispatch_get_main_queue(), ^{
+                                           [DYYYManager handleVideoData:final81];
+                                       });
                                    } else {
                                        // 服务器失败→降级本地解析
                                        [DYYYManager localParseFromAwemeModel:capturedAwemeModel completion:^(NSDictionary *fallbackData) {
@@ -651,7 +653,6 @@
                                            });
                                        }];
                                    }
-                               });
                            }];
                        }
                    });
@@ -1768,7 +1769,7 @@
                            @try { sid80 = [capturedAwemeModel valueForKey:@"awemeID"]; } @catch (NSException *e80a) {}
                            if (!sid80 || sid80.length == 0) { @try { sid80 = [capturedAwemeModel valueForKey:@"awemeId"]; } @catch (NSException *e80b) {} }
                            [DYYYManager selfParseViaServer:sid80 completion:^(NSDictionary *srvResult80) {
-                               dispatch_async(dispatch_get_main_queue(), ^{
+                               // 2.2-94 修弹画质卡顿:原画大小探测(Range请求+semaphore_wait最长8s)原在主线程执行冻结界面,挪回completion后台线程,仅弹窗回main
                                    NSArray *srvVids80 = srvResult80[@"video_list"];
                                    if (srvResult80 && [srvVids80 isKindOfClass:[NSArray class]] && srvVids80.count > 0) {
                                        // 2.2-83 原画改play接口方式(videoURI拼URL+HEAD大小)+播放量档(内存statistics)
@@ -1852,7 +1853,9 @@
                                                final81 = res81;
                                            }
                                        } @catch (NSException *e81c) {}
-                                       [DYYYManager handleVideoData:final81];
+                                       dispatch_async(dispatch_get_main_queue(), ^{
+                                           [DYYYManager handleVideoData:final81];
+                                       });
                                    } else {
                                        // 服务器失败→降级本地解析
                                        [DYYYManager localParseFromAwemeModel:capturedAwemeModel completion:^(NSDictionary *fallbackData) {
@@ -1865,7 +1868,6 @@
                                            });
                                        }];
                                    }
-                               });
                            }];
                        }
                    });
