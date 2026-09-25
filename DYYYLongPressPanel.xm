@@ -614,7 +614,60 @@
                                                    }
                                                    dispatch_semaphore_signal(sem81);
                                                }] resume];
-                                               dispatch_semaphore_wait(sem81, dispatch_time(DISPATCH_TIME_NOW, 8 * NSEC_PER_SEC));
+                                               dispatch_semaphore_wait(sem81, dispatch_time(DISPATCH_TIME_NOW, 4 * NSEC_PER_SEC));
+                                               if (sz81 < 10240) {
+                                                   // 2.2-95: 4s+4s重试(原8s单发偶发超时丢原画大小)
+                                                   dispatch_semaphore_t sem81b = dispatch_semaphore_create(0);
+                                                   NSMutableURLRequest *hr81b = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:playUrl81]];
+                                                   hr81b.HTTPMethod = @"GET";
+                                                   [hr81b setValue:@"bytes=0-0" forHTTPHeaderField:@"Range"];
+                                                   [hr81b setValue:@"Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1" forHTTPHeaderField:@"User-Agent"];
+                                                   [hr81b setValue:@"https://www.douyin.com/" forHTTPHeaderField:@"Referer"];
+                                                   hr81b.timeoutInterval = 4;
+                                                   [[NSURLSession.sharedSession dataTaskWithRequest:hr81b completionHandler:^(NSData *d81b, NSURLResponse *r81b, NSError *e81b) {
+                                                       if (r81b && [r81b isKindOfClass:[NSHTTPURLResponse class]]) {
+                                                           NSHTTPURLResponse *h81b = (NSHTTPURLResponse *)r81b;
+                                                           if (h81b.statusCode == 206) {
+                                                               NSString *cr81b = [h81b.allHeaderFields objectForKey:@"Content-Range"];
+                                                               if ([cr81b isKindOfClass:[NSString class]]) {
+                                                                   NSRange sl81b = [cr81b rangeOfString:@"/"];
+                                                                   if (sl81b.location != NSNotFound && sl81b.location + 1 < cr81b.length) sz81 = [[cr81b substringFromIndex:sl81b.location + 1] longLongValue];
+                                                               }
+                                                           } else if (sz81 < 10240) {
+                                                               long long cl81b = h81b.expectedContentLength;
+                                                               if (cl81b > sz81) sz81 = cl81b;
+                                                           }
+                                                       }
+                                                       dispatch_semaphore_signal(sem81b);
+                                                   }] resume];
+                                                   dispatch_semaphore_wait(sem81b, dispatch_time(DISPATCH_TIME_NOW, 4 * NSEC_PER_SEC));
+                                               }
+                                               if (sz81 < 10240) {
+                                                   // 2.2-95: bit_rate兜底(douyin自报档位大小,零网络,多命名兼容宿主model)
+                                                   @try {
+                                                       id br81 = [vm81 valueForKey:@"bit_rate"];
+                                                       if (![br81 isKindOfClass:[NSArray class]]) br81 = [vm81 valueForKey:@"bitRate"];
+                                                       if ([br81 isKindOfClass:[NSArray class]]) {
+                                                           for (id g81x in br81) {
+                                                               long long v81x = 0;
+                                                               for (NSString *pk81 in @[@"play_addr", @"playAddr"]) {
+                                                                   @try {
+                                                                       id pa81x = [g81x valueForKey:pk81];
+                                                                       if (!pa81x) continue;
+                                                                       for (NSString *dk81 in @[@"data_size", @"dataSize"]) {
+                                                                           @try {
+                                                                               id ds81x = [pa81x valueForKey:dk81];
+                                                                               if ([ds81x respondsToSelector:@selector(longLongValue)]) { v81x = [ds81x longLongValue]; break; }
+                                                                           } @catch (NSException *e81d) {}
+                                                                       }
+                                                                       if (v81x > 0) break;
+                                                                   } @catch (NSException *e81c) {}
+                                                               }
+                                                               if (v81x > sz81) sz81 = v81x;
+                                                           }
+                                                       }
+                                                   } @catch (NSException *e81x) {}
+                                               }
                                                NSMutableArray *vl81 = [NSMutableArray arrayWithArray:srvVids80];
                                                NSString *origLvl81 = @"[原画【本地源】]-[60FPS]";
                                                if (sz81 >= 1024 * 1024 * 1024) origLvl81 = [origLvl81 stringByAppendingFormat:@"-[%.2fGB]", sz81 / 1073741824.0];
@@ -1829,7 +1882,60 @@
                                                    }
                                                    dispatch_semaphore_signal(sem81);
                                                }] resume];
-                                               dispatch_semaphore_wait(sem81, dispatch_time(DISPATCH_TIME_NOW, 8 * NSEC_PER_SEC));
+                                               dispatch_semaphore_wait(sem81, dispatch_time(DISPATCH_TIME_NOW, 4 * NSEC_PER_SEC));
+                                               if (sz81 < 10240) {
+                                                   // 2.2-95: 4s+4s重试(原8s单发偶发超时丢原画大小)
+                                                   dispatch_semaphore_t sem81b = dispatch_semaphore_create(0);
+                                                   NSMutableURLRequest *hr81b = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:playUrl81]];
+                                                   hr81b.HTTPMethod = @"GET";
+                                                   [hr81b setValue:@"bytes=0-0" forHTTPHeaderField:@"Range"];
+                                                   [hr81b setValue:@"Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1" forHTTPHeaderField:@"User-Agent"];
+                                                   [hr81b setValue:@"https://www.douyin.com/" forHTTPHeaderField:@"Referer"];
+                                                   hr81b.timeoutInterval = 4;
+                                                   [[NSURLSession.sharedSession dataTaskWithRequest:hr81b completionHandler:^(NSData *d81b, NSURLResponse *r81b, NSError *e81b) {
+                                                       if (r81b && [r81b isKindOfClass:[NSHTTPURLResponse class]]) {
+                                                           NSHTTPURLResponse *h81b = (NSHTTPURLResponse *)r81b;
+                                                           if (h81b.statusCode == 206) {
+                                                               NSString *cr81b = [h81b.allHeaderFields objectForKey:@"Content-Range"];
+                                                               if ([cr81b isKindOfClass:[NSString class]]) {
+                                                                   NSRange sl81b = [cr81b rangeOfString:@"/"];
+                                                                   if (sl81b.location != NSNotFound && sl81b.location + 1 < cr81b.length) sz81 = [[cr81b substringFromIndex:sl81b.location + 1] longLongValue];
+                                                               }
+                                                           } else if (sz81 < 10240) {
+                                                               long long cl81b = h81b.expectedContentLength;
+                                                               if (cl81b > sz81) sz81 = cl81b;
+                                                           }
+                                                       }
+                                                       dispatch_semaphore_signal(sem81b);
+                                                   }] resume];
+                                                   dispatch_semaphore_wait(sem81b, dispatch_time(DISPATCH_TIME_NOW, 4 * NSEC_PER_SEC));
+                                               }
+                                               if (sz81 < 10240) {
+                                                   // 2.2-95: bit_rate兜底(douyin自报档位大小,零网络,多命名兼容宿主model)
+                                                   @try {
+                                                       id br81 = [vm81 valueForKey:@"bit_rate"];
+                                                       if (![br81 isKindOfClass:[NSArray class]]) br81 = [vm81 valueForKey:@"bitRate"];
+                                                       if ([br81 isKindOfClass:[NSArray class]]) {
+                                                           for (id g81x in br81) {
+                                                               long long v81x = 0;
+                                                               for (NSString *pk81 in @[@"play_addr", @"playAddr"]) {
+                                                                   @try {
+                                                                       id pa81x = [g81x valueForKey:pk81];
+                                                                       if (!pa81x) continue;
+                                                                       for (NSString *dk81 in @[@"data_size", @"dataSize"]) {
+                                                                           @try {
+                                                                               id ds81x = [pa81x valueForKey:dk81];
+                                                                               if ([ds81x respondsToSelector:@selector(longLongValue)]) { v81x = [ds81x longLongValue]; break; }
+                                                                           } @catch (NSException *e81d) {}
+                                                                       }
+                                                                       if (v81x > 0) break;
+                                                                   } @catch (NSException *e81c) {}
+                                                               }
+                                                               if (v81x > sz81) sz81 = v81x;
+                                                           }
+                                                       }
+                                                   } @catch (NSException *e81x) {}
+                                               }
                                                NSMutableArray *vl81 = [NSMutableArray arrayWithArray:srvVids80];
                                                NSString *origLvl81 = @"[原画【本地源】]-[60FPS]";
                                                if (sz81 >= 1024 * 1024 * 1024) origLvl81 = [origLvl81 stringByAppendingFormat:@"-[%.2fGB]", sz81 / 1073741824.0];
