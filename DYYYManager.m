@@ -5385,7 +5385,7 @@ static NSString *DYYYFetchAwemeDetailViaWebView(NSString *awemeId, NSMutableStri
     NSDictionary *webResp = [self _dyyyTikHubSyncGet:[NSString stringWithFormat:@"https://api.tikhub.dev/api/v1/douyin/web/fetch_one_video?aweme_id=%@", awemeId]];
     NSDictionary *detail = webResp[@"data"][@"aweme_detail"];
     if (![detail isKindOfClass:[NSDictionary class]]) return nil;
-    // 类型判定（v33 1:1）：is_live=首图有live_photo_type/clip_type(4,5)且有video；is_image=所有图无标记
+    // 类型判定（v33 1:1 + 混合帖修复）：anyMark=任意图有live标记→isLivePost；全无标记→isImagePost
     NSArray *rawImages = detail[@"image_post_info"][@"images"];
     if (![rawImages isKindOfClass:[NSArray class]]) rawImages = detail[@"images"];
     if (![rawImages isKindOfClass:[NSArray class]]) rawImages = @[];
@@ -5393,15 +5393,6 @@ static NSString *DYYYFetchAwemeDetailViaWebView(NSString *awemeId, NSMutableStri
     BOOL isLivePost = NO;
     BOOL isImagePost = NO;
     if (hasImages) {
-        NSDictionary *img0 = rawImages[0];
-        if ([img0 isKindOfClass:[NSDictionary class]]) {
-            id lpt = img0[@"live_photo_type"];
-            BOOL lptTruthy = NO;
-            if ([lpt respondsToSelector:@selector(boolValue)]) lptTruthy = [(NSNumber *)lpt boolValue];
-            else if ([lpt isKindOfClass:[NSString class]]) lptTruthy = [(NSString *)lpt length] > 0;
-            NSInteger ct = [img0[@"clip_type"] integerValue];
-            isLivePost = (lptTruthy || ct == 4 || ct == 5) && ([img0[@"video"] isKindOfClass:[NSDictionary class]]);
-        }
         BOOL anyMark = NO;
         for (NSDictionary *img in rawImages) {
             if (![img isKindOfClass:[NSDictionary class]]) continue;
@@ -5412,6 +5403,7 @@ static NSString *DYYYFetchAwemeDetailViaWebView(NSString *awemeId, NSMutableStri
             NSInteger c = [img[@"clip_type"] integerValue];
             if (lpT || c == 4 || c == 5) { anyMark = YES; break; }
         }
+        isLivePost = anyMark;
         isImagePost = hasImages && !anyMark;
     }
     // 音乐ID与有无URL（决定是否调music_detail，v33同条件）
@@ -5489,15 +5481,6 @@ static NSString *DYYYFetchAwemeDetailViaWebView(NSString *awemeId, NSMutableStri
         BOOL isLivePost = NO;
         BOOL isImagePost = NO;
         if (hasImages) {
-            NSDictionary *img0 = rawImages[0];
-            if ([img0 isKindOfClass:[NSDictionary class]]) {
-                id lpt = img0[@"live_photo_type"];
-                BOOL lptTruthy = NO;
-                if ([lpt respondsToSelector:@selector(boolValue)]) lptTruthy = [(NSNumber *)lpt boolValue];
-                else if ([lpt isKindOfClass:[NSString class]]) lptTruthy = [(NSString *)lpt length] > 0;
-                NSInteger ct = [img0[@"clip_type"] integerValue];
-                isLivePost = (lptTruthy || ct == 4 || ct == 5) && ([img0[@"video"] isKindOfClass:[NSDictionary class]]);
-            }
             BOOL anyMark = NO;
             for (NSDictionary *img in rawImages) {
                 if (![img isKindOfClass:[NSDictionary class]]) continue;
@@ -5508,6 +5491,7 @@ static NSString *DYYYFetchAwemeDetailViaWebView(NSString *awemeId, NSMutableStri
                 NSInteger c = [img[@"clip_type"] integerValue];
                 if (lpT || c == 4 || c == 5) { anyMark = YES; break; }
             }
+            isLivePost = anyMark;
             isImagePost = hasImages && !anyMark;
         }
         // 普通视频：web完整画质优先，hybrid兜底（v33：web_detail.video存在即用）
