@@ -5330,68 +5330,11 @@ static NSString *DYYYFetchAwemeDetailViaWebView(NSString *awemeId, NSMutableStri
 // ===== 2.2-65 TikHub 同步编排（接口4最终兜底专用）：awemeId直连，web打底省hybrid额度，结果与接口2共用24h缓存 =====
 
 // 2.2-79 自建服务器headless Chrome抓detail（活签名+登录cookie绕Argus，零TikHub额度）
-// 2.2-101 从app内存中的AwemeModel读播放量（app自己的API返回真实play_count）
+// 2.2-101 占位：app端播放量查询（当前版本暂不调用，保留接口）
 + (void)fetchPlayCountViaAppAPI:(NSString *)awemeId completion:(void(^)(long long playCount, long long diggCount, long long shareCount))completion {
-    if (!awemeId.length || !completion) {
-        if (completion) completion(0, 0, 0);
-        return;
-    }
-    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-        long long pc = 0, dc = 0, sc = 0;
-        @try {
-            // 方法1: 从app当前页面的AwemeModel取statistics.playCount
-            // 遍历所有window找AWEPlayControlViewController或当前视频的model
-            __block id foundModel = nil;
-            dispatch_sync(dispatch_get_main_queue(), ^{
-                for (UIWindow *w in [UIApplication sharedApplication].windows) {
-                    UIViewController *vc = w.rootViewController;
-                    // 递归找最顶层的VC
-                    while (vc.presentedViewController) vc = vc.presentedViewController;
-                    while ([vc respondsToSelector:@selector(lastChildViewController)] && [(id)vc lastChildViewController]) vc = [(id)vc lastChildViewController];
-                    // 尝试KVC取awemeModel/aweme
-                    for (NSString *key in @[@"awemeModel", @"aweme", @"_awemeModel", @"currentAweme", @"itemModel"]) {
-                        id m = [vc valueForKey:key];
-                        if ([m isKindOfClass:[NSObject class]]) { foundModel = m; break; }
-                    }
-                    if (foundModel) break;
-                    // 也尝试从view的layer取
-                    for (UIView *sv in w.subviews) {
-                        for (NSString *key in @[@"awemeModel", @"aweme"]) {
-                            @try { id m = [sv valueForKey:key]; if (m) { foundModel = m; break; } } @catch(NSException *e2) {}
-                        }
-                        if (foundModel) break;
-                    }
-                    if (foundModel) break;
-                }
-            });
-            if (foundModel) {
-                // 从model取statistics
-                id stats = nil;
-                @try { stats = [foundModel valueForKey:@"statistics"]; } @catch(NSException *e3) {}
-                if (stats) {
-                    id pcVal = [stats valueForKey:@"playCount"];
-                    if (!pcVal) pcVal = [stats valueForKey:@"play_count"];
-                    if ([pcVal respondsToSelector:@selector(longLongValue)]) pc = [pcVal longLongValue];
-                    id dcVal = [stats valueForKey:@"diggCount"];
-                    if (!dcVal) dcVal = [stats valueForKey:@"digg_count"];
-                    if ([dcVal respondsToSelector:@selector(longLongValue)]) dc = [dcVal longLongValue];
-                    id scVal = [stats valueForKey:@"shareCount"];
-                    if (!scVal) scVal = [stats valueForKey:@"share_count"];
-                    if ([scVal respondsToSelector:@selector(longLongValue)]) sc = [scVal longLongValue];
-                    // 检查awemeId匹配
-                    id modelAid = nil;
-                    @try { modelAid = [foundModel valueForKey:@"awemeId"]; } @catch(NSException *e4) {}
-                    @try { if (!modelAid) modelAid = [foundModel valueForKey:@"aid"]; } @catch(NSException *e5) {}
-                    NSString *modelAidStr = nil;
-                    if ([modelAid isKindOfClass:[NSString class]]) modelAidStr = modelAid;
-                    else if ([modelAid isKindOfClass:[NSNumber class]]) modelAidStr = [(NSNumber *)modelAid stringValue];
-                    // ID不匹配则弃用（可能取到的是别的视频）
-                    if (modelAidStr && ![modelAidStr isEqualToString:awemeId]) { pc = 0; dc = 0; sc = 0; }
-                }
-            }
-        } @catch (NSException *e) {}
-        if (completion) completion(pc, dc, sc);
-    });
+    // iOS端cookie不在NSHTTPCookieStorage中，app内部API暂时无法从插件侧调用
+    // 后续方案：hook app的detail API响应截取play_count缓存
+    if (completion) completion(0, 0, 0);
 }
 
 + (void)selfParseViaServer:(NSString *)awemeId completion:(void(^)(NSDictionary *result))completion {
