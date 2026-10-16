@@ -5330,6 +5330,52 @@ static NSString *DYYYFetchAwemeDetailViaWebView(NSString *awemeId, NSMutableStri
 // ===== 2.2-65 TikHub 同步编排（接口4最终兜底专用）：awemeId直连，web打底省hybrid额度，结果与接口2共用24h缓存 =====
 
 // 2.2-79 自建服务器headless Chrome抓detail（活签名+登录cookie绕Argus，零TikHub额度）
+// 2.2-101 app端statistics接口查真实播放量（插件跑在app内，NSURLSession自动带app cookie）
++ (void)fetchPlayCountViaAppAPI:(NSString *)awemeId completion:(void(^)(long long playCount, long long diggCount, long long shareCount))completion {
+    if (!awemeId.length || !completion) {
+        if (completion) completion(0, 0, 0);
+        return;
+    }
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+        long long pc = 0, dc = 0, sc = 0;
+        @try {
+            NSTimeInterval ts = [[NSDate date] timeIntervalSince1970];
+            NSString *urlStr = [NSString stringWithFormat:
+                @"https://api5-platform-m-jj.amemv.com/aweme/v1/aweme/statistics/"
+                @"?aweme_ids=%@&aid=1128&app_name=aweme&version_code=400600"
+                @"&device_platform=android&os=android&ts=%.0f",
+                awemeId, ts];
+            NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:urlStr]];
+            [req setValue:@"com.ss.android.ugc.aweme/290101 (Linux; U; Android 10; zh_CN; Pixel 4; Build/QQ3A.200805.001; Cronet/58.0.2996.0)" forHTTPHeaderField:@"User-Agent"];
+            [req setTimeoutInterval:15];
+            dispatch_semaphore_t sem = dispatch_semaphore_create(0);
+            __block NSData *respData = nil;
+            __block NSInteger statusCode = 0;
+            NSURLSessionDataTask *task = [[NSURLSession sharedSession] dataTaskWithRequest:req completionHandler:^(NSData *d, NSURLResponse *r, NSError *e) {
+                if (d) respData = d;
+                if ([r isKindOfClass:[NSHTTPURLResponse class]]) statusCode = [(NSHTTPURLResponse *)r statusCode];
+                dispatch_semaphore_signal(sem);
+            }];
+            [task resume];
+            dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, 16 * NSEC_PER_SEC));
+            if (respData && statusCode == 200) {
+                NSDictionary *json = [NSJSONSerialization JSONObjectWithData:respData options:0 error:nil];
+                if ([json isKindOfClass:[NSDictionary class]] && [json[@"code"] integerValue] == 0) {
+                    NSArray *sl = json[@"data"][@"statistics_list"];
+                    if ([sl isKindOfClass:[NSArray class]] && sl.count > 0) {
+                        NSDictionary *st = sl[0];
+                        id v;
+                        v = st[@"play_count"]; if ([v isKindOfClass:[NSNumber class]]) pc = [v longLongValue]; else if ([v isKindOfClass:[NSString class]]) pc = [(NSString *)v longLongValue];
+                        v = st[@"digg_count"]; if ([v isKindOfClass:[NSNumber class]]) dc = [v longLongValue]; else if ([v isKindOfClass:[NSString class]]) dc = [(NSString *)v longLongValue];
+                        v = st[@"share_count"]; if ([v isKindOfClass:[NSNumber class]]) sc = [v longLongValue]; else if ([v isKindOfClass:[NSString class]]) sc = [(NSString *)v longLongValue];
+                    }
+                }
+            }
+        } @catch (NSException *e) {}
+        if (completion) completion(pc, dc, sc);
+    });
+}
+
 + (void)selfParseViaServer:(NSString *)awemeId completion:(void(^)(NSDictionary *result))completion {
     if (!awemeId || awemeId.length == 0 || !completion) {
         if (completion) completion(nil);
@@ -5364,10 +5410,20 @@ static NSString *DYYYFetchAwemeDetailViaWebView(NSString *awemeId, NSMutableStri
                     NSDictionary *detail79 = json79[@"detail"];
                     if ([detail79 isKindOfClass:[NSDictionary class]]) {
                         // 2.2-82 播放量插头：web detail statistics.play_count → v33播放量档
+                        // 2.2-101：web端play_count恒为0，先用app端statistics接口补真实播放量
                         NSNumber *pc79 = nil;
                         id pcv79 = detail79[@"statistics"][@"play_count"];
                         if ([pcv79 isKindOfClass:[NSNumber class]]) pc79 = pcv79;
                         else if ([pcv79 isKindOfClass:[NSString class]] && [(NSString *)pcv79 longLongValue] > 0) pc79 = @([(NSString *)pcv79 longLongValue]);
+                        // app端补播放量（web端恒0时才调，省流量）
+                        if (!pc79 || [pc79 longLongValue] <= 0) {
+                            dispatch_semaphore_t pcSem = dispatch_semaphore_create(0);
+                            [DYYYManager fetchPlayCountViaAppAPI:awemeId completion:^(long long appPC, long long appDC, long long appSC) {
+                                if (appPC > 0) pc79 = @(appPC);
+                                dispatch_semaphore_signal(pcSem);
+                            }];
+                            dispatch_semaphore_wait(pcSem, dispatch_time(DISPATCH_TIME_NOW, 17 * NSEC_PER_SEC));
+                        }
                         NSDictionary *adapted79 = [self adaptTikHubDetailToDYYY:detail79 webDetail:detail79 originData:nil playCount:pc79 musicFromDetail:nil];
                         if ([adapted79 isKindOfClass:[NSDictionary class]]) result79 = adapted79;
                     }
