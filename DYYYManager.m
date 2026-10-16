@@ -5411,7 +5411,7 @@ static NSString *DYYYFetchAwemeDetailViaWebView(NSString *awemeId, NSMutableStri
                     if ([detail79 isKindOfClass:[NSDictionary class]]) {
                         // 2.2-82 播放量插头：web detail statistics.play_count → v33播放量档
                         // 2.2-101：web端play_count恒为0，先用app端statistics接口补真实播放量
-                        NSNumber *pc79 = nil;
+                        __block NSNumber *pc79 = nil;
                         id pcv79 = detail79[@"statistics"][@"play_count"];
                         if ([pcv79 isKindOfClass:[NSNumber class]]) pc79 = pcv79;
                         else if ([pcv79 isKindOfClass:[NSString class]] && [(NSString *)pcv79 longLongValue] > 0) pc79 = @([(NSString *)pcv79 longLongValue]);
