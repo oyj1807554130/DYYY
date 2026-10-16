@@ -5336,78 +5336,76 @@ static NSMutableDictionary<NSString *, NSNumber *> *gDYYYDiggCountCache = nil;
 static NSMutableDictionary<NSString *, NSNumber *> *gDYYYShareCountCache = nil;
 static BOOL gDYYYPlayCountHookInstalled = NO;
 
+// 传统C函数指针hook（比imp_implementationWithBlock更稳定，无ARC问题）
+static void (*gDYYYOrigSetStatistics)(id, SEL, id);
+static void gDYYYHookedSetStatistics(id _self, SEL _cmd, id stats) {
+    // 先调原方法
+    if (gDYYYOrigSetStatistics) gDYYYOrigSetStatistics(_self, _cmd, stats);
+    if (!stats) return;
+    @try {
+        // 诊断：dump statistics model全部属性（只打前3次）
+        static NSInteger diagCount = 0;
+        if (diagCount < 3) {
+            diagCount++;
+            unsigned int propCount = 0;
+            objc_property_t *props = class_copyPropertyList([stats class], &propCount);
+            NSMutableString *propList = [NSMutableString stringWithFormat:@"[DYYY] stats类=%@ 属性%u个:", NSStringFromClass([stats class]), propCount];
+            for (unsigned int j = 0; j < propCount; j++) {
+                const char *pname = property_getName(props[j]);
+                [propList appendFormat:@" %s", pname];
+            }
+            free(props);
+            NSLog(@"%@", propList);
+            for (unsigned int j = 0; j < propCount; j++) {
+                const char *pname = property_getName(props[j]);
+                NSString *pns = [NSString stringWithUTF8String:pname];
+                @try {
+                    id val = [stats valueForKey:pns];
+                    if (val && [val isKindOfClass:[NSNumber class]] && [val longLongValue] > 0)
+                        NSLog(@"[DYYY] stats.%@ = %@", pns, val);
+                } @catch(NSException *e) {}
+            }
+        }
+        NSString *vid = nil;
+        @try { vid = [_self valueForKey:@"itemID"]; } @catch(NSException *e) {}
+        if (!vid || vid.length == 0) @try { vid = [_self valueForKey:@"awemeID"]; } @catch(NSException *e2) {}
+        if (!vid || vid.length == 0) @try { vid = [_self valueForKey:@"awemeId"]; } @catch(NSException *e3) {}
+        if (!vid || vid.length == 0) return;
+        NSNumber *pc = nil;
+        @try { pc = [stats valueForKey:@"playCount"]; } @catch(NSException *e) {}
+        if (!pc || [pc longLongValue] <= 0) @try { pc = [stats valueForKey:@"play_count"]; } @catch(NSException *e4) {}
+        if (!pc || [pc longLongValue] <= 0) @try { pc = [stats valueForKey:@"playNum"]; } @catch(NSException *e5) {}
+        if (pc && [pc isKindOfClass:[NSNumber class]] && [pc longLongValue] > 0) {
+            @synchronized(gDYYYPlayCountCache) { gDYYYPlayCountCache[vid] = pc; }
+            NSLog(@"[DYYY] playCount缓存: %@ → %@", vid, pc);
+        }
+        NSNumber *dc = nil;
+        @try { dc = [stats valueForKey:@"diggCount"]; } @catch(NSException *e) {}
+        if (dc && [dc isKindOfClass:[NSNumber class]] && [dc longLongValue] > 0) {
+            @synchronized(gDYYYDiggCountCache) { gDYYYDiggCountCache[vid] = dc; }
+        }
+        NSNumber *sc = nil;
+        @try { sc = [stats valueForKey:@"shareCount"]; } @catch(NSException *e) {}
+        if (sc && [sc isKindOfClass:[NSNumber class]] && [sc longLongValue] > 0) {
+            @synchronized(gDYYYShareCountCache) { gDYYYShareCountCache[vid] = sc; }
+        }
+    } @catch(NSException *e) {
+        NSLog(@"[DYYY] playCount hook exception: %@", e);
+    }
+}
+
 + (void)_dyypcSetupStatisticsHook {
     if (gDYYYPlayCountHookInstalled) return;
     Class cls = objc_getClass("AWEAwemeModel");
-    if (!cls) return; // 类还没加载，下次再试
+    if (!cls) return;
     SEL sel = @selector(setStatistics:);
     Method m = class_getInstanceMethod(cls, sel);
     if (!m) return;
-
     if (!gDYYYPlayCountCache) gDYYYPlayCountCache = [NSMutableDictionary new];
     if (!gDYYYDiggCountCache) gDYYYDiggCountCache = [NSMutableDictionary new];
     if (!gDYYYShareCountCache) gDYYYShareCountCache = [NSMutableDictionary new];
-
-    IMP origIMP = method_getImplementation(m);
-    // 直接调origIMP，绝对不能用objc_msgSend（sel已被替换，会无限递归闪退）
-    IMP newIMP = imp_implementationWithBlock(^(id _self, id stats) {
-        ((void(*)(id,SEL,id))origIMP)(_self, sel, stats);
-        if (!stats) return;
-        @try {
-            // 诊断：dump statistics model全部属性（只打前3次，防刷屏）
-            static NSInteger diagCount = 0;
-            if (diagCount < 3) {
-                diagCount++;
-                unsigned int propCount = 0;
-                objc_property_t *props = class_copyPropertyList([stats class], &propCount);
-                NSMutableString *propList = [NSMutableString stringWithFormat:@"[DYYY] stats类=%@ 属性%u个: ", NSStringFromClass([stats class]), propCount];
-                for (unsigned int j = 0; j < propCount; j++) {
-                    const char *pname = property_getName(props[j]);
-                    [propList appendFormat:@"%s ", pname];
-                }
-                free(props);
-                NSLog(@"%@", propList);
-                // 逐个尝试读值
-                for (unsigned int j = 0; j < propCount; j++) {
-                    const char *pname = property_getName(props[j]);
-                    NSString *pns = [NSString stringWithUTF8String:pname];
-                    @try {
-                        id val = [stats valueForKey:pns];
-                        if (val && [val isKindOfClass:[NSNumber class]] && [val longLongValue] > 0) {
-                            NSLog(@"[DYYY] stats.%@ = %@", pns, val);
-                        }
-                    } @catch(NSException *e) {}
-                }
-            }
-            NSString *vid = nil;
-            @try { vid = [_self valueForKey:@"itemID"]; } @catch(NSException *e) {}
-            if (!vid || vid.length == 0) @try { vid = [_self valueForKey:@"awemeID"]; } @catch(NSException *e2) {}
-            if (!vid || vid.length == 0) @try { vid = [_self valueForKey:@"awemeId"]; } @catch(NSException *e3) {}
-            if (!vid || vid.length == 0) return;
-            // 尝试多种属性名
-            NSNumber *pc = nil;
-            @try { pc = [stats valueForKey:@"playCount"]; } @catch(NSException *e) {}
-            if (!pc || [pc longLongValue] <= 0) @try { pc = [stats valueForKey:@"play_count"]; } @catch(NSException *e4) {}
-            if (!pc || [pc longLongValue] <= 0) @try { pc = [stats valueForKey:@"playNum"]; } @catch(NSException *e5) {}
-            if (pc && [pc isKindOfClass:[NSNumber class]] && [pc longLongValue] > 0) {
-                @synchronized(gDYYYPlayCountCache) { gDYYYPlayCountCache[vid] = pc; }
-                NSLog(@"[DYYY] playCount缓存: %@ → %@", vid, pc);
-            }
-            NSNumber *dc = nil;
-            @try { dc = [stats valueForKey:@"diggCount"]; } @catch(NSException *e) {}
-            if (dc && [dc isKindOfClass:[NSNumber class]] && [dc longLongValue] > 0) {
-                @synchronized(gDYYYDiggCountCache) { gDYYYDiggCountCache[vid] = dc; }
-            }
-            NSNumber *sc = nil;
-            @try { sc = [stats valueForKey:@"shareCount"]; } @catch(NSException *e) {}
-            if (sc && [sc isKindOfClass:[NSNumber class]] && [sc longLongValue] > 0) {
-                @synchronized(gDYYYShareCountCache) { gDYYYShareCountCache[vid] = sc; }
-            }
-        } @catch(NSException *e) {
-            NSLog(@"[DYYY] playCount hook exception: %@", e);
-        }
-    });
-    method_setImplementation(m, newIMP);
+    gDYYYOrigSetStatistics = (void(*)(id,SEL,id))method_getImplementation(m);
+    method_setImplementation(m, (IMP)gDYYYHookedSetStatistics);
     gDYYYPlayCountHookInstalled = YES;
     NSLog(@"[DYYY] playCount hook: AWEAwemeModel setStatistics: swizzled ✅");
 }
