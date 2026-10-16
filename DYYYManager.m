@@ -5348,21 +5348,25 @@ static NSString *DYYYFetchAwemeDetailViaWebView(NSString *awemeId, NSMutableStri
             NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:urlStr]];
             [req setValue:@"com.ss.android.ugc.aweme/290101 (Linux; U; Android 10; zh_CN; Pixel 4; Build/QQ3A.200805.001; Cronet/58.0.2996.0)" forHTTPHeaderField:@"User-Agent"];
             // 从app的cookie jar读取amemv.com的cookie，手动拼Cookie头
-            NSURL *cookieURL = [NSURL URLWithString:@"https://api5-platform-m-jj.amemv.com/"];
+            // 从app的cookie jar读取多个可能的域名cookie
             NSHTTPCookieStorage *cookieJar = [NSHTTPCookieStorage sharedHTTPCookieStorage];
-            NSArray *cookies = [cookieJar cookiesForURL:cookieURL];
             NSMutableString *cookieStr = [NSMutableString string];
-            for (NSHTTPCookie *ck in cookies) {
-                if (cookieStr.length > 0) [cookieStr appendString:@"; "];
-                [cookieStr appendFormat:@"%@=%@", ck.name, ck.value];
-            }
-            // 如果amemv.com没有cookie，尝试.douyin.com的（有些token是跨域的）
-            if (cookieStr.length == 0) {
-                NSURL *dyURL = [NSURL URLWithString:@"https://www.douyin.com/"];
-                NSArray *dyCookies = [cookieJar cookiesForURL:dyURL];
-                for (NSHTTPCookie *ck in dyCookies) {
-                    if (cookieStr.length > 0) [cookieStr appendString:@"; "];
-                    [cookieStr appendFormat:@"%@=%@", ck.name, ck.value];
+            // 按优先级尝试多个域名（iOS app可能用不同API域名）
+            NSArray *cookieURLs = @[
+                [NSURL URLWithString:@"https://api5-platform-m-jj.amemv.com/"],
+                [NSURL URLWithString:@"https://api-h2.amemv.com/"],
+                [NSURL URLWithString:@"https://api.amemv.com/"],
+                [NSURL URLWithString:@"https://www.douyin.com/"],
+                [NSURL URLWithString:@"https://www.iesdouyin.com/"],
+            ];
+            for (NSURL *curl in cookieURLs) {
+                NSArray *cks = [cookieJar cookiesForURL:curl];
+                if (cks.count > 0) {
+                    for (NSHTTPCookie *ck in cks) {
+                        if (cookieStr.length > 0) [cookieStr appendString:@"; "];
+                        [cookieStr appendFormat:@"%@=%@", ck.name, ck.value];
+                    }
+                    break;  // 找到有cookie的域名就用
                 }
             }
             if (cookieStr.length > 0) [req setValue:cookieStr forHTTPHeaderField:@"Cookie"];
@@ -5370,7 +5374,7 @@ static NSString *DYYYFetchAwemeDetailViaWebView(NSString *awemeId, NSMutableStri
             dispatch_semaphore_t sem = dispatch_semaphore_create(0);
             __block NSData *respData = nil;
             __block NSInteger statusCode = 0;
-            NSURLSessionConfiguration *cfg = [NSURLSessionConfiguration defaultSessionConfiguration];
+            NSURLSessionConfiguration *cfg = [NSURLSessionConfiguration ephemeralSessionConfiguration];  // ephemeral=独立副本，不污染app默认配置
             cfg.HTTPShouldSetCookies = NO;  // 我们手动设了Cookie头，不让系统覆盖
             NSURLSession *session = [NSURLSession sessionWithConfiguration:cfg];
             NSURLSessionDataTask *task = [session dataTaskWithRequest:req completionHandler:^(NSData *d, NSURLResponse *r, NSError *e) {
