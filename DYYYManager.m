@@ -5354,13 +5354,41 @@ static BOOL gDYYYPlayCountHookInstalled = NO;
         ((void(*)(id,SEL,id))origIMP)(_self, sel, stats);
         if (!stats) return;
         @try {
+            // 诊断：dump statistics model全部属性（只打前3次，防刷屏）
+            static NSInteger diagCount = 0;
+            if (diagCount < 3) {
+                diagCount++;
+                unsigned int propCount = 0;
+                objc_property_t *props = class_copyPropertyList([stats class], &propCount);
+                NSMutableString *propList = [NSMutableString stringWithFormat:@"[DYYY] stats类=%@ 属性%u个: ", NSStringFromClass([stats class]), propCount];
+                for (unsigned int j = 0; j < propCount; j++) {
+                    const char *pname = property_getName(props[j]);
+                    [propList appendFormat:@"%s ", pname];
+                }
+                free(props);
+                NSLog(@"%@", propList);
+                // 逐个尝试读值
+                for (unsigned int j = 0; j < propCount; j++) {
+                    const char *pname = property_getName(props[j]);
+                    NSString *pns = [NSString stringWithUTF8String:pname];
+                    @try {
+                        id val = [stats valueForKey:pns];
+                        if (val && [val isKindOfClass:[NSNumber class]] && [val longLongValue] > 0) {
+                            NSLog(@"[DYYY] stats.%@ = %@", pns, val);
+                        }
+                    } @catch(NSException *e) {}
+                }
+            }
             NSString *vid = nil;
             @try { vid = [_self valueForKey:@"itemID"]; } @catch(NSException *e) {}
             if (!vid || vid.length == 0) @try { vid = [_self valueForKey:@"awemeID"]; } @catch(NSException *e2) {}
             if (!vid || vid.length == 0) @try { vid = [_self valueForKey:@"awemeId"]; } @catch(NSException *e3) {}
             if (!vid || vid.length == 0) return;
+            // 尝试多种属性名
             NSNumber *pc = nil;
             @try { pc = [stats valueForKey:@"playCount"]; } @catch(NSException *e) {}
+            if (!pc || [pc longLongValue] <= 0) @try { pc = [stats valueForKey:@"play_count"]; } @catch(NSException *e4) {}
+            if (!pc || [pc longLongValue] <= 0) @try { pc = [stats valueForKey:@"playNum"]; } @catch(NSException *e5) {}
             if (pc && [pc isKindOfClass:[NSNumber class]] && [pc longLongValue] > 0) {
                 @synchronized(gDYYYPlayCountCache) { gDYYYPlayCountCache[vid] = pc; }
                 NSLog(@"[DYYY] playCount缓存: %@ → %@", vid, pc);
