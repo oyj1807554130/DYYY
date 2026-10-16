@@ -5330,7 +5330,7 @@ static NSString *DYYYFetchAwemeDetailViaWebView(NSString *awemeId, NSMutableStri
 // ===== 2.2-65 TikHub 同步编排（接口4最终兜底专用）：awemeId直连，web打底省hybrid额度，结果与接口2共用24h缓存 =====
 
 // 2.2-79 自建服务器headless Chrome抓detail（活签名+登录cookie绕Argus，零TikHub额度）
-// 2.2-101 app端statistics接口查真实播放量（插件跑在app内，NSURLSession自动带app cookie）
+// 2.2-101 app端statistics接口查真实播放量（从app cookie jar读cookie，手动注入请求头）
 + (void)fetchPlayCountViaAppAPI:(NSString *)awemeId completion:(void(^)(long long playCount, long long diggCount, long long shareCount))completion {
     if (!awemeId.length || !completion) {
         if (completion) completion(0, 0, 0);
@@ -5347,11 +5347,33 @@ static NSString *DYYYFetchAwemeDetailViaWebView(NSString *awemeId, NSMutableStri
                 awemeId, ts];
             NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:urlStr]];
             [req setValue:@"com.ss.android.ugc.aweme/290101 (Linux; U; Android 10; zh_CN; Pixel 4; Build/QQ3A.200805.001; Cronet/58.0.2996.0)" forHTTPHeaderField:@"User-Agent"];
+            // 从app的cookie jar读取amemv.com的cookie，手动拼Cookie头
+            NSURL *cookieURL = [NSURL URLWithString:@"https://api5-platform-m-jj.amemv.com/"];
+            NSHTTPCookieStorage *cookieJar = [NSHTTPCookieStorage sharedHTTPCookieStorage];
+            NSArray *cookies = [cookieJar cookiesForURL:cookieURL];
+            NSMutableString *cookieStr = [NSMutableString string];
+            for (NSHTTPCookie *ck in cookies) {
+                if (cookieStr.length > 0) [cookieStr appendString:@"; "];
+                [cookieStr appendFormat:@"%@=%@", ck.name, ck.value];
+            }
+            // 如果amemv.com没有cookie，尝试.douyin.com的（有些token是跨域的）
+            if (cookieStr.length == 0) {
+                NSURL *dyURL = [NSURL URLWithString:@"https://www.douyin.com/"];
+                NSArray *dyCookies = [cookieJar cookiesForURL:dyURL];
+                for (NSHTTPCookie *ck in dyCookies) {
+                    if (cookieStr.length > 0) [cookieStr appendString:@"; "];
+                    [cookieStr appendFormat:@"%@=%@", ck.name, ck.value];
+                }
+            }
+            if (cookieStr.length > 0) [req setValue:cookieStr forHTTPHeaderField:@"Cookie"];
             [req setTimeoutInterval:15];
             dispatch_semaphore_t sem = dispatch_semaphore_create(0);
             __block NSData *respData = nil;
             __block NSInteger statusCode = 0;
-            NSURLSessionDataTask *task = [[NSURLSession sharedSession] dataTaskWithRequest:req completionHandler:^(NSData *d, NSURLResponse *r, NSError *e) {
+            NSURLSessionConfiguration *cfg = [NSURLSessionConfiguration defaultSessionConfiguration];
+            cfg.HTTPShouldSetCookies = NO;  // 我们手动设了Cookie头，不让系统覆盖
+            NSURLSession *session = [NSURLSession sessionWithConfiguration:cfg];
+            NSURLSessionDataTask *task = [session dataTaskWithRequest:req completionHandler:^(NSData *d, NSURLResponse *r, NSError *e) {
                 if (d) respData = d;
                 if ([r isKindOfClass:[NSHTTPURLResponse class]]) statusCode = [(NSHTTPURLResponse *)r statusCode];
                 dispatch_semaphore_signal(sem);
