@@ -5330,54 +5330,76 @@ static NSString *DYYYFetchAwemeDetailViaWebView(NSString *awemeId, NSMutableStri
 // ===== 2.2-65 TikHub 同步编排（接口4最终兜底专用）：awemeId直连，web打底省hybrid额度，结果与接口2共用24h缓存 =====
 
 // 2.2-79 自建服务器headless Chrome抓detail（活签名+登录cookie绕Argus，零TikHub额度）
-// 2.2-101 播放量缓存：hook AWEAwemeModel setStatistics: 截取app内部真实播放量
+// 2.2-106 播放量：从app内部直接调statistics API（自动带app cookie）+ setStatistics hook兜底
 static NSMutableDictionary<NSString *, NSNumber *> *gDYYYPlayCountCache = nil;
 static NSMutableDictionary<NSString *, NSNumber *> *gDYYYDiggCountCache = nil;
 static NSMutableDictionary<NSString *, NSNumber *> *gDYYYShareCountCache = nil;
 static BOOL gDYYYPlayCountHookInstalled = NO;
+// 截获的amemv.com cookie（从hook NSMutableURLRequest或NSHTTPCookieStorage获取）
+static NSString *gDYYYCapturedAmemvCookie = nil;
+static NSMutableDictionary<NSString *, NSNumber *> *gDYYYPendingPlayCountReqs = nil; // 防重复请求
 
-// 传统C函数指针hook（比imp_implementationWithBlock更稳定，无ARC问题）
+// ---- setStatistics hook（兜底：从model属性/ivar截取） ----
 static void (*gDYYYOrigSetStatistics)(id, SEL, id);
 static void gDYYYHookedSetStatistics(id _self, SEL _cmd, id stats) {
-    // 先调原方法
     if (gDYYYOrigSetStatistics) gDYYYOrigSetStatistics(_self, _cmd, stats);
     if (!stats) return;
     @try {
-        // 诊断：dump statistics model全部属性（只打前3次）
+        // 诊断：dump全部属性+ivar（只打前2次）
         static NSInteger diagCount = 0;
-        if (diagCount < 3) {
+        if (diagCount < 2) {
             diagCount++;
+            // 属性
             unsigned int propCount = 0;
             objc_property_t *props = class_copyPropertyList([stats class], &propCount);
-            NSMutableString *propList = [NSMutableString stringWithFormat:@"[DYYY] stats类=%@ 属性%u个:", NSStringFromClass([stats class]), propCount];
-            for (unsigned int j = 0; j < propCount; j++) {
-                const char *pname = property_getName(props[j]);
-                [propList appendFormat:@" %s", pname];
-            }
-            free(props);
-            NSLog(@"%@", propList);
+            NSLog(@"[DYYY] stats类=%@ 属性%u个", NSStringFromClass([stats class]), propCount);
             for (unsigned int j = 0; j < propCount; j++) {
                 const char *pname = property_getName(props[j]);
                 NSString *pns = [NSString stringWithUTF8String:pname];
                 @try {
                     id val = [stats valueForKey:pns];
-                    if (val && [val isKindOfClass:[NSNumber class]] && [val longLongValue] > 0)
-                        NSLog(@"[DYYY] stats.%@ = %@", pns, val);
+                    NSLog(@"[DYYY]   prop %@ = %@", pns, val);
                 } @catch(NSException *e) {}
             }
+            free(props);
+            // ivar（比属性更全，可能包含未暴露的playCount）
+            unsigned int ivarCount = 0;
+            Ivar *ivars = class_copyIvarList([stats class], &ivarCount);
+            NSLog(@"[DYYY] stats类=%@ ivar%u个", NSStringFromClass([stats class]), ivarCount);
+            for (unsigned int j = 0; j < ivarCount; j++) {
+                const char *iname = ivar_getName(ivars[j]);
+                const char *itype = ivar_getTypeEncoding(ivars[j]);
+                NSString *ins = [NSString stringWithUTF8String:iname];
+                // 只读数值型ivar（q=long long, d=double, i=int, l=long）
+                if (itype && (itype[0] == 'q' || itype[0] == 'd' || itype[0] == 'i' || itype[0] == 'l')) {
+                    @try {
+                        id val = [stats valueForKey:ins];
+                        if (val && [val respondsToSelector:@selector(longLongValue)] && [val longLongValue] > 0)
+                            NSLog(@"[DYYY]   ivar %@(%s) = %lld", ins, itype, [val longLongValue]);
+                    } @catch(NSException *e) {}
+                } else {
+                    NSLog(@"[DYYY]   ivar %@(%s)", ins, itype ? itype : "?");
+                }
+            }
+            free(ivars);
         }
+        // 获取视频ID
         NSString *vid = nil;
         @try { vid = [_self valueForKey:@"itemID"]; } @catch(NSException *e) {}
         if (!vid || vid.length == 0) @try { vid = [_self valueForKey:@"awemeID"]; } @catch(NSException *e2) {}
         if (!vid || vid.length == 0) @try { vid = [_self valueForKey:@"awemeId"]; } @catch(NSException *e3) {}
         if (!vid || vid.length == 0) return;
+        // 从属性+ivar尝试取playCount
         NSNumber *pc = nil;
         @try { pc = [stats valueForKey:@"playCount"]; } @catch(NSException *e) {}
         if (!pc || [pc longLongValue] <= 0) @try { pc = [stats valueForKey:@"play_count"]; } @catch(NSException *e4) {}
         if (!pc || [pc longLongValue] <= 0) @try { pc = [stats valueForKey:@"playNum"]; } @catch(NSException *e5) {}
+        // 也试下划线ivar名
+        if (!pc || [pc longLongValue] <= 0) @try { pc = [stats valueForKey:@"_playCount"]; } @catch(NSException *e6) {}
+        if (!pc || [pc longLongValue] <= 0) @try { pc = [stats valueForKey:@"_play_count"]; } @catch(NSException *e7) {}
         if (pc && [pc isKindOfClass:[NSNumber class]] && [pc longLongValue] > 0) {
             @synchronized(gDYYYPlayCountCache) { gDYYYPlayCountCache[vid] = pc; }
-            NSLog(@"[DYYY] playCount缓存: %@ → %@", vid, pc);
+            NSLog(@"[DYYY] playCount(setStatistics): %@ → %@", vid, pc);
         }
         NSNumber *dc = nil;
         @try { dc = [stats valueForKey:@"diggCount"]; } @catch(NSException *e) {}
@@ -5404,29 +5426,159 @@ static void gDYYYHookedSetStatistics(id _self, SEL _cmd, id stats) {
     if (!gDYYYPlayCountCache) gDYYYPlayCountCache = [NSMutableDictionary new];
     if (!gDYYYDiggCountCache) gDYYYDiggCountCache = [NSMutableDictionary new];
     if (!gDYYYShareCountCache) gDYYYShareCountCache = [NSMutableDictionary new];
+    if (!gDYYYPendingPlayCountReqs) gDYYYPendingPlayCountReqs = [NSMutableDictionary new];
     gDYYYOrigSetStatistics = (void(*)(id,SEL,id))method_getImplementation(m);
     method_setImplementation(m, (IMP)gDYYYHookedSetStatistics);
     gDYYYPlayCountHookInstalled = YES;
     NSLog(@"[DYYY] playCount hook: AWEAwemeModel setStatistics: swizzled ✅");
 }
 
+// ---- cookie截获：hook NSMutableURLRequest setValue:forHTTPHeaderField: 捕获amemv.com的Cookie ----
+static void (*gDYYYOrigSetValueForHeader)(id, SEL, NSString*, NSString*);
+static void gDYYYHookedSetValueForHeader(id _self, SEL _cmd, NSString *value, NSString *field) {
+    gDYYYOrigSetValueForHeader(_self, _cmd, value, field);
+    // 只拦截Cookie头，且长度>50（排除无关小cookie）
+    if ([field caseInsensitiveCompare:@"Cookie"] == NSOrderedSame && value.length > 50) {
+        @try {
+            // 从request的URL判断是否amemv
+            NSURL *url = [(NSURLRequest *)_self URL];
+            if (url && [url.absoluteString containsString:@"amemv"]) {
+                @synchronized(gDYYYCapturedAmemvCookie) {
+                    if (value.length > gDYYYCapturedAmemvCookie.length) {
+                        gDYYYCapturedAmemvCookie = [value copy];
+                        NSLog(@"[DYYY] 截获amemv cookie: %lu字符", (unsigned long)value.length);
+                    }
+                }
+            }
+        } @catch(NSException *e) {}
+    }
+}
+
++ (void)_dyypcSetupCookieHook {
+    static BOOL cookieHookInstalled = NO;
+    if (cookieHookInstalled) return;
+    Class cls = objc_getClass("NSMutableURLRequest");
+    if (!cls) return;
+    SEL sel = @selector(setValue:forHTTPHeaderField:);
+    Method m = class_getInstanceMethod(cls, sel);
+    if (!m) return;
+    gDYYYOrigSetValueForHeader = (void(*)(id,SEL,NSString*,NSString*))method_getImplementation(m);
+    method_setImplementation(m, (IMP)gDYYYHookedSetValueForHeader);
+    cookieHookInstalled = YES;
+    NSLog(@"[DYYY] cookie截获hook: NSMutableURLRequest setValue:forHTTPHeaderField: ✅");
+}
+
 + (void)fetchPlayCountViaAppAPI:(NSString *)awemeId completion:(void(^)(long long playCount, long long diggCount, long long shareCount))completion {
-    // 确保hook已安装
     [self _dyypcSetupStatisticsHook];
+    if (!awemeId || awemeId.length == 0) { if (completion) completion(0,0,0); return; }
+
+    // 1) 先查缓存
     long long pc = 0, dc = 0, sc = 0;
-    if (awemeId.length > 0) {
-        @synchronized(gDYYYPlayCountCache) {
-            NSNumber *pcVal = gDYYYPlayCountCache[awemeId];
-            if (pcVal) pc = [pcVal longLongValue];
-            NSNumber *dcVal = gDYYYDiggCountCache[awemeId];
-            if (dcVal) dc = [dcVal longLongValue];
-            NSNumber *scVal = gDYYYShareCountCache[awemeId];
-            if (scVal) sc = [scVal longLongValue];
+    @synchronized(gDYYYPlayCountCache) {
+        NSNumber *v = gDYYYPlayCountCache[awemeId];
+        if (v) pc = [v longLongValue];
+        v = gDYYYDiggCountCache[awemeId];
+        if (v) dc = [v longLongValue];
+        v = gDYYYShareCountCache[awemeId];
+        if (v) sc = [v longLongValue];
+    }
+    if (pc > 0) {
+        NSLog(@"[DYYY] playCount命中缓存: %@ → %lld", awemeId, pc);
+        if (completion) completion(pc, dc, sc);
+        return;
+    }
+
+    // 2) 缓存未命中 → 从app内部发HTTP请求调statistics API
+    // 防止重复请求同一个awemeId
+    @synchronized(gDYYYPendingPlayCountReqs) {
+        if (gDYYYPendingPlayCountReqs[awemeId]) {
+            NSLog(@"[DYYY] playCount请求已在途: %@", awemeId);
+            if (completion) completion(0,0,0);
+            return;
+        }
+        gDYYYPendingPlayCountReqs[awemeId] = @1;
+    }
+
+    NSString *ts = [NSString stringWithFormat:@"%lld", (long long)[[NSDate date] timeIntervalSince1970]];
+    NSString *urlStr = [NSString stringWithFormat:
+        @"https://api5-platform-m-jj.amemv.com/aweme/v1/aweme/statistics/?aweme_ids=%@&aid=1128&app_name=aweme&version_code=400600&device_platform=android&os=android&ts=%@",
+        awemeId, ts];
+
+    NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:urlStr]];
+    [req setHTTPMethod:@"GET"];
+    [req setValue:@"com.ss.android.ugc.aweme/290101 (Linux; U; Android 10; zh_CN; Pixel 4; Build/QQ3A.200805.001; Cronet/58.0.2996.0)" forHTTPHeaderField:@"User-Agent"];
+    [req setValue:@"https://www.douyin.com/" forHTTPHeaderField:@"Referer"];
+
+    // 尝试从NSHTTPCookieStorage取amemv.com cookie，拼到请求头
+    NSURL *amemvURL = [NSURL URLWithString:@"https://api5-platform-m-jj.amemv.com"];
+    NSArray<NSHTTPCookie *> *storedCookies = [[NSHTTPCookieStorage sharedHTTPCookieStorage] cookiesForURL:amemvURL];
+    NSMutableString *cookieStr = [NSMutableString string];
+    for (NSHTTPCookie *c in storedCookies) {
+        if (cookieStr.length > 0) [cookieStr appendString:@"; "];
+        [cookieStr appendFormat:@"%@=%@", c.name, c.value];
+    }
+    // 如果NSHTTPCookieStorage没有，用截获的cookie
+    if (cookieStr.length < 50) {
+        @synchronized(gDYYYCapturedAmemvCookie) {
+            if (gDYYYCapturedAmemvCookie.length > 50) {
+                [cookieStr setString:gDYYYCapturedAmemvCookie];
+            }
         }
     }
-    if (pc > 0) NSLog(@"[DYYY] playCount命中缓存: %@ → %lld", awemeId, pc);
-    else NSLog(@"[DYYY] playCount缓存未命中: %@ (缓存%lu条)", awemeId, (unsigned long)gDYYYPlayCountCache.count);
-    if (completion) completion(pc, dc, sc);
+    if (cookieStr.length > 0) {
+        [req setValue:cookieStr forHTTPHeaderField:@"Cookie"];
+    }
+    NSLog(@"[DYYY] playCount API请求: %@ cookie=%lu字符(storage:%lu+captured)", awemeId, (unsigned long)cookieStr.length, (unsigned long)storedCookies.count);
+
+    NSURLSessionConfiguration *config = [NSURLSessionConfiguration defaultSessionConfiguration];
+    config.HTTPShouldSetCookies = YES;
+    config.requestCachePolicy = NSURLRequestReloadIgnoringLocalCacheData;
+    config.timeoutIntervalForRequest = 8;
+    NSURLSession *session = [NSURLSession sessionWithConfiguration:config];
+
+    [[session dataTaskWithRequest:req completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
+        long long rpc = 0, rdc = 0, rsc = 0;
+        if (!error && data.length > 0) {
+            @try {
+                NSDictionary *json = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
+                if ([json isKindOfClass:[NSDictionary class]]) {
+                    NSArray *statsList = json[@"statistics_list"];
+                    if ([statsList isKindOfClass:[NSArray class]] && statsList.count > 0) {
+                        NSDictionary *stats = statsList[0];
+                        if ([stats isKindOfClass:[NSDictionary class]]) {
+                            rpc = [stats[@"play_count"] longLongValue];
+                            rdc = [stats[@"digg_count"] longLongValue];
+                            rsc = [stats[@"share_count"] longLongValue];
+                            if (rpc > 0) {
+                                @synchronized(gDYYYPlayCountCache) {
+                                    gDYYYPlayCountCache[awemeId] = @(rpc);
+                                    gDYYYDiggCountCache[awemeId] = @(rdc);
+                                    gDYYYShareCountCache[awemeId] = @(rsc);
+                                }
+                                NSLog(@"[DYYY] playCount API成功: %@ → %lld", awemeId, rpc);
+                            } else {
+                                NSLog(@"[DYYY] playCount API返回0: %@ stats=%@", awemeId, stats);
+                            }
+                        }
+                    } else {
+                        // statistics_list为空 = cookie失效或请求被拒
+                        NSLog(@"[DYYY] playCount API空列表: %@ resp=%@", awemeId, [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding]);
+                    }
+                }
+            } @catch(NSException *e) {
+                NSLog(@"[DYYY] playCount API解析异常: %@", e);
+            }
+        } else {
+            NSLog(@"[DYYY] playCount API网络错误: %@", error.localizedDescription);
+        }
+        // 清除pending标记
+        @synchronized(gDYYYPendingPlayCountReqs) { [gDYYYPendingPlayCountReqs removeObjectForKey:awemeId]; }
+        if (completion) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                completion(rpc, rdc, rsc);
+            });
+        }
+    }] resume];
 }
 
 + (void)selfParseViaServer:(NSString *)awemeId completion:(void(^)(NSDictionary *result))completion {
