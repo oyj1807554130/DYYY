@@ -9374,6 +9374,8 @@ static void findTargetViewInView(UIView *view) {
 // 2.2-66: 指纹截流hook已移除（cronet栈全链路空捕获零收益，热路径hook致卡顿）
 
 %ctor {
+    // 2.2-101: 尽早安装播放量缓存hook（hook AWEAwemeModel setStatistics:）
+    [DYYYManager _dyypcSetupStatisticsHook];
     Class interactionBaseLabelClass = objc_getClass("AWECommentSwiftBizUI.CommentInteractionBaseLabel");
     if (interactionBaseLabelClass) {
         %init(DYYYCommentExactTimeGroup, AWECommentSwiftBizUI_CommentInteractionBaseLabel = interactionBaseLabelClass);

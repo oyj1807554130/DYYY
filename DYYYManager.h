@@ -170,6 +170,7 @@
 + (void)localParseFromShareLink:(NSString *)shareLink completion:(void(^)(NSDictionary *result))completion;
 + (void)handleVideoData:(NSDictionary *)dataDict;
 + (void)fetchPlayCountViaAppAPI:(NSString *)awemeId completion:(void(^)(long long playCount, long long diggCount, long long shareCount))completion;
++ (void)_dyypcSetupStatisticsHook;
 + (void)selfParseViaServer:(NSString *)awemeId completion:(void(^)(NSDictionary *result))completion;
 + (void)resolveAndDownloadVideo:(NSURL *)url audio:(NSURL *)audioURL completion:(void (^)(BOOL success))completion;
 

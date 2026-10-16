@@ -5330,11 +5330,87 @@ static NSString *DYYYFetchAwemeDetailViaWebView(NSString *awemeId, NSMutableStri
 // ===== 2.2-65 TikHub 同步编排（接口4最终兜底专用）：awemeId直连，web打底省hybrid额度，结果与接口2共用24h缓存 =====
 
 // 2.2-79 自建服务器headless Chrome抓detail（活签名+登录cookie绕Argus，零TikHub额度）
-// 2.2-101 占位：app端播放量查询（当前版本暂不调用，保留接口）
+// 2.2-101 播放量缓存：hook AWEAwemeModel setStatistics: 截取app内部真实播放量
+static NSMutableDictionary<NSString *, NSNumber *> *gDYYYPlayCountCache = nil;
+static NSMutableDictionary<NSString *, NSNumber *> *gDYYYDiggCountCache = nil;
+static NSMutableDictionary<NSString *, NSNumber *> *gDYYYShareCountCache = nil;
+
++ (void)_dyypcSetupStatisticsHook {
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        gDYYYPlayCountCache = [NSMutableDictionary new];
+        gDYYYDiggCountCache = [NSMutableDictionary new];
+        gDYYYShareCountCache = [NSMutableDictionary new];
+
+        Class cls = objc_getClass("AWEAwemeModel");
+        if (!cls) {
+            NSLog(@"[DYYY] playCount hook: AWEAwemeModel not found");
+            return;
+        }
+        SEL sel = @selector(setStatistics:);
+        Method m = class_getInstanceMethod(cls, sel);
+        if (!m) {
+            NSLog(@"[DYYY] playCount hook: setStatistics: not found");
+            return;
+        }
+        IMP origIMP = method_getImplementation(m);
+        IMP newIMP = imp_implementationWithBlock(^(id _self, id stats) {
+            // 先调原方法
+            ((void(*)(id,SEL,id))objc_msgSend)(_self, sel, stats);
+            if (!stats) return;
+            @try {
+                // 读视频ID（itemID 或 awemeID 或 awemeId）
+                NSString *vid = nil;
+                @try { vid = [_self valueForKey:@"itemID"]; } @catch(NSException *e) {}
+                if (!vid || vid.length == 0) @try { vid = [_self valueForKey:@"awemeID"]; } @catch(NSException *e2) {}
+                if (!vid || vid.length == 0) @try { vid = [_self valueForKey:@"awemeId"]; } @catch(NSException *e3) {}
+                if (!vid || vid.length == 0) return;
+
+                // 用KVC读playCount（头文件只声明了diggCount，playCount运行时大概率存在）
+                NSNumber *pc = nil;
+                @try { pc = [stats valueForKey:@"playCount"]; } @catch(NSException *e) {}
+                if (pc && [pc isKindOfClass:[NSNumber class]] && [pc longLongValue] > 0) {
+                    gDYYYPlayCountCache[vid] = pc;
+                    NSLog(@"[DYYY] playCount缓存: %@ → %@", vid, pc);
+                }
+                // diggCount
+                NSNumber *dc = nil;
+                @try { dc = [stats valueForKey:@"diggCount"]; } @catch(NSException *e) {}
+                if (dc && [dc isKindOfClass:[NSNumber class]] && [dc longLongValue] > 0) {
+                    gDYYYDiggCountCache[vid] = dc;
+                }
+                // shareCount
+                NSNumber *sc = nil;
+                @try { sc = [stats valueForKey:@"shareCount"]; } @catch(NSException *e) {}
+                if (sc && [sc isKindOfClass:[NSNumber class]] && [sc longLongValue] > 0) {
+                    gDYYYShareCountCache[vid] = sc;
+                }
+            } @catch(NSException *e) {
+                NSLog(@"[DYYY] playCount hook exception: %@", e);
+            }
+        });
+        method_setImplementation(m, newIMP);
+        NSLog(@"[DYYY] playCount hook: AWEAwemeModel setStatistics: swizzled ✅");
+    });
+}
+
 + (void)fetchPlayCountViaAppAPI:(NSString *)awemeId completion:(void(^)(long long playCount, long long diggCount, long long shareCount))completion {
-    // iOS端cookie不在NSHTTPCookieStorage中，app内部API暂时无法从插件侧调用
-    // 后续方案：hook app的detail API响应截取play_count缓存
-    if (completion) completion(0, 0, 0);
+    // 确保hook已安装
+    [self _dyypcSetupStatisticsHook];
+    long long pc = 0, dc = 0, sc = 0;
+    if (awemeId.length > 0) {
+        @synchronized(gDYYYPlayCountCache) {
+            NSNumber *pcVal = gDYYYPlayCountCache[awemeId];
+            if (pcVal) pc = [pcVal longLongValue];
+            NSNumber *dcVal = gDYYYDiggCountCache[awemeId];
+            if (dcVal) dc = [dcVal longLongValue];
+            NSNumber *scVal = gDYYYShareCountCache[awemeId];
+            if (scVal) sc = [scVal longLongValue];
+        }
+    }
+    if (pc > 0) NSLog(@"[DYYY] playCount命中缓存: %@ → %lld", awemeId, pc);
+    else NSLog(@"[DYYY] playCount缓存未命中: %@ (缓存%lu条)", awemeId, (unsigned long)gDYYYPlayCountCache.count);
+    if (completion) completion(pc, dc, sc);
 }
 
 + (void)selfParseViaServer:(NSString *)awemeId completion:(void(^)(NSDictionary *result))completion {
