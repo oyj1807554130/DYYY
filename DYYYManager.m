@@ -5330,7 +5330,7 @@ static NSString *DYYYFetchAwemeDetailViaWebView(NSString *awemeId, NSMutableStri
 // ===== 2.2-65 TikHub 同步编排（接口4最终兜底专用）：awemeId直连，web打底省hybrid额度，结果与接口2共用24h缓存 =====
 
 // 2.2-79 自建服务器headless Chrome抓detail（活签名+登录cookie绕Argus，零TikHub额度）
-// 2.2-101 app端statistics接口查真实播放量（从app cookie jar读cookie，手动注入请求头）
+// 2.2-101 从app内存中的AwemeModel读播放量（app自己的API返回真实play_count）
 + (void)fetchPlayCountViaAppAPI:(NSString *)awemeId completion:(void(^)(long long playCount, long long diggCount, long long shareCount))completion {
     if (!awemeId.length || !completion) {
         if (completion) completion(0, 0, 0);
@@ -5339,62 +5339,54 @@ static NSString *DYYYFetchAwemeDetailViaWebView(NSString *awemeId, NSMutableStri
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         long long pc = 0, dc = 0, sc = 0;
         @try {
-            NSTimeInterval ts = [[NSDate date] timeIntervalSince1970];
-            NSString *urlStr = [NSString stringWithFormat:
-                @"https://api5-platform-m-jj.amemv.com/aweme/v1/aweme/statistics/"
-                @"?aweme_ids=%@&aid=1128&app_name=aweme&version_code=400600"
-                @"&device_platform=android&os=android&ts=%.0f",
-                awemeId, ts];
-            NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:urlStr]];
-            [req setValue:@"com.ss.android.ugc.aweme/290101 (Linux; U; Android 10; zh_CN; Pixel 4; Build/QQ3A.200805.001; Cronet/58.0.2996.0)" forHTTPHeaderField:@"User-Agent"];
-            // 从app的cookie jar读取amemv.com的cookie，手动拼Cookie头
-            // 从app的cookie jar读取多个可能的域名cookie
-            NSHTTPCookieStorage *cookieJar = [NSHTTPCookieStorage sharedHTTPCookieStorage];
-            NSMutableString *cookieStr = [NSMutableString string];
-            // 按优先级尝试多个域名（iOS app可能用不同API域名）
-            NSArray *cookieURLs = @[
-                [NSURL URLWithString:@"https://api5-platform-m-jj.amemv.com/"],
-                [NSURL URLWithString:@"https://api-h2.amemv.com/"],
-                [NSURL URLWithString:@"https://api.amemv.com/"],
-                [NSURL URLWithString:@"https://www.douyin.com/"],
-                [NSURL URLWithString:@"https://www.iesdouyin.com/"],
-            ];
-            for (NSURL *curl in cookieURLs) {
-                NSArray *cks = [cookieJar cookiesForURL:curl];
-                if (cks.count > 0) {
-                    for (NSHTTPCookie *ck in cks) {
-                        if (cookieStr.length > 0) [cookieStr appendString:@"; "];
-                        [cookieStr appendFormat:@"%@=%@", ck.name, ck.value];
+            // 方法1: 从app当前页面的AwemeModel取statistics.playCount
+            // 遍历所有window找AWEPlayControlViewController或当前视频的model
+            __block id foundModel = nil;
+            dispatch_sync(dispatch_get_main_queue(), ^{
+                for (UIWindow *w in [UIApplication sharedApplication].windows) {
+                    UIViewController *vc = w.rootViewController;
+                    // 递归找最顶层的VC
+                    while (vc.presentedViewController) vc = vc.presentedViewController;
+                    while ([vc respondsToSelector:@selector(lastChildViewController)] && [(id)vc lastChildViewController]) vc = [(id)vc lastChildViewController];
+                    // 尝试KVC取awemeModel/aweme
+                    for (NSString *key in @[@"awemeModel", @"aweme", @"_awemeModel", @"currentAweme", @"itemModel"]) {
+                        id m = [vc valueForKey:key];
+                        if ([m isKindOfClass:[NSObject class]]) { foundModel = m; break; }
                     }
-                    break;  // 找到有cookie的域名就用
+                    if (foundModel) break;
+                    // 也尝试从view的layer取
+                    for (UIView *sv in w.subviews) {
+                        for (NSString *key in @[@"awemeModel", @"aweme"]) {
+                            @try { id m = [sv valueForKey:key]; if (m) { foundModel = m; break; } } @catch(NSException *e2) {}
+                        }
+                        if (foundModel) break;
+                    }
+                    if (foundModel) break;
                 }
-            }
-            if (cookieStr.length > 0) [req setValue:cookieStr forHTTPHeaderField:@"Cookie"];
-            [req setTimeoutInterval:15];
-            dispatch_semaphore_t sem = dispatch_semaphore_create(0);
-            __block NSData *respData = nil;
-            __block NSInteger statusCode = 0;
-            NSURLSessionConfiguration *cfg = [NSURLSessionConfiguration ephemeralSessionConfiguration];  // ephemeral=独立副本，不污染app默认配置
-            cfg.HTTPShouldSetCookies = NO;  // 我们手动设了Cookie头，不让系统覆盖
-            NSURLSession *session = [NSURLSession sessionWithConfiguration:cfg];
-            NSURLSessionDataTask *task = [session dataTaskWithRequest:req completionHandler:^(NSData *d, NSURLResponse *r, NSError *e) {
-                if (d) respData = d;
-                if ([r isKindOfClass:[NSHTTPURLResponse class]]) statusCode = [(NSHTTPURLResponse *)r statusCode];
-                dispatch_semaphore_signal(sem);
-            }];
-            [task resume];
-            dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, 16 * NSEC_PER_SEC));
-            if (respData && statusCode == 200) {
-                NSDictionary *json = [NSJSONSerialization JSONObjectWithData:respData options:0 error:nil];
-                if ([json isKindOfClass:[NSDictionary class]] && [json[@"code"] integerValue] == 0) {
-                    NSArray *sl = json[@"data"][@"statistics_list"];
-                    if ([sl isKindOfClass:[NSArray class]] && sl.count > 0) {
-                        NSDictionary *st = sl[0];
-                        id v;
-                        v = st[@"play_count"]; if ([v isKindOfClass:[NSNumber class]]) pc = [v longLongValue]; else if ([v isKindOfClass:[NSString class]]) pc = [(NSString *)v longLongValue];
-                        v = st[@"digg_count"]; if ([v isKindOfClass:[NSNumber class]]) dc = [v longLongValue]; else if ([v isKindOfClass:[NSString class]]) dc = [(NSString *)v longLongValue];
-                        v = st[@"share_count"]; if ([v isKindOfClass:[NSNumber class]]) sc = [v longLongValue]; else if ([v isKindOfClass:[NSString class]]) sc = [(NSString *)v longLongValue];
-                    }
+            });
+            if (foundModel) {
+                // 从model取statistics
+                id stats = nil;
+                @try { stats = [foundModel valueForKey:@"statistics"]; } @catch(NSException *e3) {}
+                if (stats) {
+                    id pcVal = [stats valueForKey:@"playCount"];
+                    if (!pcVal) pcVal = [stats valueForKey:@"play_count"];
+                    if ([pcVal respondsToSelector:@selector(longLongValue)]) pc = [pcVal longLongValue];
+                    id dcVal = [stats valueForKey:@"diggCount"];
+                    if (!dcVal) dcVal = [stats valueForKey:@"digg_count"];
+                    if ([dcVal respondsToSelector:@selector(longLongValue)]) dc = [dcVal longLongValue];
+                    id scVal = [stats valueForKey:@"shareCount"];
+                    if (!scVal) scVal = [stats valueForKey:@"share_count"];
+                    if ([scVal respondsToSelector:@selector(longLongValue)]) sc = [scVal longLongValue];
+                    // 检查awemeId匹配
+                    id modelAid = nil;
+                    @try { modelAid = [foundModel valueForKey:@"awemeId"]; } @catch(NSException *e4) {}
+                    @try { if (!modelAid) modelAid = [foundModel valueForKey:@"aid"]; } @catch(NSException *e5) {}
+                    NSString *modelAidStr = nil;
+                    if ([modelAid isKindOfClass:[NSString class]]) modelAidStr = modelAid;
+                    else if ([modelAid isKindOfClass:[NSNumber class]]) modelAidStr = [(NSNumber *)modelAid stringValue];
+                    // ID不匹配则弃用（可能取到的是别的视频）
+                    if (modelAidStr && ![modelAidStr isEqualToString:awemeId]) { pc = 0; dc = 0; sc = 0; }
                 }
             }
         } @catch (NSException *e) {}
