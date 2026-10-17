@@ -9374,10 +9374,10 @@ static void findTargetViewInView(UIView *view) {
 // 2.2-66: 指纹截流hook已移除（cronet栈全链路空捕获零收益，热路径hook致卡顿）
 
 %ctor {
-    // 2.2-106: 延迟1秒安装播放量hook+cookie截获hook
+    // 2.2-107: NSJSONSerialization hook截获原始JSON中play_count + setStatistics兜底
+    [DYYYManager _dyypcSetupJSONHook];
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 1 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
         [DYYYManager _dyypcSetupStatisticsHook];
-        [DYYYManager _dyypcSetupCookieHook];
     });
     Class interactionBaseLabelClass = objc_getClass("AWECommentSwiftBizUI.CommentInteractionBaseLabel");
     if (interactionBaseLabelClass) {
