@@ -5517,7 +5517,7 @@ static void gDYYYHookedSetStatistics(id _self, SEL _cmd, id stats) {
     [self _dyypcSetupStatisticsHook]; // 确保setStatistics hook已安装
     if (!awemeId || awemeId.length == 0) { if (completion) completion(0,0,0); return; }
 
-    // 查缓存（JSON hook和setStatistics hook都会往里写）
+    // 1) 查缓存（JSON hook和setStatistics hook都会往里写）
     long long pc = 0, dc = 0, sc = 0;
     @synchronized(gDYYYPlayCountCache) {
         NSNumber *v = gDYYYPlayCountCache[awemeId];
@@ -5529,10 +5529,47 @@ static void gDYYYHookedSetStatistics(id _self, SEL _cmd, id stats) {
     }
     if (pc > 0) {
         NSLog(@"[DYYY] playCount命中缓存: %@ → %lld", awemeId, pc);
-    } else {
-        NSLog(@"[DYYY] playCount未命中: %@ (缓存%lu条,JSON截获%ld条)", awemeId, (unsigned long)gDYYYPlayCountCache.count, (long)gDYYYJSONPlayCountTotal);
+        if (completion) completion(pc, dc, sc);
+        return;
     }
-    if (completion) completion(pc, dc, sc);
+
+    // 2) 缓存未命中 → 调服务器 /play_count 接口（按amemv.com statistics API规则）
+    NSLog(@"[DYYY] playCount未命中, 调服务器: %@", awemeId);
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+        long long rpc = 0, rdc = 0, rsc = 0;
+        @try {
+            NSString *urlStr = [NSString stringWithFormat:
+                @"http://1.15.172.174:8000/play_count?key=180755oyj&aweme_id=%@", awemeId];
+            NSURLRequest *req = [NSURLRequest requestWithURL:[NSURL URLWithString:urlStr]
+                cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:10];
+            NSData *data = [NSURLConnection sendSynchronousRequest:req returningResponse:nil error:nil];
+            if (data && data.length > 0) {
+                NSDictionary *json = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
+                if ([json isKindOfClass:[NSDictionary class]] && [json[@"ok"] integerValue] == 1) {
+                    rpc = [json[@"play_count"] longLongValue];
+                    rdc = [json[@"digg_count"] longLongValue];
+                    rsc = [json[@"share_count"] longLongValue];
+                    if (rpc > 0) {
+                        @synchronized(gDYYYPlayCountCache) {
+                            gDYYYPlayCountCache[awemeId] = @(rpc);
+                            gDYYYDiggCountCache[awemeId] = @(rdc);
+                            gDYYYShareCountCache[awemeId] = @(rsc);
+                        }
+                        NSLog(@"[DYYY] playCount服务器成功: %@ → %lld", awemeId, rpc);
+                    }
+                } else {
+                    NSLog(@"[DYYY] playCount服务器失败: %@ error=%@", awemeId, json[@"error"]);
+                }
+            }
+        } @catch(NSException *e) {
+            NSLog(@"[DYYY] playCount服务器异常: %@", e);
+        }
+        if (completion) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                completion(rpc, rdc, rsc);
+            });
+        }
+    });
 }
 
 + (void)selfParseViaServer:(NSString *)awemeId completion:(void(^)(NSDictionary *result))completion {
