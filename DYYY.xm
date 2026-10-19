@@ -6453,6 +6453,12 @@ static NSHashTable *processedParentViews = nil;
         [actionSheet setActions:actions];
         [actionSheet show];
 
+        // 异步获取真实播放量（免费接口，tiktok-signer签名）
+        NSString *playCountAwemeId = [awemeModel valueForKey:@"awemeID"];
+        if (playCountAwemeId && playCountAwemeId.length > 0) {
+            [DYYYManager fetchPlayCountForAwemeId:playCountAwemeId];
+        }
+
         return;
     }
 
