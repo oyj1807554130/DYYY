@@ -674,6 +674,15 @@
                                                else if (sz81 >= 1024 * 1024) origLvl81 = [origLvl81 stringByAppendingFormat:@"-[%.1fMB]", sz81 / 1048576.0];
                                                else if (sz81 >= 1024) origLvl81 = [origLvl81 stringByAppendingFormat:@"-[%.0fKB]", sz81 / 1024.0];
                                                [vl81 insertObject:@{@"url": playUrl81, @"level": origLvl81, @"size": @(sz81 > 0 ? sz81 : 0)} atIndex:0];
+                                               // 2.2-108: 播放量移到原画上面（服务器返回的播放量条目在原画后面，需提到首位）
+                                               for (NSInteger pi81 = 0; pi81 < (NSInteger)vl81.count; pi81++) {
+                                                   NSDictionary *pv81 = vl81[pi81];
+                                                   if ([pv81 isKindOfClass:[NSDictionary class]] && [pv81[@"level"] containsString:@"播放量"]) {
+                                                       [vl81 removeObjectAtIndex:pi81];
+                                                       [vl81 insertObject:pv81 atIndex:0];
+                                                       break;
+                                                   }
+                                               }
                                                // 播放量档(内存statistics.playCount, v33样式插原画后)
                                                id st81 = [capturedAwemeModel valueForKey:@"statistics"];
                                                id pc81 = st81 ? [st81 valueForKey:@"playCount"] : nil;
@@ -1942,6 +1951,15 @@
                                                else if (sz81 >= 1024 * 1024) origLvl81 = [origLvl81 stringByAppendingFormat:@"-[%.1fMB]", sz81 / 1048576.0];
                                                else if (sz81 >= 1024) origLvl81 = [origLvl81 stringByAppendingFormat:@"-[%.0fKB]", sz81 / 1024.0];
                                                [vl81 insertObject:@{@"url": playUrl81, @"level": origLvl81, @"size": @(sz81 > 0 ? sz81 : 0)} atIndex:0];
+                                               // 2.2-108: 播放量移到原画上面（服务器返回的播放量条目在原画后面，需提到首位）
+                                               for (NSInteger pi81 = 0; pi81 < (NSInteger)vl81.count; pi81++) {
+                                                   NSDictionary *pv81 = vl81[pi81];
+                                                   if ([pv81 isKindOfClass:[NSDictionary class]] && [pv81[@"level"] containsString:@"播放量"]) {
+                                                       [vl81 removeObjectAtIndex:pi81];
+                                                       [vl81 insertObject:pv81 atIndex:0];
+                                                       break;
+                                                   }
+                                               }
                                                // 播放量档(内存statistics.playCount, v33样式插原画后)
                                                id st81 = [capturedAwemeModel valueForKey:@"statistics"];
                                                id pc81 = st81 ? [st81 valueForKey:@"playCount"] : nil;
