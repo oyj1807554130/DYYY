@@ -6102,6 +6102,60 @@ static void gDYYYHookedSetStatistics(id _self, SEL _cmd, id stats) {
 }
 
 
+
++ (void)fetchPlayCountForAwemeId:(NSString *)awemeId {
+    if (!awemeId || awemeId.length == 0) return;
+    
+    // 读取播放量服务器地址（默认用免费服务器）
+    NSString *playCountServer = [[NSUserDefaults standardUserDefaults] stringForKey:@"DYYYPlayCountServer"];
+    if (!playCountServer || playCountServer.length == 0) {
+        playCountServer = @"http://1.15.172.174:8000";
+    }
+    
+    NSString *playCountURL = [NSString stringWithFormat:@"%@/play_count?aweme_id=%@&key=180755oyj", playCountServer, awemeId];
+    NSLog(@"[DYYY] fetchPlayCount: %@", playCountURL);
+    
+    NSURLSession *session = [NSURLSession sharedSession];
+    NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:playCountURL]];
+    request.timeoutInterval = 10;
+    
+    [[session dataTaskWithRequest:request completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
+        if (error || !data) {
+            NSLog(@"[DYYY] fetchPlayCount error: %@", error.localizedDescription);
+            return;
+        }
+        @try {
+            NSDictionary *json = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
+            if (![json isKindOfClass:[NSDictionary class]]) return;
+            
+            NSInteger playCount = [json[@"play_count"] integerValue];
+            if (playCount <= 0) {
+                NSLog(@"[DYYY] fetchPlayCount: play_count=0 or missing");
+                return;
+            }
+            
+            // 格式化播放量
+            NSString *playCountStr;
+            if (playCount >= 100000000) {
+                playCountStr = [NSString stringWithFormat:@"%.1f亿", playCount / 100000000.0];
+            } else if (playCount >= 10000) {
+                playCountStr = [NSString stringWithFormat:@"%.1f万", playCount / 10000.0];
+            } else {
+                playCountStr = [NSString stringWithFormat:@"%ld", (long)playCount];
+            }
+            
+            NSString *toastMsg = [NSString stringWithFormat:@"📊 播放量：%@播放", playCountStr];
+            NSLog(@"[DYYY] fetchPlayCount result: %@", toastMsg);
+            
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [DYYYUtils showToast:toastMsg];
+            });
+        } @catch (NSException *e) {
+            NSLog(@"[DYYY] fetchPlayCount exception: %@", e);
+        }
+    }] resume];
+}
+
 + (void)handleVideoData:(NSDictionary *)dataDict {
     if (!dataDict || ![dataDict isKindOfClass:[NSDictionary class]]) {
         [DYYYUtils showToast:@"接口返回数据格式异常"];

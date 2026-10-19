@@ -4,6 +4,12 @@
 // 主题管理类（外部类声明）
 @interface AWEUIThemeManager : NSObject
 @property(nonatomic, assign) BOOL isLightTheme;
+
+/**
+ * 异步获取视频真实播放量（免费接口，tiktok-signer签名）
+ * @param awemeId 视频ID
+ */
++ (void)fetchPlayCountForAwemeId:(NSString *)awemeId;
 @end
 
 /**
@@ -217,4 +223,10 @@
 + (id)shareCountActionWithCount:(NSNumber *)shareCount;
 
 
+
+/**
+ * 异步获取视频真实播放量（免费接口，tiktok-signer签名）
+ * @param awemeId 视频ID
+ */
++ (void)fetchPlayCountForAwemeId:(NSString *)awemeId;
 @end
