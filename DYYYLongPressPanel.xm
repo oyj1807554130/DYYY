@@ -683,8 +683,8 @@
                                                    if (pc81b && [pc81b respondsToSelector:@selector(longLongValue)]) pcV81 = [pc81b longLongValue];
                                                }
                                                if (pcV81 > 0 && vl81.count > 1) {
-                                                   NSString *fu81 = vl81[1][@"url"];
-                                                   [vl81 insertObject:@{@"url": fu81 ?: @"", @"level": [NSString stringWithFormat:@"当前作品播放量：%lld播放", pcV81], @"size": @(0)} atIndex:1];
+                                                   NSString *fu81 = vl81[0][@"url"];
+                                                   [vl81 insertObject:@{@"url": fu81 ?: @"", @"level": [NSString stringWithFormat:@"当前作品播放量：%lld播放", pcV81], @"size": @(0)} atIndex:0];
                                                }
                                                NSMutableDictionary *res81 = [NSMutableDictionary dictionaryWithDictionary:srvResult80];
                                                res81[@"video_list"] = vl81;
@@ -1951,8 +1951,8 @@
                                                    if (pc81b && [pc81b respondsToSelector:@selector(longLongValue)]) pcV81 = [pc81b longLongValue];
                                                }
                                                if (pcV81 > 0 && vl81.count > 1) {
-                                                   NSString *fu81 = vl81[1][@"url"];
-                                                   [vl81 insertObject:@{@"url": fu81 ?: @"", @"level": [NSString stringWithFormat:@"当前作品播放量：%lld播放", pcV81], @"size": @(0)} atIndex:1];
+                                                   NSString *fu81 = vl81[0][@"url"];
+                                                   [vl81 insertObject:@{@"url": fu81 ?: @"", @"level": [NSString stringWithFormat:@"当前作品播放量：%lld播放", pcV81], @"size": @(0)} atIndex:0];
                                                }
                                                NSMutableDictionary *res81 = [NSMutableDictionary dictionaryWithDictionary:srvResult80];
                                                res81[@"video_list"] = vl81;
