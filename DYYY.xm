@@ -2161,19 +2161,37 @@ static NSString *const kDYYYLongPressCopyEnabledKey = @"DYYYLongPressCopyTextEna
 
 %new
 - (void)dyyy_compactActionList {
-    // 查找内部UITableView，缩小rowHeight来减少cell间距
+    // 查找内部UITableView，缩小rowHeight来减少cell间距 + 限高滚动
+    CGFloat screenHeight = [UIScreen mainScreen].bounds.size.height;
+    CGFloat maxTableHeight = screenHeight - 180; // 留180pt给header/底部按钮/安全区
     NSMutableArray *stack = [NSMutableArray arrayWithObject:self];
     while (stack.count > 0) {
         UIView *view = [stack lastObject];
         [stack removeLastObject];
         if ([view isKindOfClass:NSClassFromString(@"UITableView")]) {
             UITableView *tableView = (UITableView *)view;
-            // 缩小rowHeight（默认约56pt，改为44pt）
-            if (tableView.rowHeight > 44) {
-                tableView.rowHeight = 44;
+            // 缩小rowHeight（默认约56pt，改为42pt）
+            if (tableView.rowHeight > 42) {
+                tableView.rowHeight = 42;
             }
             // 减少section间距
             [tableView setSeparatorInset:UIEdgeInsetsZero];
+            // 开启滚动
+            tableView.scrollEnabled = YES;
+            tableView.alwaysBounceVertical = YES;
+            // 限制TableView高度不超过屏幕
+            if (tableView.frame.size.height > maxTableHeight) {
+                CGRect tvFrame = tableView.frame;
+                tvFrame.size.height = maxTableHeight;
+                tableView.frame = tvFrame;
+            }
+            // 同时限制父容器高度
+            UIView *parent = tableView.superview;
+            if (parent && parent.frame.size.height > screenHeight) {
+                CGRect pFrame = parent.frame;
+                pFrame.size.height = screenHeight - 60;
+                parent.frame = pFrame;
+            }
             break;
         }
         for (UIView *sub in view.subviews) {
