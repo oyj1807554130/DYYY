@@ -6365,7 +6365,16 @@ static void gDYYYHookedSetStatistics(id _self, SEL _cmd, id stats) {
                                                                                                         }
                                                                                                     }
                                                                                                     if (qualityActions.count > 0) {
-                                                                                                        [DYYYManager addDisclaimerHeaderToActionSheet:qualitySheet actionCount:subQualityCount];
+                                                                                                        // AWEUserActionSheetView不支持滚动，限制最多12条防止超出屏幕
+                                                                                                        NSInteger dyyyMaxItems = 12;
+                                                                                                        if (qualityActions.count > dyyyMaxItems) {
+                                                                                                            NSInteger dyyyExtras = qualityActions.count - dyyyMaxItems;
+                                                                                                            [DYYYUtils showToast:[NSString stringWithFormat:@"画质选项过多，仅显示前%ld项，剩余%ld项请用保存所有实况", (long)dyyyMaxItems, (long)dyyyExtras]];
+                                                                                                            while (qualityActions.count > dyyyMaxItems) {
+                                                                                                                [qualityActions removeLastObject];
+                                                                                                            }
+                                                                                                        }
+                                        [DYYYManager addDisclaimerHeaderToActionSheet:qualitySheet actionCount:subQualityCount];
                                                                                                         [qualitySheet setActions:qualityActions];
                                                                                                         [qualitySheet show];
                                                                                                     }

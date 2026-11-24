@@ -2161,86 +2161,23 @@ static NSString *const kDYYYLongPressCopyEnabledKey = @"DYYYLongPressCopyTextEna
 
 %new
 - (void)dyyy_compactActionList {
-    CGFloat screenHeight = [UIScreen mainScreen].bounds.size.height;
-    CGFloat maxHeight = screenHeight - 120;
-    // 搜索所有UIScrollView（含UITableView/UICollectionView）+ 限制所有超高view
+    // 查找内部UITableView，缩小rowHeight来减少cell间距
     NSMutableArray *stack = [NSMutableArray arrayWithObject:self];
-    UIScrollView *foundScroll = nil;
     while (stack.count > 0) {
         UIView *view = [stack lastObject];
         [stack removeLastObject];
-        if ([view isKindOfClass:[UIScrollView class]]) {
-            UIScrollView *sv = (UIScrollView *)view;
-            sv.scrollEnabled = YES;
-            sv.clipsToBounds = YES;
-            sv.delaysContentTouches = NO;
-            sv.canCancelContentTouches = YES;
-            if (sv.frame.size.height > maxHeight) {
-                CGRect f = sv.frame;
-                f.size.height = maxHeight;
-                sv.frame = f;
+        if ([view isKindOfClass:NSClassFromString(@"UITableView")]) {
+            UITableView *tableView = (UITableView *)view;
+            if (tableView.rowHeight > 44) {
+                tableView.rowHeight = 44;
             }
-            if (!foundScroll) foundScroll = sv;
-        }
-        if ([view isKindOfClass:[UITableView class]]) {
-            UITableView *tv = (UITableView *)view;
-            if (tv.rowHeight > 42) tv.rowHeight = 42;
-            [tv setSeparatorInset:UIEdgeInsetsZero];
-        }
-        // 限制所有超高子view
-        if (view != self && view.frame.size.height > maxHeight) {
-            CGRect f = view.frame;
-            f.size.height = maxHeight;
-            view.frame = f;
-            view.clipsToBounds = YES;
+            [tableView setSeparatorInset:UIEdgeInsetsZero];
+            break;
         }
         for (UIView *sub in view.subviews) {
             [stack addObject:sub];
         }
     }
-    // 限制弹窗自身高度
-    if (self.frame.size.height > screenHeight) {
-        CGRect sf = self.frame;
-        sf.size.height = maxHeight;
-        self.frame = sf;
-        self.clipsToBounds = YES;
-    }
-    // 二次延迟保障：下一个runloop再设一次，防止被原生覆盖
-    __weak AWEUserActionSheetView *weakSelf = self;
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.05 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        __strong AWEUserActionSheetView *s = weakSelf;
-        if (!s) return;
-        if (s.frame.size.height > screenHeight) {
-            CGRect sf = s.frame;
-            sf.size.height = maxHeight;
-            s.frame = sf;
-            s.clipsToBounds = YES;
-        }
-        // 再次遍历找scrollview
-        NSMutableArray *st2 = [NSMutableArray arrayWithObject:s];
-        while (st2.count > 0) {
-            UIView *v = [st2 lastObject];
-            [st2 removeLastObject];
-            if ([v isKindOfClass:[UIScrollView class]]) {
-                UIScrollView *sv = (UIScrollView *)v;
-                sv.scrollEnabled = YES;
-                sv.clipsToBounds = YES;
-                sv.delaysContentTouches = NO;
-                if (sv.frame.size.height > maxHeight) {
-                    CGRect f = sv.frame;
-                    f.size.height = maxHeight;
-                    sv.frame = f;
-                }
-            }
-            if (v != s && v.frame.size.height > maxHeight) {
-                CGRect f = v.frame;
-                f.size.height = maxHeight;
-                v.frame = f;
-                v.clipsToBounds = YES;
-            }
-            for (UIView *sub in v.subviews) [st2 addObject:sub];
-        }
-    });
 }
 
 %new
