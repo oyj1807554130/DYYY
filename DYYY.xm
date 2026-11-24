@@ -2161,43 +2161,65 @@ static NSString *const kDYYYLongPressCopyEnabledKey = @"DYYYLongPressCopyTextEna
 
 %new
 - (void)dyyy_compactActionList {
-    // 查找内部UITableView，缩小rowHeight来减少cell间距 + 限高滚动
+    // 查找内部UITableView，缩小rowHeight + 限高滚动
     CGFloat screenHeight = [UIScreen mainScreen].bounds.size.height;
-    CGFloat maxTableHeight = screenHeight - 180; // 留180pt给header/底部按钮/安全区
+    CGFloat maxTableHeight = screenHeight - 180;
     NSMutableArray *stack = [NSMutableArray arrayWithObject:self];
+    UITableView *foundTV = nil;
     while (stack.count > 0) {
         UIView *view = [stack lastObject];
         [stack removeLastObject];
         if ([view isKindOfClass:NSClassFromString(@"UITableView")]) {
-            UITableView *tableView = (UITableView *)view;
-            // 缩小rowHeight（默认约56pt，改为42pt）
-            if (tableView.rowHeight > 42) {
-                tableView.rowHeight = 42;
+            foundTV = (UITableView *)view;
+            if (foundTV.rowHeight > 42) {
+                foundTV.rowHeight = 42;
             }
-            // 减少section间距
-            [tableView setSeparatorInset:UIEdgeInsetsZero];
-            // 开启滚动
-            tableView.scrollEnabled = YES;
-            tableView.alwaysBounceVertical = YES;
-            // 限制TableView高度不超过屏幕
-            if (tableView.frame.size.height > maxTableHeight) {
-                CGRect tvFrame = tableView.frame;
-                tvFrame.size.height = maxTableHeight;
-                tableView.frame = tvFrame;
-            }
-            // 同时限制父容器高度
-            UIView *parent = tableView.superview;
-            if (parent && parent.frame.size.height > screenHeight) {
-                CGRect pFrame = parent.frame;
-                pFrame.size.height = screenHeight - 60;
-                parent.frame = pFrame;
-            }
+            [foundTV setSeparatorInset:UIEdgeInsetsZero];
             break;
         }
         for (UIView *sub in view.subviews) {
             [stack addObject:sub];
         }
     }
+    if (!foundTV) return;
+    // 延迟到下一个runloop再设置frame和滚动，避免被原生布局覆盖
+    __weak UITableView *weakTV = foundTV;
+    __weak typeof(self) weakSelf = self;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        __strong UITableView *tv = weakTV;
+        __strong typeof(weakSelf) strongSelf = weakSelf;
+        if (!tv) return;
+        // 开启滚动
+        tv.scrollEnabled = YES;
+        tv.alwaysBounceVertical = YES;
+        tv.clipsToBounds = YES;
+        tv.delaysContentTouches = NO;
+        tv.canCancelContentTouches = YES;
+        // 限制TableView高度
+        if (tv.frame.size.height > maxTableHeight) {
+            CGRect tvFrame = tv.frame;
+            tvFrame.size.height = maxTableHeight;
+            tv.frame = tvFrame;
+        }
+        // 限制所有父容器高度不超过屏幕
+        UIView *p = tv.superview;
+        while (p && p != strongSelf) {
+            if (p.frame.size.height > screenHeight - 40) {
+                CGRect pf = p.frame;
+                pf.size.height = screenHeight - 40;
+                p.frame = pf;
+                p.clipsToBounds = YES;
+            }
+            p = p.superview;
+        }
+        // 限制弹窗自身高度
+        if (strongSelf.frame.size.height > screenHeight) {
+            CGRect sf = strongSelf.frame;
+            sf.size.height = screenHeight - 40;
+            strongSelf.frame = sf;
+            strongSelf.clipsToBounds = YES;
+        }
+    });
 }
 
 %new
