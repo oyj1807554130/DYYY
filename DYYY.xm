@@ -2184,10 +2184,10 @@ static NSString *const kDYYYLongPressCopyEnabledKey = @"DYYYLongPressCopyTextEna
     if (!foundTV) return;
     // 延迟到下一个runloop再设置frame和滚动，避免被原生布局覆盖
     __weak UITableView *weakTV = foundTV;
-    __weak typeof(self) weakSelf = self;
+    __weak AWEUserActionSheetView *weakSelf = self;
     dispatch_async(dispatch_get_main_queue(), ^{
         __strong UITableView *tv = weakTV;
-        __strong typeof(weakSelf) strongSelf = weakSelf;
+        __strong AWEUserActionSheetView *strongSelf = weakSelf;
         if (!tv) return;
         // 开启滚动
         tv.scrollEnabled = YES;
