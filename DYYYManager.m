@@ -61,6 +61,119 @@
 @end
 
 
+// ===== DYYYScrollableSheetView: 可滚动的画质选择面板 =====
+@interface DYYYScrollableSheetView : UIView <UITableViewDataSource, UITableViewDelegate>
+@property (nonatomic, strong) UITableView *tableView;
+@property (nonatomic, strong) NSMutableArray *items;
+@property (nonatomic, strong) NSURL *audioURL;
+@property (nonatomic, strong) UIView *overlay;
+@property (nonatomic, strong) UIView *sheet;
+@end
+
+@implementation DYYYScrollableSheetView
+
+- (instancetype)initWithFrame:(CGRect)frame items:(NSArray *)items audioURL:(NSURL *)audioURL title:(NSString *)title {
+    self = [super initWithFrame:frame];
+    if (self) {
+        _items = [items mutableCopy];
+        _audioURL = audioURL;
+        CGFloat screenW = frame.size.width;
+        CGFloat screenH = frame.size.height;
+        // Overlay
+        _overlay = [[UIView alloc] initWithFrame:CGRectMake(0, 0, screenW, screenH)];
+        _overlay.backgroundColor = [UIColor colorWithWhite:0 alpha:0.4];
+        _overlay.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+        UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(dyyyDismiss)];
+        tap.cancelsTouchesInView = NO;
+        [_overlay addGestureRecognizer:tap];
+        // Sheet container
+        CGFloat sheetH = MIN(screenH - 80, _items.count * 48 + 90);
+        _sheet = [[UIView alloc] initWithFrame:CGRectMake(0, screenH, screenW, sheetH)];
+        _sheet.backgroundColor = [UIColor colorWithWhite:0.1 alpha:0.97];
+        _sheet.layer.cornerRadius = 12;
+        _sheet.layer.masksToBounds = YES;
+        // Title
+        UILabel *titleLabel = [[UILabel alloc] initWithFrame:CGRectMake(0, 10, screenW, 28)];
+        titleLabel.text = title ?: @"选择画质";
+        titleLabel.textColor = [UIColor whiteColor];
+        titleLabel.textAlignment = NSTextAlignmentCenter;
+        titleLabel.font = [UIFont systemFontOfSize:14];
+        [_sheet addSubview:titleLabel];
+        // Cancel button
+        UIButton *cancelBtn = [UIButton buttonWithType:UIButtonTypeSystem];
+        cancelBtn.frame = CGRectMake(0, sheetH - 44, screenW, 44);
+        [cancelBtn setTitle:@"取消" forState:UIControlStateNormal];
+        [cancelBtn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
+        cancelBtn.titleLabel.font = [UIFont systemFontOfSize:16];
+        cancelBtn.backgroundColor = [UIColor colorWithWhite:0.15 alpha:1];
+        [cancelBtn addTarget:self action:@selector(dyyyDismiss) forControlEvents:UIControlEventTouchUpInside];
+        [_sheet addSubview:cancelBtn];
+        // TableView
+        _tableView = [[UITableView alloc] initWithFrame:CGRectMake(0, 40, screenW, sheetH - 40 - 44) style:UITableViewStylePlain];
+        _tableView.dataSource = self;
+        _tableView.delegate = self;
+        _tableView.backgroundColor = [UIColor clearColor];
+        _tableView.separatorColor = [UIColor colorWithWhite:1 alpha:0.08];
+        _tableView.rowHeight = 48;
+        _tableView.scrollEnabled = YES;
+        _tableView.showsVerticalScrollIndicator = YES;
+        [_sheet addSubview:_tableView];
+        [self addSubview:_overlay];
+        [self addSubview:_sheet];
+        // Animate slide up
+        [UIView animateWithDuration:0.25 animations:^{
+            CGRect f = self.sheet.frame;
+            f.origin.y = screenH - sheetH;
+            self.sheet.frame = f;
+        }];
+    }
+    return self;
+}
+
+- (void)dyyyDismiss {
+    [UIView animateWithDuration:0.25 animations:^{
+        self.overlay.alpha = 0;
+        CGRect f = self.sheet.frame;
+        f.origin.y = self.bounds.size.height;
+        self.sheet.frame = f;
+    } completion:^(BOOL finished) {
+        [self removeFromSuperview];
+    }];
+}
+
+- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
+    return self.items.count;
+}
+
+- (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
+    static NSString *cellId = @"DYYYQCell";
+    UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:cellId];
+    if (!cell) {
+        cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:cellId];
+        cell.backgroundColor = [UIColor clearColor];
+        cell.textLabel.textColor = [UIColor whiteColor];
+        cell.textLabel.font = [UIFont systemFontOfSize:15];
+        cell.textLabel.numberOfLines = 2;
+        cell.selectionStyle = UITableViewCellSelectionStyleGray;
+    }
+    NSDictionary *item = self.items[indexPath.row];
+    cell.textLabel.text = item[@"level"];
+    return cell;
+}
+
+- (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
+    [tableView deselectRowAtIndexPath:indexPath animated:YES];
+    NSDictionary *item = self.items[indexPath.row];
+    NSString *urlStr = item[@"url"];
+    NSURL *videoURL = [NSURL URLWithString:urlStr];
+    [self dyyyDismiss];
+    if (videoURL) {
+        [DYYYManager resolveAndDownloadVideo:videoURL audio:self.audioURL completion:^(BOOL success) {}];
+    }
+}
+
+@end
+
 @implementation DYYYManager
 
 #pragma mark - API 适配器实现
@@ -6365,19 +6478,29 @@ static void gDYYYHookedSetStatistics(id _self, SEL _cmd, id stats) {
                                                                                                         }
                                                                                                     }
                                                                                                     if (qualityActions.count > 0) {
-                                                                                                        // AWEUserActionSheetView不支持滚动，限制最多12条防止超出屏幕
-                                                                                                        NSInteger dyyyMaxItems = 12;
-                                                                                                        if (qualityActions.count > dyyyMaxItems) {
-                                                                                                            NSInteger dyyyExtras = qualityActions.count - dyyyMaxItems;
-                                                                                                            [DYYYUtils showToast:[NSString stringWithFormat:@"画质选项过多，仅显示前%ld项，剩余%ld项请用保存所有实况", (long)dyyyMaxItems, (long)dyyyExtras]];
-                                                                                                            while (qualityActions.count > dyyyMaxItems) {
-                                                                                                                [qualityActions removeLastObject];
-                                                                                                            }
-                                                                                                        }
-                                        [DYYYManager addDisclaimerHeaderToActionSheet:qualitySheet actionCount:subQualityCount];
-                                                                                                        [qualitySheet setActions:qualityActions];
-                                                                                                        [qualitySheet show];
-                                                                                                    }
+                                        NSInteger dyyyThreshold = 10;
+                                        if (qualityActions.count > dyyyThreshold) {
+                                            NSMutableArray *scrollItems = [NSMutableArray array];
+                                            for (id videoItem in videoList) {
+                                                if (![videoItem isKindOfClass:[NSDictionary class]]) continue;
+                                                NSDictionary *videoDict = (NSDictionary *)videoItem;
+                                                NSString *url = videoDict[@"url"];
+                                                NSString *level = videoDict[@"level"];
+                                                if (url.length > 0 && level.length > 0) {
+                                                    [scrollItems addObject:@{@"level": level, @"url": url}];
+                                                }
+                                            }
+                                            UIWindow *dyyyKeyWin = UIApplication.sharedApplication.keyWindow;
+                                            if (dyyyKeyWin && scrollItems.count > 0) {
+                                                DYYYScrollableSheetView *scrollSheet = [[DYYYScrollableSheetView alloc] initWithFrame:dyyyKeyWin.bounds items:scrollItems audioURL:(musicURL.length > 0 ? [NSURL URLWithString:musicURL] : nil) title:@"选择画质"];
+                                                [dyyyKeyWin addSubview:scrollSheet];
+                                            }
+                                        } else {
+                                            [DYYYManager addDisclaimerHeaderToActionSheet:qualitySheet actionCount:subQualityCount];
+                                            [qualitySheet setActions:qualityActions];
+                                            [qualitySheet show];
+                                        }
+                                    }
                                                                                                 }];
             [actions addObject:videoOnlyAction];
             
